@@ -1,0 +1,857 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* ===================================================================
+   Aesthetic: Dark editorial + warm amber accent. 
+   Inspired by late-night creative studios, not generic SaaS dashboards.
+   =================================================================== */
+
+@theme {
+  /* --- Core Palette: Warm obsidian + amber signal --- */
+  --color-base-950: #0a0a0c;
+  --color-base-900: #111114;
+  --color-base-850: #161619;
+  --color-base-800: #1a1a1f;
+  --color-base-750: #1f1f26;
+  --color-base-700: #25252e;
+  --color-base-600: #32323e;
+  --color-base-500: #4a4a5a;
+  --color-base-400: #6b6b80;
+  --color-base-300: #9090a8;
+  --color-base-200: #b8b8cc;
+  --color-base-100: #e0e0ec;
+  --color-base-50: #f0f0f6;
+
+  /* --- Accent: Warm amber/gold --- */
+  --color-accent-500: #f59e0b;
+  --color-accent-400: #fbbf24;
+  --color-accent-300: #fcd34d;
+  --color-accent-200: #fde68a;
+  --color-accent-600: #d97706;
+  --color-accent-700: #b45309;
+  --color-accent-glow: rgba(245, 158, 11, 0.15);
+
+  /* --- Signal: Emerald for success, rose for error --- */
+  --color-signal-success: #34d399;
+  --color-signal-success-dim: rgba(52, 211, 153, 0.12);
+  --color-signal-error: #fb7185;
+  --color-signal-error-dim: rgba(251, 113, 133, 0.12);
+  --color-signal-info: #60a5fa;
+  --color-signal-info-dim: rgba(96, 165, 250, 0.12);
+  --color-signal-warning: #fbbf24;
+  --color-signal-warning-dim: rgba(251, 191, 36, 0.12);
+
+  /* --- Semantic mappings (backward compat) --- */
+  --color-surface: #0a0a0c;
+  --color-surface-dim: #0a0a0c;
+  --color-surface-bright: #25252e;
+  --color-surface-container-lowest: #111114;
+  --color-surface-container-low: #161619;
+  --color-surface-container: #1a1a1f;
+  --color-surface-container-high: #1f1f26;
+  --color-surface-container-highest: #25252e;
+  --color-on-surface: #e0e0ec;
+  --color-on-surface-variant: #9090a8;
+  --color-outline: #6b6b80;
+  --color-outline-variant: #32323e;
+  --color-primary: #fbbf24;
+  --color-primary-container: #b45309;
+  --color-on-primary: #0a0a0c;
+  --color-secondary: #60a5fa;
+  --color-secondary-container: #1e3a5f;
+  --color-tertiary: #34d399;
+  --color-tertiary-container: #064e3b;
+  --color-error: #fb7185;
+  --color-error-container: #4c0519;
+  --color-background: #0a0a0c;
+  --color-on-background: #e0e0ec;
+  --color-surface-variant: #1a1a1f;
+  --color-on-primary-fixed: #0a0a0c;
+  --color-primary-fixed: #fde68a;
+  --color-surface-tint: #fbbf24;
+  --color-inverse-primary: #d97706;
+  --color-primary-fixed-dim: #fbbf24;
+  --color-on-error-container: #fecdd3;
+  --color-secondary-fixed: #bfdbfe;
+  --color-tertiary-fixed: #a7f3d0;
+  --color-tertiary-fixed-dim: #34d399;
+}
+
+/* ===================================================================
+   LIGHT THEME OVERRIDES
+   Activated by setting `data-theme="light"` on <html>.
+   The amber accent + signal colors stay the same so the brand feel is
+   consistent across themes; only the neutral base scale is inverted.
+   =================================================================== */
+
+:root[data-theme="light"] {
+  --color-base-950: #f5f5f7;
+  --color-base-900: #ececef;
+  --color-base-850: #e3e3e8;
+  --color-base-800: #d9d9e0;
+  --color-base-750: #cfcfd8;
+  --color-base-700: #bdbdc9;
+  --color-base-600: #9a9aab;
+  --color-base-500: #7a7a8c;
+  --color-base-400: #5a5a6c;
+  --color-base-300: #3f3f50;
+  --color-base-200: #2a2a38;
+  --color-base-100: #15151e;
+  --color-base-50:  #0a0a0c;
+
+  --color-surface: #f5f5f7;
+  --color-surface-dim: #ececef;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f5f5f7;
+  --color-surface-container: #ececef;
+  --color-surface-container-high: #e3e3e8;
+  --color-surface-container-highest: #d9d9e0;
+  --color-on-surface: #15151e;
+  --color-on-surface-variant: #3f3f50;
+  --color-background: #f5f5f7;
+  --color-on-background: #15151e;
+
+  /* Light theme swaps the accent palette from amber to a deep, professional
+     blue (Stripe / Linear feel). Everything that uses `accent-*` utilities —
+     hover text, focus rings, badges, links — automatically picks this up. */
+  --color-accent-500: #2563eb;
+  --color-accent-400: #3b82f6;
+  --color-accent-300: #60a5fa;
+  --color-accent-200: #93c5fd;
+  --color-accent-600: #1d4ed8;
+  --color-accent-700: #1e40af;
+  --color-accent-glow: rgba(37, 99, 235, 0.15);
+}
+
+:root[data-theme="light"] body {
+  background-color: var(--color-base-950);
+  color: var(--color-base-100);
+}
+
+:root[data-theme="light"] .glass-panel {
+  background: linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.03) 0%,
+    rgba(0, 0, 0, 0.01) 100%
+  );
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 8px 32px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+:root[data-theme="light"] .glass-pill {
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* -------------------------------------------------------------------
+   Flip the many hard-coded `white/N` overlay utilities so that borders,
+   dividers, and hover backdrops remain visible against a light surface.
+   Tailwind compiles `border-white/6` to a literal rgba(255,255,255,0.06)
+   which is invisible in light mode; these rules retarget the same
+   compiled class names to black-opacity equivalents.
+   ------------------------------------------------------------------- */
+
+:root[data-theme="light"] .border-white\/3  { border-color: rgba(0, 0, 0, 0.05); }
+:root[data-theme="light"] .border-white\/4  { border-color: rgba(0, 0, 0, 0.06); }
+:root[data-theme="light"] .border-white\/5  { border-color: rgba(0, 0, 0, 0.07); }
+:root[data-theme="light"] .border-white\/6  { border-color: rgba(0, 0, 0, 0.09); }
+:root[data-theme="light"] .border-white\/8  { border-color: rgba(0, 0, 0, 0.11); }
+:root[data-theme="light"] .border-white\/10 { border-color: rgba(0, 0, 0, 0.14); }
+:root[data-theme="light"] .border-white\/20 { border-color: rgba(0, 0, 0, 0.20); }
+
+:root[data-theme="light"] .bg-white\/3  { background-color: rgba(0, 0, 0, 0.03); }
+:root[data-theme="light"] .bg-white\/4  { background-color: rgba(0, 0, 0, 0.04); }
+:root[data-theme="light"] .bg-white\/5  { background-color: rgba(0, 0, 0, 0.05); }
+:root[data-theme="light"] .bg-white\/6  { background-color: rgba(0, 0, 0, 0.06); }
+:root[data-theme="light"] .bg-white\/10 { background-color: rgba(0, 0, 0, 0.08); }
+
+:root[data-theme="light"] .hover\:bg-white\/3:hover  { background-color: rgba(0, 0, 0, 0.04); }
+:root[data-theme="light"] .hover\:bg-white\/4:hover  { background-color: rgba(0, 0, 0, 0.05); }
+:root[data-theme="light"] .hover\:bg-white\/5:hover  { background-color: rgba(0, 0, 0, 0.06); }
+:root[data-theme="light"] .hover\:bg-white\/6:hover  { background-color: rgba(0, 0, 0, 0.07); }
+:root[data-theme="light"] .hover\:bg-white\/10:hover { background-color: rgba(0, 0, 0, 0.10); }
+
+:root[data-theme="light"] .hover\:border-white\/6:hover  { border-color: rgba(0, 0, 0, 0.12); }
+:root[data-theme="light"] .hover\:border-white\/10:hover { border-color: rgba(0, 0, 0, 0.16); }
+:root[data-theme="light"] .focus\:border-white\/10:focus { border-color: rgba(0, 0, 0, 0.16); }
+
+:root[data-theme="light"] .divide-white\/4 > * + * { border-color: rgba(0, 0, 0, 0.06); }
+:root[data-theme="light"] .divide-white\/6 > * + * { border-color: rgba(0, 0, 0, 0.09); }
+
+/* Selection colour reads better with a darker text colour on light bg. */
+:root[data-theme="light"] ::selection {
+  background: rgba(245, 158, 11, 0.25);
+  color: #15151e;
+}
+
+/* Ambient gradient is too subtle on light bg — boost the amber tint a notch. */
+:root[data-theme="light"] .ambient-bg {
+  background-image:
+    radial-gradient(ellipse 80% 60% at 10% 0%, rgba(245, 158, 11, 0.10) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 80% at 90% 100%, rgba(96, 165, 250, 0.08) 0%, transparent 50%);
+}
+
+/* Noise overlay is calibrated for dark; dial it down in light mode. */
+:root[data-theme="light"] .noise-bg::before {
+  opacity: 0.5;
+}
+
+/* Top-nav uses bg-base-950/60 which becomes a translucent light grey — keep
+   it readable by tinting toward white. */
+:root[data-theme="light"] nav.bg-base-950\/60 {
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
+/* -------------------------------------------------------------------
+   Button + glow refinements for light mode.
+   The amber brand colour stays consistent (think Stripe purple, Linear
+   indigo, Notion red — accent doesn't flip with theme). We only adjust
+   shadow weight and gradient stops so the CTA reads as crisp and
+   intentional on a light surface instead of washed-out.
+   ------------------------------------------------------------------- */
+
+:root[data-theme="light"] .btn-primary,
+:root[data-theme="light"] .kinetic-pill {
+  /* Deep professional blue gradient (Stripe / Linear feel). */
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(29, 78, 216, 0.18),
+    0 4px 12px rgba(59, 130, 246, 0.30);
+}
+:root[data-theme="light"] .btn-primary:hover,
+:root[data-theme="light"] .kinetic-pill:hover {
+  box-shadow:
+    0 2px 4px rgba(29, 78, 216, 0.22),
+    0 8px 24px rgba(59, 130, 246, 0.40);
+}
+
+/* Glow ring: dark mode uses heavy black shadow; light mode wants a
+   softer, tighter lift with a hint of blue so cards feel raised. */
+:root[data-theme="light"] .ambient-glow {
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.06),
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 0 32px rgba(59, 130, 246, 0.10);
+}
+
+/* Glass panels in light mode get a subtle drop shadow for separation. */
+:root[data-theme="light"] .glass-panel {
+  backdrop-filter: blur(20px) saturate(1.4);
+}
+
+/* Brand mark (logo text + SE chip) also flips to the blue palette so the
+   light theme reads as fully monochrome-cool rather than amber+blue mixed. */
+:root[data-theme="light"] .text-gradient-amber {
+  background: linear-gradient(135deg, #3b82f6, #2563eb, #1d4ed8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+:root[data-theme="light"] .aurora-chip {
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 50%, #1d4ed8 100%);
+  color: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(29, 78, 216, 0.20),
+    0 4px 12px rgba(59, 130, 246, 0.30);
+}
+
+/* User-message chat bubble — also flip to the blue palette. */
+:root[data-theme="light"] .aurora-bubble {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(29, 78, 216, 0.18),
+    0 6px 20px rgba(59, 130, 246, 0.22);
+}
+
+/* The amber gradient text utility (used for some headings) too. */
+:root[data-theme="light"] .text-gradient-aurora {
+  background: linear-gradient(135deg, #3b82f6, #2563eb, #1d4ed8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Podcast Player — light mode overrides ──────────────────────────────────
+   In light mode the player card flips to a clean white/grey surface and
+   the inactive bars become a subtle dark tint. The play button glow
+   picks up the blue accent automatically because --color-accent-* already
+   flips in the light theme block above.
+─────────────────────────────────────────────────────────────────────────── */
+:root[data-theme="light"] .podcast-player-card {
+  --podcast-card-bg-start: #ffffff;
+  --podcast-card-bg-end:   #f0f0f6;
+  /* Inactive bars: dark tint on light surface */
+  --podcast-bar-inactive:  rgba(0, 0, 0, 0.12);
+  /* Play button glow: blue accent */
+  --podcast-play-ring:        rgba(37, 99, 235, 0.20);
+  --podcast-play-glow:        rgba(37, 99, 235, 0.30);
+  --podcast-play-glow-strong: rgba(37, 99, 235, 0.50);
+  /* Lighter shadow for light mode */
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.06),
+    0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+:root[data-theme="light"] .podcast-player-card h3 {
+  color: var(--color-base-100); /* dark text on light card */
+}
+
+:root[data-theme="light"] .podcast-player-card p {
+  color: var(--color-base-400);
+}
+
+
+/* ===================================================================
+   BASE LAYER
+   =================================================================== */
+
+@layer base {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-base-950);
+    color: var(--color-base-100);
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Sora', system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'Space Mono', ui-monospace, monospace;
+  }
+
+  ::selection {
+    background: rgba(251, 191, 36, 0.3);
+    color: #fde68a;
+  }
+}
+
+/* ===================================================================
+   UTILITIES
+   =================================================================== */
+
+@layer utilities {
+
+  /* --- Noise texture overlay --- */
+  .noise-bg::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* --- Ambient background gradient --- */
+  .ambient-bg {
+    background-image: 
+      radial-gradient(ellipse 80% 60% at 10% 0%, rgba(245, 158, 11, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse 60% 80% at 90% 100%, rgba(96, 165, 250, 0.04) 0%, transparent 50%);
+    background-attachment: fixed;
+  }
+
+  /* --- Glass panel: refined frosted glass --- */
+  .glass-panel {
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.04) 0%,
+      rgba(255, 255, 255, 0.02) 100%
+    );
+    backdrop-filter: blur(20px) saturate(1.2);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.3),
+      0 8px 32px rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  /* --- Glass pill (lighter variant) --- */
+  .glass-pill {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  /* --- CTA button: warm amber gradient --- */
+  .btn-primary {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #0a0a0c;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active {
+    transform: translateY(0) scale(0.98);
+  }
+
+  /* --- Kinetic pill (backward compat, now amber) --- */
+  .kinetic-pill {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #0a0a0c;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+  }
+  .kinetic-pill:hover {
+    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+    transform: translateY(-1px);
+  }
+  .kinetic-pill:active {
+    transform: translateY(0) scale(0.98);
+  }
+  .kinetic-pill:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* --- Glow ring effect --- */
+  .ambient-glow {
+    box-shadow: 
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 0 40px rgba(245, 158, 11, 0.05);
+  }
+
+  /* --- High contrast card (for blog reader) --- */
+  .high-contrast-card {
+    background-color: #fafafa;
+    color: #1a1a2e;
+  }
+
+  /* --- Status dot pulse --- */
+  .status-pulse {
+    animation: statusPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  @keyframes statusPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* --- Shimmer loading bar --- */
+  .progress-bar-animated {
+    background: linear-gradient(90deg, var(--color-accent-500) 0%, var(--color-accent-300) 50%, var(--color-accent-500) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite linear;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* --- Fade-in animation --- */
+  .fade-in {
+    animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* --- Stagger children --- */
+  .stagger > * {
+    animation: fadeIn 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  .stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger > *:nth-child(2) { animation-delay: 50ms; }
+  .stagger > *:nth-child(3) { animation-delay: 100ms; }
+  .stagger > *:nth-child(4) { animation-delay: 150ms; }
+  .stagger > *:nth-child(5) { animation-delay: 200ms; }
+  .stagger > *:nth-child(6) { animation-delay: 250ms; }
+  .stagger > *:nth-child(7) { animation-delay: 300ms; }
+  .stagger > *:nth-child(8) { animation-delay: 350ms; }
+
+  /* --- Slide in from left (sidebar items) --- */
+  .slide-in-left {
+    animation: slideInLeft 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+  @keyframes slideInLeft {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* --- Custom scrollbar --- */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* --- Audio player override --- */
+  audio {
+    border-radius: 8px;
+    width: 100%;
+    filter: sepia(0.1) hue-rotate(15deg);
+  }
+
+  /* ── Podcast Player — theme-adaptive CSS vars ─────────────────────────────
+     Dark mode defaults (amber accent).
+     Light mode overrides are below in the :root[data-theme="light"] block.
+  ─────────────────────────────────────────────────────────────────────────── */
+  .podcast-player-card {
+    /* Dark: deep obsidian surface */
+    --podcast-card-bg-start: #111114;
+    --podcast-card-bg-end:   #0d0d10;
+    /* Inactive waveform bars: faint white tint on dark bg */
+    --podcast-bar-inactive:  rgba(255, 255, 255, 0.13);
+    /* Play button glow helpers — derived from accent */
+    --podcast-play-ring:        rgba(245, 158, 11, 0.22);
+    --podcast-play-glow:        rgba(245, 158, 11, 0.38);
+    --podcast-play-glow-strong: rgba(245, 158, 11, 0.60);
+
+    background: linear-gradient(
+      160deg,
+      var(--podcast-card-bg-start) 0%,
+      var(--podcast-card-bg-end)   100%
+    );
+  }
+
+  /* Play button: matches accent in both themes */
+  .podcast-play-btn {
+    background: linear-gradient(
+      135deg,
+      var(--color-accent-500) 0%,
+      var(--color-accent-600) 100%
+    );
+  }
+  .podcast-play-btn:hover {
+    filter: brightness(1.12);
+  }
+
+  /* --- Prose overrides for blog content --- */
+  .prose h1, .prose h2, .prose h3 {
+    font-family: 'Sora', system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+  .prose a {
+    color: var(--color-accent-500);
+    text-decoration-color: rgba(245, 158, 11, 0.3);
+  }
+  .prose a:hover {
+    color: var(--color-accent-400);
+    text-decoration-color: var(--color-accent-400);
+  }
+
+  /* --- Focus ring --- */
+  .focus-ring:focus-visible {
+    outline: 2px solid var(--color-accent-500);
+    outline-offset: 2px;
+  }
+
+  /* --- Gradient text utility --- */
+  .text-gradient-amber {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-cool {
+    background: linear-gradient(135deg, #60a5fa, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* --- Backward-compat aliases: map "aurora" classes to the amber palette
+     so the refactored components keep rendering correctly under the
+     original warm-amber theme. --- */
+  .aurora-chip {
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
+    color: #0a0a0c;
+    box-shadow:
+      0 2px 12px rgba(245, 158, 11, 0.30),
+      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+
+  .aurora-bubble {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #0a0a0c;
+    box-shadow:
+      0 6px 24px rgba(245, 158, 11, 0.18),
+      0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  }
+
+  .text-gradient-aurora {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .neural-pulse {
+    animation: statusPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  /* ===================================================================
+     PREMIUM ANIMATIONS — UI Upgrade
+     =================================================================== */
+
+  /* --- Animated Score Ring (conic-gradient fill) --- */
+  .score-ring {
+    --score-pct: 0;
+    --ring-color: var(--color-accent-500);
+    --ring-track: rgba(255, 255, 255, 0.06);
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: conic-gradient(
+      var(--ring-color) calc(var(--score-pct) * 3.6deg),
+      var(--ring-track) calc(var(--score-pct) * 3.6deg)
+    );
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    animation: scoreRingFill 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .score-ring-inner {
+    width: calc(100% - 10px);
+    height: calc(100% - 10px);
+    border-radius: 50%;
+    background: var(--color-base-950);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  @keyframes scoreRingFill {
+    from { --score-pct: 0; }
+  }
+  @property --score-pct {
+    syntax: '<number>';
+    initial-value: 0;
+    inherits: false;
+  }
+
+  /* --- Orbital Loader (multi-ring) --- */
+  .orbital-loader {
+    position: relative;
+    width: 80px;
+    height: 80px;
+  }
+  .orbital-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+  }
+  .orbital-ring-1 {
+    border-top-color: var(--color-accent-500);
+    border-right-color: var(--color-accent-500);
+    animation: orbitalSpin 1.6s linear infinite;
+    filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.4));
+  }
+  .orbital-ring-2 {
+    inset: 6px;
+    border-bottom-color: var(--color-accent-300);
+    border-left-color: var(--color-accent-300);
+    animation: orbitalSpin 2.4s linear infinite reverse;
+    filter: drop-shadow(0 0 4px rgba(252, 211, 77, 0.3));
+  }
+  .orbital-ring-3 {
+    inset: 12px;
+    border-top-color: var(--color-accent-600);
+    animation: orbitalSpin 3.2s linear infinite;
+    opacity: 0.6;
+  }
+  @keyframes orbitalSpin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* --- Premium Skeleton Shimmer --- */
+  .skeleton-shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 25%,
+      rgba(255, 255, 255, 0.08) 50%,
+      rgba(255, 255, 255, 0.03) 75%
+    );
+    background-size: 400% 100%;
+    animation: skeletonSweep 1.8s ease-in-out infinite;
+    border-radius: 8px;
+  }
+  @keyframes skeletonSweep {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* --- Sidebar Hover Glow --- */
+  .sidebar-glow {
+    position: relative;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar-glow::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    opacity: 0;
+    background: radial-gradient(
+      ellipse at 20% 50%,
+      var(--color-accent-glow) 0%,
+      transparent 70%
+    );
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
+  .sidebar-glow:hover::before {
+    opacity: 1;
+  }
+
+  /* --- Step Tracker --- */
+  .step-track {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+  .step-node {
+    position: relative;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .step-node-completed {
+    background: var(--color-signal-success);
+    color: #0a0a0c;
+    box-shadow: 0 0 12px rgba(52, 211, 153, 0.4);
+  }
+  .step-node-active {
+    background: var(--color-accent-500);
+    color: #0a0a0c;
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.5);
+    animation: stepPulse 2s ease-in-out infinite;
+  }
+  .step-node-pending {
+    background: var(--color-base-700);
+    color: var(--color-base-400);
+    border: 1px solid var(--color-base-600);
+  }
+  .step-node-error {
+    background: var(--color-signal-error);
+    color: #0a0a0c;
+    box-shadow: 0 0 12px rgba(251, 113, 133, 0.5);
+  }
+  @keyframes stepPulse {
+    0%, 100% { box-shadow: 0 0 16px rgba(245, 158, 11, 0.5); }
+    50% { box-shadow: 0 0 24px rgba(245, 158, 11, 0.8), 0 0 40px rgba(245, 158, 11, 0.2); }
+  }
+  .step-connector {
+    flex: 1;
+    height: 2px;
+    background: var(--color-base-700);
+    position: relative;
+    overflow: hidden;
+    min-width: 20px;
+  }
+  .step-connector-fill {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, var(--color-signal-success), var(--color-accent-500));
+    transform-origin: left;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* --- Floating Hero Particles --- */
+  .hero-particle {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    animation: heroFloat linear infinite;
+  }
+  @keyframes heroFloat {
+    0% { transform: translateY(0) scale(1); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateY(-100px) scale(0.5); opacity: 0; }
+  }
+
+  /* --- Tab Content Transition (CSS fallback) --- */
+  .tab-enter {
+    animation: tabSlideIn 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+  @keyframes tabSlideIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* --- Gradient text shimmer (hero headings) --- */
+  .text-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--color-accent-300) 0%,
+      var(--color-accent-500) 25%,
+      var(--color-accent-200) 50%,
+      var(--color-accent-500) 75%,
+      var(--color-accent-300) 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: textShimmer 4s linear infinite;
+  }
+  @keyframes textShimmer {
+    to { background-position: 200% center; }
+  }
+
+  /* --- Tilt hover card --- */
+  .hover-lift {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .hover-lift:hover {
+    transform: translateY(-4px);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.25),
+      0 0 0 1px rgba(255, 255, 255, 0.06),
+      0 0 30px var(--color-accent-glow);
+  }
+}

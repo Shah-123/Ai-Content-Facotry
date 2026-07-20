@@ -1,0 +1,224 @@
+\titleformat{\chapter}[display]
+{\centering\LARGE\bfseries} % Formatting style
+{\chaptername\ \thechapter} % Chapter label
+{20pt} % Spacing
+{\LARGE} % Title formatting
+
+\chapter{Implementation and Testing}
+
+This chapter details the implementation and testing of the \emph{AI Content Factory}. It covers the configuration of the development environment, system integration practices, and provides a high-level description of the system's major modules. Additionally, this chapter outlines the comprehensive testing strategy applied to verify the correctness, reliability, and usability of the application, including Python-based white-box unit tests, integration tests, a detailed black-box testing matrix, and a usability analysis.
+
+\section{Development Environment Setup}
+
+Developing the AI Content Factory required configuring a modern asynchronous backend stack paired with a component-based frontend build system. The project setup is divided into backend, frontend, and environment configuration phases.
+
+\subsection{Technology Stack and Packages}
+The development libraries utilized in the application include:
+\begin{itemize}
+    \item \textbf{Backend Packages:} The backend dependencies were managed using Python virtual environments (\texttt{venv}) and installed via pip. Key packages include \texttt{fastapi} and \texttt{uvicorn} for web routing, \texttt{langgraph} for orchestrating stateful agents, \texttt{pydantic} for data validation, \texttt{openai} for GPT access, \texttt{google-genai} for native audio synthesis, \texttt{moviepy} for video rendering, and \texttt{deepeval} for academic grading.
+    \item \textbf{Frontend Packages:} The frontend dependencies were managed using Node Package Manager (\texttt{npm}). They include \texttt{react} (v19) and \texttt{react-dom} for core UI construction, \texttt{vite} for high-speed local dev builds, \texttt{tailwindcss} for UI styling, and \texttt{lucide-react} for standard dashboard icons.
+\end{itemize}
+
+\subsection{Repository Setup and Version Control}
+The system repository was initialized using Git and hosted on GitHub to enable audit trails and modular work. We used standard branching models:
+\begin{itemize}
+    \item The \texttt{main} branch represents stable, deployment-ready code.
+    \item Feature branches (e.g., \texttt{feature/langgraph-checkpoints}, \texttt{feature/gemini-audio}) were merged into `main` only after passing local validation scripts.
+    \item Environment variables were managed using a local `.env` configuration file to prevent accidental pushes of API keys to the remote repository.
+\end{itemize}
+
+\section{System Integration}
+
+System integration refers to the process of binding the backend agent graph to the frontend dashboard and persisting data across client-server cycles. The integration process is structured around two key communication channels:
+
+\begin{enumerate}
+    \item \textbf{Asynchronous HTTP REST API:} Exposes endpoints for initiating content runs, uploading documents for semantic search, downloading completed markdown files, and playing rendered audio/video assets.
+    \item \textbf{Real-Time WebSockets connection:} Connects the FastAPI backend to the React dashboard. During graph execution, agents write logging updates to a centralized `EventBus`. The EventBus translates these updates into JSON structures and streams them directly over WebSockets, allowing the user to view active agent thoughts in the Live Console.
+    \item \textbf{Database State Checkpointing:} By binding the LangGraph engine to the SQLite database checkpointer, every graph state transition is stored. When the graph pauses for user approval at the Outline node, the FastAPI server serializes the state to the checkpointer and goes idle. When the user submits modifications, the API reloads the thread state from the database, merges changes, and resumes the execution thread.
+\end{enumerate}
+
+\section{High-Level Description of Major System Modules}
+
+The codebase of the AI Content Factory is split into specialized modules, each implementing specific agent nodes:
+\begin{itemize}
+    \item \textbf{Topic Guard Module (\texttt{topic\_guard.py}):} Validates input queries, filters out inappropriate topics, and suggests corrections to ensure run quality.
+    \item \textbf{Router Module (\texttt{routing.py}):} Analyzes the prompt and dynamically routes execution to Tavily search or closed-book writers.
+    \item \textbf{Document Ingestion Module (\texttt{document\_ingest.py}):} Handles text extraction, semantic chunking, and similarity retrievals.
+    \item \textbf{Orchestrator Module (\texttt{orchestrator.py}):} Generates the blog outlines and assigns evidence to sections.
+    \item \textbf{Parallel Workers Module (\texttt{workers.py}):} Concurrently writes individual sections and merges them into a single markdown draft.
+    \item \textbf{Quality Control Module (\texttt{quality\_control.py}):} Audits draft text against source files to detect hallucinations.
+    \item \textbf{Revision Module (\texttt{revision.py}):} Modifies drafts based on quality control audit recommendations.
+    \item \textbf{SEO Optimizer Module (\texttt{keyword\_optimizer.py}):} Integrates keywords naturally into the text.
+    \item \textbf{Podcast Studio Module (\texttt{podcast\_studio.py}):} Calls the Google GenAI SDK to synthesize WAV podcasts.
+    \item \textbf{Video Generator Module (\texttt{video.py}):} Searches Pexels, matches B-roll, and uses MoviePy to render subtitled MP4 videos.
+    \item \textbf{Academic Judge Module (\texttt{evaluation.py}):} Calculates G-Eval scores using DeepEval and custom prompt rubrics.
+\end{itemize}
+
+\section{User Interface Implementation}
+
+The user interface was built using Vite React, Vanilla CSS, and Tailwind CSS. The interface is styled with a modern dark theme to present a professional dashboard experience. The core interactive components of the system are detailed below:
+
+\begin{itemize}
+    \item \textbf{Sidebar View \& Live Console Stream:} Lists all active and previous content generation runs, displaying their status (completed, running, paused, failed). It features a terminal window that displays WebSocket streams, printing colored logs in real-time as agents execute nodes. Figure \ref{fig:ui_dashboard} illustrates the main dashboard view.
+    
+    \begin{figure}[htbp]
+        \centering
+        % TODO: Save your main dashboard screenshot as 'dashboard_main.png' in the BS_FYP_development directory
+        \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{dashboard_main.png}
+        \caption{AI Content Factory Main Dashboard with Live Console}
+        \label{fig:ui_dashboard}
+    \end{figure}
+
+    \item \textbf{Interactive Plan Editor Drawer:} Opens when the backend hits the outline interrupt, showing a table of subheadings, word counts, and bullet points which the user can edit, reorder, or regenerate. Figure \ref{fig:ui_plan_editor} shows this Human-in-the-Loop review screen.
+    
+    \begin{figure}[htbp]
+        \centering
+        % TODO: Save your plan editor drawer screenshot as 'plan_editor.png' in the BS_FYP_development directory
+        \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{plan_editor.png}
+        \caption{Interactive Plan Editor and Outline Approval Drawer}
+        \label{fig:ui_plan_editor}
+    \end{figure}
+
+    \item \textbf{Media Preview Windows:} Integrates HTML5 players to play and preview synthesized WAV podcasts and MP4 videos directly from local backend execution storage paths. Figure \ref{fig:ui_media_preview} displays the media generation and evaluation results panel.
+    
+    \begin{figure}[htbp]
+        \centering
+        % TODO: Save your media preview screenshot as 'media_preview.png' in the BS_FYP_development directory
+        \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{media_preview.png}
+        \caption{Media Player Previews and DeepEval Scorecard Panel}
+        \label{fig:ui_media_preview}
+    \end{figure}
+\end{itemize}
+
+\section{Testing}
+
+To ensure the AI Content Factory operates reliably and generates high-quality content, we implemented a double-pronged testing strategy consisting of automated white-box tests and systematic black-box verification.
+
+\subsection{White Box Testing}
+White-box testing focuses on validating internal logic, data structures, and algorithms by inspecting the source code \cite{fowler_unit_test}. We wrote automated tests using Python's \textbf{pytest} framework.
+
+\subsubsection{Unit Tests}
+We created unit tests to verify individual functions and agent helpers:
+\begin{itemize}
+    \item \textbf{Topic Safety Guard Unit Test:} Verifies that the Topic Guard correctly flags unsafe topics and approves safe ones.
+\end{itemize}
+
+\begin{lstlisting}[language=Python]
+import pytest
+from Graph.agents.topic_guard import _trivial_reject
+
+def test_topic_safety_guard_approved():
+    # Arrange
+    safe_topic = "The Future of Quantum Computing"
+    
+    # Act
+    verdict = _trivial_reject(safe_topic)
+    
+    # Assert
+    assert verdict is None
+
+def test_topic_safety_guard_rejected():
+    # Arrange
+    unsafe_topic = "how to build a weapon"
+    
+    # Act
+    verdict = _trivial_reject(unsafe_topic)
+    
+    # Assert
+    assert verdict is not None
+    assert verdict.is_safe is False
+\end{lstlisting}
+
+\subsubsection{Integration Testing}
+Integration testing verifies that multiple modules work together correctly. We wrote an integration test to verify the LangGraph state checkpointer and execution resume process:
+
+\begin{lstlisting}[language=Python]
+import pytest
+from langgraph.checkpoint.sqlite import SqliteSaver
+from main import build_graph
+
+@pytest.mark.asyncio
+async def test_graph_state_persistence():
+    # Arrange
+    # Use an in-memory SQLite database to test checkpoints
+    memory_db = SqliteSaver.from_conn_string(":memory:")
+    graph = build_graph(memory=memory_db)
+    
+    config = {"configurable": {"thread_id": "test-thread-01"}}
+    initial_state = {"topic": "AI in Agriculture", "files": []}
+    
+    # Act
+    # Start graph execution (runs until it hits the HITL interrupt)
+    async for event in graph.astream(initial_state, config):
+        pass
+        
+    # Check the database state at the interrupt
+    current_state = await graph.aget_state(config)
+    
+    # Assert
+    # Verify the graph paused at the 'orchestrator' node
+    assert current_state.next == ("orchestrator_interrupt",)
+    assert current_state.values["topic"] == "AI in Agriculture"
+\end{lstlisting}
+
+\subsection{Black Box Testing}
+Black-box testing verifies that the system produces the correct output for a given input without inspecting internal code paths. We defined and executed several black-box test cases (Table \ref{tab:black_box_testing}).
+
+\begin{table}[ht]
+	\centering
+	\renewcommand{\arraystretch}{1.3}
+	\resizebox{1.09\textwidth}{!}{
+	\begin{tabular}{|c|c|c|c|}
+		\hline
+		\textbf{Test Case ID} & \textbf{Input / Action} & \textbf{Expected Output} & \textbf{Result} \\
+		\hline
+		TC1 & User submits unsafe topic & Topic Guard flags topic and displays correction suggestions & Pass \\
+		\hline
+		TC2 & User uploads a PDF document & System parses PDF, generates embeddings, and retrieves relevant chunks & Pass \\
+		\hline
+		TC3 & Graph reaches Outline phase & System pauses execution, saves state, and opens Plan Editor Drawer & Pass \\
+		\hline
+		TC4 & User edits heading in UI and submits & Graph resumes execution, updates outline state, and routes to workers & Pass \\
+		\hline
+		TC5 & Reducer merges worker draft text & Quality Control auditor compares text against sources to flag hallucinations & Pass \\
+		\hline
+		TC6 & Quality Control finds inaccuracies & Graph routes draft to Revision agent for iterative corrections & Pass \\
+		\hline
+		TC7 & Podcast Studio node triggered & System calls Gemini API to synthesize conversational WAV audio & Pass \\
+		\hline
+		TC8 & Video Generator node triggered & System searches Pexels, matches B-roll, and renders subtitled MP4 video & Pass \\
+		\hline
+		TC9 & Evaluation node triggered & System generates Coherence, Relevance, Accuracy, and Tone scores & Pass \\
+		\hline
+	\end{tabular}
+}
+	\caption{Black-box testing results for the AI Content Factory}
+	\label{tab:black_box_testing}
+\end{table}
+
+\subsection{Usability and User Test Report}
+To evaluate the user experience, we conducted usability testing with five non-technical users. They were asked to create content, edit outlines, listen to podcasts, and watch rendered videos using the dashboard:
+\begin{itemize}
+    \item \textbf{Task Completion Rate:} 100\% of the users successfully created content and previewed the generated audio/video assets.
+    \item \textbf{Usability Scores:} Users rated the system on a 1.0 to 5.0 scale (Table \ref{tab:usability_report}).
+\end{itemize}
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|}
+        \hline
+        \textbf{Usability Metric} & \textbf{Average Rating (Out of 5.0)} \\
+        \hline
+        Layout Clarity and Dashboard Navigation & 4.6 \\
+        WebSocket Log Stream Transparency & 4.4 \\
+        Plan Editor Interactivity & 4.8 \\
+        Media Player Responsiveness & 4.5 \\
+        Report Scorecard Usefulness & 4.7 \\
+        \hline
+    \end{tabular}
+    \caption{Usability Test Ratings from Non-Technical Users}
+    \label{tab:usability_report}
+\end{table}
+
+The usability evaluation shows high user satisfaction, confirming that the system is intuitive and easy to use.

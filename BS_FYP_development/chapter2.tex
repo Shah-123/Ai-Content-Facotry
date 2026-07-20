@@ -1,0 +1,80 @@
+\titleformat{\chapter}[display]
+{\centering\LARGE\bfseries} % Formatting style
+{\chaptername\ \thechapter} % Chapter label
+{20pt} % Spacing
+{\LARGE} % Title formatting
+
+\chapter{Literature Review}
+
+\section{Introduction}
+
+The design of automated content generation engines lies at the intersection of information retrieval, natural language processing, and stateful distributed software systems. This chapter reviews the literature across these domains, tracing the transition from traditional content management systems and single-prompt LLM tasks to stateful multi-agent systems. It reviews the theoretical and practical aspects of RAG, real-time WebSocket log streaming, and identifies the gaps in current systems that the proposed *AI Content Factory* aims to resolve.
+
+\section{Traditional Content Generation Systems}
+
+Traditional digital content creation and management pipelines (such as WordPress or content marketing suites) are highly dependent on human labor. The process of researching topics, outlining sections, drafting copy, editing for style, recording audio summaries, and compiling matching stock videos requires separate tools and teams. While these platforms have introduced basic automation extensions, they lack semantic coordination. 
+
+The manual nature of this workflow makes it slow and expensive, requiring days of turnaround time and significant cost per content piece.
+
+\section{Stateful Multi-Agent Graph Architectures}
+
+To automate complex workflows, developers are moving toward agentic architectures. Early frameworks, such as LangChain, modeled LLMs as linear chains. However, linear chains cannot handle complex loops or conditional decisions (e.g., repeating a task if editing validation fails).
+
+Frameworks like \textbf{CrewAI} and \textbf{Microsoft AutoGen} introduced multi-agent cooperation. In CrewAI, agents work in a sequential or hierarchical structure. However, CrewAI abstracts the execution logic, making it difficult to define fine-grained state transitions or save execution states mid-run. AutoGen models agents as conversational threads. While flexible, this conversational model is hard to configure for structured, predictable software pipelines, which can lead to infinite loops or off-topic outputs.
+
+This research highlights the need for stateful, graph-based agent orchestration, where transitions are modeled as nodes and edges in a defined graph, as detailed in UML modeling principles \cite{seidl2015uml}.
+
+\section{Large Language Models for Content Synthesis}
+
+Large Language Models (LLMs), such as OpenAI's GPT models and Google's Gemini, have demonstrated impressive text synthesis and reasoning capabilities. However, when asked to write long-form content, models face limitations:
+\begin{itemize}
+    \item \textbf{Hallucinations:} Without grounding, LLMs generate plausible but false information. Studies document hallucination rates of 15-25\% in ungrounded academic or technical synthesis.
+    \item \textbf{Context Limits and Decay:} Feeding raw search results directly into the context window causes context bloat and degrades formatting quality.
+    \item \textbf{Lack of State Recovery:} Standard API calls are stateless. If a connection fails during a long run, the progress is lost, wasting tokens and time. This vulnerability is a known challenge in data-intensive systems design \cite{kleppmann2017designing}.
+\end{itemize}
+
+\section{Retrieval-Augmented Generation and Grounding}
+
+Retrieval-Augmented Generation (RAG) resolves the hallucination problem by fetching relevant document chunks or search queries before generating text. The LLM uses this retrieved context as grounding evidence, keeping its outputs accurate.
+
+Recent research has focused on optimizing RAG pipelines. Query reformulation helps refine search terms, while semantic chunking splits documents based on conceptual similarity rather than arbitrary character limits. However, standard RAG tools typically operate in a single-turn, sequential format. The AI Content Factory addresses these limits by combining RAG with parallel worker agents and an active quality control auditing node that fact-checks drafts against source data.
+
+\section{Asynchronous Event Log Streaming and WebSockets}
+
+Providing visibility into agent actions is crucial for usability. In long-running workflows, users need real-time updates to see what each agent is doing.
+
+Traditional web architectures rely on HTTP polling, which is inefficient and introduces latency. Modern interfaces use Server-Sent Events (SSE) or WebSockets to stream log events asynchronously from the server to the client. By connecting the agentic graph's event bus to WebSockets, the React frontend can stream agent logs in real-time, providing immediate feedback and improving user confidence in the system.
+
+\section{Research Gap in Existing Literature}
+
+A review of the literature reveals several gaps that this project addresses:
+\begin{itemize}
+    \item \textbf{Lack of Unified Stateful Pipelines:} While RAG, WebSockets, and multi-agent coordination have been studied individually, there is no published framework that integrates these components into a single, unified pipeline with state persistence and automated evaluation.
+    \item \textbf{Fragile Execution States:} Existing agent frameworks lack reliable database-backed checkpointers. The AI Content Factory resolves this by using SQLite checkpointers to save graph states at every transition, allowing the system to pause for human reviews and recover from server crashes.
+    \item \textbf{Disconnected Multi-Modal Output:} Traditional tools do not synchronize text, audio, and video generations, resulting in mismatched media assets.
+\end{itemize}
+
+\section{Summary of Related Works}
+
+Table 2.1 summarizes the approaches, limitations, and release years of key related works compared to the proposed AI Content Factory.
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \resizebox{\textwidth}{!}{
+    \begin{tabular}{|l|l|l|c|}
+        \hline
+        \textbf{System/Study} & \textbf{Approach} & \textbf{Limitations} & \textbf{Year} \\
+        \hline
+        Lewis et al. & RAG foundation architecture & Stateless, single-source retrieval & 2020 \\
+        CrewAI & Sequential/Hierarchical agent roles & Volatile state, lacks database checkpointers & 2023 \\
+        Microsoft AutoGen & Conversational agent dialogues & Prone to infinite loops, difficult to structure & 2023 \\
+        AcademicRAG & RAG with static database & No real-time web research, lacks parallel dispatch & 2024 \\
+        \hline
+        \textbf{This Project} & \textbf{Stateful multi-agent DAG + SQLite checkpointer} & \textbf{English only, requires API connectivity} & \textbf{2026} \\
+        \hline
+    \end{tabular}
+    }
+    \caption{Summary of Related Systems and Frameworks}
+    \label{tab:summary_related}
+\end{table}

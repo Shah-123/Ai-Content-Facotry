@@ -1,0 +1,59 @@
+\titleformat{\chapter}[display]
+{\centering\LARGE\bfseries} % Formatting style
+{\chaptername\ \thechapter} % Chapter label
+{20pt} % Spacing
+{\LARGE} % Title formatting
+
+\chapter{Development Environment}
+
+\section{Introduction}
+
+The selection of an appropriate development environment is essential for the successful design, implementation, and testing of any software engineering project. This chapter describes the platforms, programming languages, libraries, and hardware infrastructure used during the development of the *AI Content Factory*. It also reviews the version control and collaboration workflows applied to manage the project code.
+
+\section{Development Platform}
+
+The primary development platform used for this project was \textbf{Visual Studio Code (VS Code)}. VS Code is a lightweight, customizable code editor that provides robust support for Python development and web applications.
+
+During the development of the AI Content Factory, VS Code was used for writing Python modules, managing dependencies, editing React components, and debugging API routes. VS Code's extension ecosystem (including the Python Debugger, Pylance, GitLens, and Tailwind CSS IntelliSense) helped improve coding efficiency and maintain clean code structure.
+
+\section{Programming Language and Runtime}
+
+The application utilizes a decoupled runtime model to manage backend logic and frontend presentations:
+\begin{itemize}
+    \item \textbf{Python (v3.11):} Selected as the primary programming language for the backend components. Python is widely used in AI development due to its rich ecosystem of libraries. The entire backend runs as an asynchronous ASGI process.
+    \item \textbf{Node.js (v18+):} Employed as the runtime environment for the React frontend, managing packages and compiling static assets via Vite.
+    \item \textbf{Standard HTML5, CSS3, and JavaScript (ES6+):} Used for frontend styling, utilizing responsive layouts and modern components without requiring heavy transpilation.
+\end{itemize}
+
+\section{Key Libraries and Dependencies}
+
+The core functionality of the AI Content Factory is built on several key libraries:
+\begin{itemize}
+    \item \textbf{FastAPI (v0.100+):} An asynchronous backend framework used to build REST API routes and support real-time WebSocket communication.
+    \item \textbf{LangGraph (v0.0.1+):} A framework for building stateful, multi-agent graphs, enabling cyclic workflows and Human-in-the-Loop interrupts.
+    \item \textbf{Google GenAI SDK:} Used to interface with Gemini 2.5 Flash for native audio podcast generation.
+    \item \textbf{MoviePy (v1.0.3) \& FFmpeg:} Programmatic video compiling libraries used to download B-roll clips, synchronize subtitles, and render MP4 videos.
+    \item \textbf{DeepEval (v0.21+):} An open-source LLM evaluation framework used to run G-Eval metrics locally.
+    \item \textbf{SQLite3:} Used as the local SQL database engine for storing job metadata, metrics, and LangGraph checkpointer binaries.
+\end{itemize}
+
+\section{Hardware Infrastructure}
+
+Development and local testing were carried out on standard computing hardware:
+\begin{itemize}
+    \item \textbf{CPU:} Intel Core i7 / AMD Ryzen 7 multi-core processor (necessary for parallel video compiling tasks).
+    \item \textbf{RAM:} 16GB (to support running the FastAPI backend, Vite dev server, and local database management tools simultaneously).
+    \item \textbf{Storage:} 256GB SSD (to allow fast read/write speeds during semantic indexing and SQLite updates).
+\end{itemize}
+The low hardware requirements demonstrate that the proposed system is accessible and cost-effective to run in standard development environments.
+
+\section{Version Control and Collaboration}
+
+Git was used as the primary version control system to manage code modifications and maintain a complete history of development activities.
+
+The project repository was hosted on \textbf{GitHub}. We used a structured branching strategy to keep development organized:
+\begin{itemize}
+    \item Feature branches were used to build separate components (such as RAG vector indexing or video synthesis).
+    \item Code changes were reviewed and validated locally before being merged into the stable `main` branch.
+    \item Git commit messages were kept descriptive to ensure transparency and track major design changes.
+\end{itemize}

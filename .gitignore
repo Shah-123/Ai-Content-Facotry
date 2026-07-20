@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+virtual_env/
+.venv/
+
+# Environment variables
+.env
+
+# uv
+uv.lock
+
+# OS
+.DS_Store
+Thumbs.db
+blogs/
+generated_podcasts/
+generated_videos/
+.agent/
+.qoder/
+
+# Databases
+*.db
+*.sqlite
+Agents_backend/data/
+*qoder
+
+# Golden test artifacts
+Agents_backend/tests/golden/_runs/
+
+# Caches & Test Results
+.deepeval/
+.pytest_cache/
+Agents_backend/.deepeval/
+Agents_backend/.pytest_cache/
+**/__pycache__/
+
+# User Uploads
+Agents_backend/uploads/
+
+# Node.js
+node_modules/
+

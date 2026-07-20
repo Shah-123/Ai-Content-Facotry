@@ -1,0 +1,76 @@
+
+% main.tex
+\documentclass[a4paper,12pt]{report}
+\usepackage{graphicx} 
+\usepackage{titlesec}
+\usepackage{float}
+\usepackage[top=2cm]{geometry}
+\usepackage{times}
+\usepackage{hyperref}
+\usepackage{cite}
+
+%Font style and packages related to it.
+\usepackage{newtxtext}
+
+\usepackage{setspace}
+
+
+
+\usepackage{listings}
+\usepackage{color}
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+
+\lstset{frame=tb,
+	language=C++,
+	aboveskip=3mm,
+	belowskip=3mm,
+	showstringspaces=false,
+	columns=flexible,
+	basicstyle={\small\ttfamily},
+	numbers=none,
+	numberstyle=\tiny\color{gray},
+	keywordstyle=\color{blue},
+	commentstyle=\color{dkgreen},
+	stringstyle=\color{mauve},
+	breaklines=true,
+	breakatwhitespace=true,
+	tabsize=3
+}
+
+%centering the content and list of figures to the center
+\renewcommand{\contentsname}{\makebox[\textwidth][c]{Table of Contents}}
+
+\renewcommand{\listfigurename}{\makebox[\textwidth][c]{List of Figures}}
+
+
+\begin{document}
+    
+	\setstretch{1}
+	% \input{title}  % Include the title file
+        \include{partialfulfillment}
+    
+	\pagenumbering{roman} 
+	%\setcounter{page}{1}
+	\include{approval}
+    \include{abstract}
+	\include{acknowledgment}
+        \tableofcontents
+	\listoffigures
+
+        \cleardoublepage  % Start from a new page
+        \pagenumbering{arabic} 
+        \include{chapter1}
+        \include{chapter2}
+        \include{chapter3}
+        \include{chapter4}
+        \include{chapter5}
+        \include{chapter6}
+	
+	
+	\bibliographystyle {IEEEtran}
+	\bibliography{thesis}
+	
+\end{document}

@@ -1,0 +1,50 @@
+{
+  "_comment": "Golden topics for end-to-end pipeline regression tests. Each entry runs the full LangGraph pipeline (research → plan → write → reduce → completion → QA → keyword opt → blog evaluator) and asserts that the result falls within the documented quality bounds. These tests cost real API tokens and take several minutes per topic, so they only run when RUN_GOLDEN_TESTS=1 is set in the environment.",
+  "topics": [
+    {
+      "id": "closed_book_evergreen",
+      "topic": "How photosynthesis works",
+      "tone": "educational",
+      "sections": 3,
+      "expected": {
+        "min_word_count": 1200,
+        "min_qa_score": 6.5,
+        "min_blog_evaluator_score": 6.5,
+        "qa_verdict_in": ["READY", "NEEDS_REVISION"],
+        "min_evidence_count": 0,
+        "max_critical_issues": 1,
+        "expected_mode_in": ["closed_book", "hybrid"]
+      }
+    },
+    {
+      "id": "hybrid_evergreen_tech",
+      "topic": "Best practices for SEO in 2026",
+      "tone": "professional",
+      "sections": 3,
+      "expected": {
+        "min_word_count": 1500,
+        "min_qa_score": 6.5,
+        "min_blog_evaluator_score": 6.5,
+        "qa_verdict_in": ["READY", "NEEDS_REVISION"],
+        "min_evidence_count": 2,
+        "max_critical_issues": 2,
+        "expected_mode_in": ["hybrid", "open_book"]
+      }
+    },
+    {
+      "id": "open_book_current",
+      "topic": "Latest developments in multi-agent AI systems",
+      "tone": "technical",
+      "sections": 4,
+      "expected": {
+        "min_word_count": 1800,
+        "min_qa_score": 6.0,
+        "min_blog_evaluator_score": 6.5,
+        "qa_verdict_in": ["READY", "NEEDS_REVISION"],
+        "min_evidence_count": 3,
+        "max_critical_issues": 2,
+        "expected_mode_in": ["open_book", "hybrid"]
+      }
+    }
+  ]
+}

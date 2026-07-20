@@ -1,0 +1,47 @@
+# Use official Python runtime as a parent image
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set the working directory
+WORKDIR /app
+
+# Install system dependencies
+# - ffmpeg: required for MoviePy, Whisper, and audio processing
+# - git: required if any pip packages require git cloning
+# - build-essential & libpango: required for WeasyPrint PDF reports
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    git \
+    build-essential \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libjpeg-dev \
+    libopenjp2-7-dev \
+    libgirepository1.0-dev \
+    shared-mime-info \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements file
+COPY requirements.txt /app/
+
+# Install python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir google-genai
+
+# Copy backend codebase
+COPY Agents_backend /app/Agents_backend
+
+# Set workspace to the backend directory
+WORKDIR /app/Agents_backend
+
+# Expose backend server port
+EXPOSE 8000
+
+# Start FastAPI application via uvicorn
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
