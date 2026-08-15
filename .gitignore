@@ -46,3 +46,5 @@ Agents_backend/uploads/
 # Node.js
 node_modules/
 
+# FYP Development & Thesis Files
+BS_FYP_development/
