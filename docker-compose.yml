@@ -28,7 +28,8 @@ services:
       # Mount the backend folder for persistent assets and hot-reloading code changes
       - ./Agents_backend:/app/Agents_backend
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/ai_content_factory
     # Run uvicorn with hot-reload enabled, excluding data/blogs/uploads directories to prevent restart loops
