@@ -1,51 +1,42 @@
+import os
 import re
 from typing import Tuple, Dict, Any
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-
-if not api_key:
-    raise ValueError("OPENAI_API_KEY not found in environment")
-
-
-# ============================================================================
-# 1. TOPIC VALIDATOR (AI-POWERED)
-# ============================================================================
-# Topic safety checking has been unified and moved to Graph/agents/topic_guard.py.
-# Use evaluate_topic() from that module instead.
-
-
-# ============================================================================
-# 2. BLOG EVALUATOR (METRICS + AI CRITIC)
-# ============================================================================
-# Runs as a graph node after keyword_optimizer.
-# Produces an independent quality score that complements the QA agent:
-#
-#   qa_agent_node       → audits facts vs evidence, flags hallucinations
-#   blog_evaluator_node → grades the finished blog on depth, structure,
-#                         readability, and SEO as a standalone reader would
-#
-# Two different lenses on quality:
-#   QA Agent    = evidence-grounded  (did the writer hallucinate?)
-#   Evaluator   = reader-grounded    (is this actually good to read?)
-
 class BlogEvaluator:
     """
     Quality evaluator that uses LLM-as-a-Judge to comprehensively grade
     the finished blog post across four dimensions.
     """
 
-    def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)
+    def __init__(self, model_name: str = "gpt-5-mini"):
+        load_dotenv()
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger_warning = "OPENAI_API_KEY not found in environment for BlogEvaluator"
+            print(f"⚠️ {logger_warning}")
+            self.llm = None
+        else:
+            self.llm = ChatOpenAI(model=model_name, temperature=0, api_key=api_key)
 
     def evaluate(self, blog_post: str, topic: str) -> Dict[str, Any]:
         """Run complete AI evaluation. Returns a structured result dict."""
         from typing import List
         from pydantic import BaseModel, Field
+
+        if not self.llm:
+            return {
+                "final_score": 0.0,
+                "verdict": "❌ MISSING_API_KEY",
+                "metrics": {},
+                "raw_counts": {
+                    "word_count": len(blog_post.split()),
+                    "link_count": len(re.findall(r'\[.*?\]\(https?://', blog_post)),
+                    "unique_domains": len(set(re.findall(r'https?://(?:www\.)?([^/]+)', blog_post))),
+                },
+                "ai_feedback": {"error": "OPENAI_API_KEY missing", "strengths": [], "improvements": []},
+            }
 
         class BlogFeedback(BaseModel):
             depth_score: float = Field(
@@ -64,7 +55,9 @@ class BlogEvaluator:
             improvements: List[str] = Field(description="2 actionable improvements.")
             overall_impression: str = Field(description="Brief overall impression.")
 
-        evaluator = self.llm.with_structured_output(BlogFeedback)
+        evaluator = self.llm.with_structured_output(BlogFeedback).with_retry(
+            stop_after_attempt=3
+        )
 
         system_message = """You are an elite blog editor and content quality rater.
 Your job is to read the provided blog post (in Markdown) and grade it strictly against four criteria.
@@ -146,7 +139,8 @@ def blog_evaluator_node(state: dict) -> dict:
     LangGraph node wrapper for BlogEvaluator.
 
     Position in graph:
-        keyword_optimizer → blog_evaluator → [campaign / video / podcast]
+        Note: Superseded by `geval_evaluation_node` in `Graph/agents/evaluation.py`
+        to prevent duplicate LLM-as-judge calls during main graph runs.
 
     Reads:  state["final"], state["topic"]
     Writes: state["blog_evaluator_report"], state["blog_evaluator_score"]

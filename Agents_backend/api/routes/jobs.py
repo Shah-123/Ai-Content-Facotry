@@ -1,7 +1,9 @@
 import os
+import re
 import json
 import logging
 import asyncio
+import tempfile
 import threading
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -41,14 +43,8 @@ async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTask
             },
         )
 
-    job = create_job(
-        topic            = req.topic,
-        tone             = req.tone,
-        sections         = req.sections,
-        generate_podcast = req.generate_podcast,
-        generate_video   = req.generate_video,
-        generate_campaign= req.generate_campaign,
-    )
+    generation_config = req.model_dump(exclude={"topic"}, mode="json")
+    job = await asyncio.to_thread(create_job, topic=req.topic, config=generation_config)
     job_id = job["id"]
 
     # Create threading.Event for HITL synchronisation with the worker thread
@@ -59,17 +55,8 @@ async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTask
         _run_pipeline,
         job_id            = job_id,
         topic             = req.topic,
-        tone              = req.tone,
-        audience          = req.audience,
-        sections          = req.sections,
-        generate_podcast  = req.generate_podcast,
-        generate_video    = req.generate_video,
-        generate_campaign = req.generate_campaign,
-        generate_qa       = req.generate_qa,
+        config            = generation_config,
         worker_event      = worker_event,
-        keywords          = req.keywords,
-        upload_id         = req.upload_id,
-        source_mode       = req.source_mode,
     )
     return job
 
@@ -77,35 +64,43 @@ async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTask
 @router.get("/api/jobs")
 async def list_all_jobs():
     """Return all jobs, newest-first."""
-    return list_jobs_healed()
+    return await asyncio.to_thread(list_jobs_healed)
 
 
 @router.get("/api/jobs/{job_id}")
 async def get_job_details(job_id: str):
-    job = get_job_healed(job_id)
+    job = await asyncio.to_thread(get_job_healed, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     return job
 
 
+@router.get("/api/jobs/{job_id}/events")
+async def get_job_events(job_id: str):
+    """Return all historical events emitted for this job."""
+    from event_bus import _heal_stuck_events
+    events_list = await asyncio.to_thread(_heal_stuck_events, job_id)
+    return {"events": events_list}
+
+
 @router.delete("/api/jobs/{job_id}")
 async def delete_job_endpoint(job_id: str):
-    job = get_job(job_id)
+    job = await asyncio.to_thread(get_job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    
+
     # Clean up files on disk if the folder exists
     blog_folder = job.get("blog_folder")
     if blog_folder and os.path.exists(blog_folder):
         import shutil
         try:
-            shutil.rmtree(blog_folder)
+            await asyncio.to_thread(shutil.rmtree, blog_folder)
             logger.info(f"Deleted blog folder: {blog_folder}")
         except Exception as e:
             logger.error(f"Failed to delete blog folder {blog_folder}: {e}")
             
     # Delete from database
-    deleted = delete_job(job_id)
+    deleted = await asyncio.to_thread(delete_job, job_id)
     if not deleted:
         raise HTTPException(500, "Failed to delete job from database")
         
@@ -115,27 +110,97 @@ async def delete_job_endpoint(job_id: str):
 @router.get("/api/jobs/{job_id}/blog")
 async def get_blog_content(job_id: str):
     """Return the raw markdown blog content."""
-    job = get_job_healed(job_id)
+    job = await asyncio.to_thread(get_job_healed, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     content = job.get("final_content") or ""
     if not content and job.get("blog_file") and job.get("blog_folder"):
         try:
-            content = (Path(job["blog_folder"]) / job["blog_file"]).read_text(encoding="utf-8")
+            blog_path = Path(job["blog_folder"]) / job["blog_file"]
+            content = await asyncio.to_thread(blog_path.read_text, encoding="utf-8")
         except Exception:
             pass
     return {"content": content, "format": "markdown"}
 
 
+@router.get("/api/jobs/{job_id}/export/html")
+async def export_html(job_id: str):
+    """Export the blog post as a styled HTML file with embedded pictures."""
+    from fastapi.responses import Response
+    from exporters import export_to_html
+
+    job = await asyncio.to_thread(get_job_healed, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    content = job.get("final_content") or ""
+    title = job.get("topic") or "blog_post"
+    blog_folder = job.get("blog_folder")
+    job_dir = Path(blog_folder) if blog_folder else None
+
+    html_code = export_to_html(title, content, job_dir=job_dir)
+    filename = f"{re.sub(r'[^a-zA-Z0-9]', '_', title)[:40]}.html"
+    return Response(
+        content=html_code,
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@router.get("/api/jobs/{job_id}/export/docx")
+async def export_docx(job_id: str):
+    """Export the blog post as a Microsoft Word (.docx) file with embedded pictures."""
+    from exporters import export_to_docx
+
+    job = await asyncio.to_thread(get_job_healed, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    content = job.get("final_content") or ""
+    title = job.get("topic") or "blog_post"
+    blog_folder = job.get("blog_folder") or tempfile.gettempdir()
+    job_dir = Path(blog_folder)
+
+    export_path = job_dir / "exports" / f"{re.sub(r'[^a-zA-Z0-9]', '_', title)[:40]}.docx"
+    await asyncio.to_thread(export_to_docx, title, content, export_path, job_dir=job_dir)
+
+    return FileResponse(
+        path=str(export_path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=export_path.name
+    )
+
+
+@router.get("/api/jobs/{job_id}/export/pdf")
+async def export_pdf(job_id: str):
+    """Export the blog post as a PDF file with embedded pictures."""
+    from exporters import export_to_pdf
+
+    job = await asyncio.to_thread(get_job_healed, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    content = job.get("final_content") or ""
+    title = job.get("topic") or "blog_post"
+    blog_folder = job.get("blog_folder") or tempfile.gettempdir()
+    job_dir = Path(blog_folder)
+
+    export_path = job_dir / "exports" / f"{re.sub(r'[^a-zA-Z0-9]', '_', title)[:40]}.pdf"
+    await asyncio.to_thread(export_to_pdf, title, content, export_path, job_dir=job_dir)
+
+    return FileResponse(
+        path=str(export_path),
+        media_type="application/pdf",
+        filename=export_path.name
+    )
+
+
 @router.get("/api/jobs/{job_id}/approve-plan")
 async def approve_plan(job_id: str):
     """Signal HITL approval — unblocks the worker thread."""
-    job = get_job_healed(job_id)
+    job = await asyncio.to_thread(get_job_healed, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     _plan_revisions[job_id] = None  # no revision — straight approve
     _ensure_pipeline_running(job_id)
-    update_job(job_id, status="running")
+    await asyncio.to_thread(update_job, job_id, status="running")
     return {"status": "approved"}
 
 
@@ -184,8 +249,21 @@ async def update_plan_direct(job_id: str, req: UpdatePlanRequest):
 
     _direct_plan_updates[job_id] = new_plan
     _ensure_pipeline_running(job_id)
-    update_job(job_id, status="running")
+    updated_config = {**job.get("config", {}), "tone": req.tone, "audience": req.audience}
+    update_job(job_id, status="running", tone=req.tone, config_json=updated_config)
     return {"status": "plan_updated", "sections": len(tasks)}
+
+
+@router.post("/api/jobs/{job_id}/resume")
+async def resume_job_endpoint(job_id: str):
+    """Manually resumes a failed or halted job from its last persisted checkpoint."""
+    job = get_job_healed(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    update_job(job_id, status="running")
+    _ensure_pipeline_running(job_id)
+    return {"status": "resumed", "job_id": job_id}
 
 
 @router.get("/api/jobs/{job_id}/qa-report")
@@ -210,7 +288,9 @@ async def serve_file(job_id: str, filepath: str):
         raise HTTPException(404, "Job not found")
     base = Path(job["blog_folder"]).resolve()
     full_path = (base / filepath).resolve()
-    if not str(full_path).startswith(str(base)):
+    # Containment check, NOT a string prefix check: `startswith` let a job whose
+    # folder is `blogs/topic_123` read `blogs/topic_1234/...` via `../`.
+    if not full_path.is_relative_to(base):
         raise HTTPException(403, "Invalid path")
     if not full_path.exists():
         raise HTTPException(404, f"File not found: {filepath}")

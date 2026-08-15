@@ -10,9 +10,10 @@ Public surface:
     derive_topic_from_document(text)-> str
     document_ingest_node(state)     -> dict   (LangGraph node)
 
-The pipeline writes an `evidence.json` file to `uploads/<upload_id>/` at
-upload time so the LangGraph node only needs to load it (no re-parsing,
-no re-LLM-extraction during the actual job run).
+At upload time the pipeline parses, semantically chunks, and indexes the
+document into the ChromaDB vector store (the single chunk store). Evidence is
+NOT extracted at upload time — `document_ingest_node` retrieves the chunks that
+match the run's topic and extracts evidence from just those, once.
 """
 
 from __future__ import annotations
@@ -493,48 +494,58 @@ def ingest_upload(upload_dir: Path, original_filename: str) -> dict:
     src = src_files[0]
 
     parsed = parse_document(src)
-    
+
     # ── Semantic Chunking ───────────────────────────────────────────
+    embeddings_model = get_embeddings_model()
     try:
-        embeddings_model = get_embeddings_model()
         chunks = semantic_chunking(parsed["pages"], embeddings_model)
     except Exception as exc:
         logger.warning(f"Semantic chunking failed: {exc}. Using character-based fallback.")
         chunks = chunk_text(parsed["pages"])
 
-    # ── Chunk Embeddings ─────────────────────────────────────────────
+    # ── Chunk Embeddings (computed once, only for the vector store) ──
     chunk_embeddings = []
     if chunks:
         try:
-            chunk_texts = [c.text for c in chunks]
-            chunk_embeddings = embeddings_model.embed_documents(chunk_texts)
+            chunk_embeddings = embeddings_model.embed_documents([c.text for c in chunks])
         except Exception as exc:
             logger.warning(f"Generating chunk embeddings failed: {exc}")
 
-    # Save embeddings & chunks
-    embeddings_path = upload_dir / "embeddings.json"
-    with embeddings_path.open("w", encoding="utf-8") as f:
-        serialized_chunks = []
-        for i, c in enumerate(chunks):
-            serialized_chunks.append({
-                "text": c.text,
-                "page_start": c.page_start,
-                "page_end": c.page_end,
-                "embedding": chunk_embeddings[i] if i < len(chunk_embeddings) else []
-            })
-        json.dump(serialized_chunks, f, indent=2)
+    # ── ChromaDB Vector Store Indexing (the single source of chunks) ─
+    # Evidence is NOT extracted here — it is extracted at run time from the
+    # chunks that actually match the topic (see document_ingest_node), so a
+    # 200-page upload doesn't pay for a full generic extraction it may never use.
+    try:
+        from vector_store import get_vector_store
+        get_vector_store().upsert_chunks(
+            upload_id=upload_dir.name,
+            filename=original_filename,
+            chunks=chunks,
+            embeddings=chunk_embeddings,
+        )
+    except Exception as exc:
+        logger.warning(f"ChromaDB indexing skipped/failed for {original_filename}: {exc}")
 
-    # ── Evidence Extraction (Fallback / General) ────────────────────
-    evidence, truncated = extract_evidence_from_chunks(
-        chunks, original_filename, topic_hint=""
-    )
+    # ── Local chunk index (durable fallback for retrieval) ───────────
+    # Chroma is a separate service and can be unreachable or empty at
+    # generation time. Persisting the chunks + vectors we already computed
+    # costs one file write and lets document_ingest_node degrade to a local
+    # scan instead of producing an ungrounded post (see local_chunk_fallback).
+    try:
+        with (upload_dir / "embeddings.json").open("w", encoding="utf-8") as f:
+            json.dump([
+                {
+                    "text": c.text,
+                    "page_start": c.page_start,
+                    "page_end": c.page_end,
+                    "embedding": chunk_embeddings[i] if i < len(chunk_embeddings) else [],
+                }
+                for i, c in enumerate(chunks)
+            ], f)
+    except Exception as exc:
+        logger.warning(f"Failed to persist local chunk index for {original_filename}: {exc}")
+
     derived_topic = derive_topic_from_document(parsed["text"])
-
-    # Persist evidence so document_ingest_node can load it cheaply as fallback
-    evidence_path = upload_dir / "evidence.json"
-    with evidence_path.open("w", encoding="utf-8") as f:
-        json.dump([e.model_dump() for e in evidence], f, indent=2)
-
     preview = (parsed["text"] or "")[:600]
 
     meta = {
@@ -543,9 +554,6 @@ def ingest_upload(upload_dir: Path, original_filename: str) -> dict:
         "format": parsed["metadata"].get("format"),
         "pages": parsed["metadata"].get("page_count", 0),
         "chunks": len(chunks),
-        "chunks_processed": min(len(chunks), _MAX_CHUNKS),
-        "evidence_count": len(evidence),
-        "truncated": truncated,
         "derived_topic": derived_topic,
         "preview": preview,
     }
@@ -553,6 +561,74 @@ def ingest_upload(upload_dir: Path, original_filename: str) -> dict:
         json.dump(meta, f, indent=2)
 
     return meta
+
+
+def _load_json(path: Path) -> Optional[list | dict]:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Failed to read {path.name}: {exc}")
+        return None
+
+
+def local_chunk_fallback(upload_dir: Path, query_embedding: List[float],
+                         top_k: int = 8) -> List[Chunk]:
+    """Rank the upload's locally persisted chunks by cosine similarity.
+
+    Chroma is the primary index, but it is a separate service with its own
+    failure modes (cloud unreachable, empty collection, a CHROMA_PERSIST_DIR
+    that moved because it is CWD-relative). `embeddings.json` is written next
+    to the upload by ingest_upload() so retrieval degrades to a local scan
+    instead of returning nothing and generating an ungrounded blog post.
+
+    ponytail: brute-force cosine over every chunk. Fine for one document's
+    chunks (<= a few hundred); if uploads get large, this is the thing to
+    replace, not Chroma.
+    """
+    records = _load_json(upload_dir / "embeddings.json")
+    if not isinstance(records, list) or not records:
+        return []
+
+    def _as_chunk(rec: dict) -> Chunk:
+        return Chunk(
+            text=rec.get("text", ""),
+            page_start=rec.get("page_start", 1),
+            page_end=rec.get("page_end", 1),
+        )
+
+    scored = [r for r in records if r.get("embedding")]
+    if query_embedding and scored:
+        q = np.asarray(query_embedding, dtype=float)
+        q_norm = np.linalg.norm(q)
+        if q_norm > 0:
+            def _similarity(rec: dict) -> float:
+                v = np.asarray(rec["embedding"], dtype=float)
+                v_norm = np.linalg.norm(v)
+                if v_norm == 0 or v.shape != q.shape:
+                    return -1.0
+                return float(np.dot(q, v) / (q_norm * v_norm))
+
+            scored = sorted(scored, key=_similarity, reverse=True)
+            return [_as_chunk(r) for r in scored[:top_k]]
+
+    # No usable query vector — return the document's leading chunks in order.
+    return [_as_chunk(r) for r in records[:top_k]]
+
+
+def load_persisted_evidence(upload_dir: Path) -> List[EvidenceItem]:
+    """Last-resort fallback: evidence extracted by an earlier ingest run."""
+    records = _load_json(upload_dir / "evidence.json")
+    if not isinstance(records, list):
+        return []
+    items = []
+    for rec in records:
+        try:
+            items.append(EvidenceItem(**rec))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Skipping malformed persisted evidence record: {exc}")
+    return items
 
 
 def load_upload_metadata(upload_dir: Path) -> Optional[dict]:
@@ -564,18 +640,6 @@ def load_upload_metadata(upload_dir: Path) -> Optional[dict]:
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"Failed to read upload meta {meta_file}: {exc}")
         return None
-
-
-def load_upload_evidence(upload_dir: Path) -> List[EvidenceItem]:
-    ev_file = upload_dir / "evidence.json"
-    if not ev_file.exists():
-        return []
-    try:
-        raw = json.loads(ev_file.read_text(encoding="utf-8"))
-        return [EvidenceItem(**item) for item in raw]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Failed to load doc evidence {ev_file}: {exc}")
-        return []
 
 
 # ---------------------------------------------------------------------------
@@ -594,11 +658,12 @@ def _resolve_uploads_root() -> Path:
 
 
 def document_ingest_node(state: State) -> dict:
-    """LangGraph node: load doc evidence + (optionally) derive topic.
+    """LangGraph node: retrieve topic-relevant document chunks + extract evidence.
 
-    Runs only when `state["upload_id"]` is set.
-    Performs dynamic Advanced RAG search over embedded chunks if topic or keywords are specified,
-    falling back to pre-extracted evidence if embeddings do not exist or retrieval fails.
+    Runs only when `state["upload_id"]` is set. Queries the ChromaDB vector store
+    for the chunks matching the topic/keywords, then extracts evidence from just
+    those chunks (falling back to the document's stored chunks if a scoped query
+    returns nothing).
     """
     job_id = _job(state)
     upload_id = state.get("upload_id") or ""
@@ -610,7 +675,7 @@ def document_ingest_node(state: State) -> dict:
         return {}
 
     _emit(job_id, "ingest", "started",
-          "Performing Advanced RAG semantic search on document...",
+          "Retrieving relevant document sections via ChromaDB...",
           {"upload_id": upload_id, "source_mode": source_mode})
     logger.info(f"📄 INGEST --- upload_id={upload_id} mode={source_mode}")
 
@@ -622,93 +687,104 @@ def document_ingest_node(state: State) -> dict:
     meta = load_upload_metadata(upload_dir) or {}
     filename = meta.get("filename", "document")
     
-    # ── Advanced RAG Retrieval ──────────────────────────────────────
-    evidence = []
-    retrieved_chunks = []
-    
-    embeddings_path = upload_dir / "embeddings.json"
-    if embeddings_path.exists() and (topic or keywords):
+    # ── Vector retrieval (ChromaDB) → dynamic evidence extraction ────
+    # Chroma is the single chunk store. Retrieve the chunks matching the
+    # topic/keywords; if a scoped query returns nothing (e.g. no query text),
+    # fall back to the document's stored chunks. Evidence is extracted here,
+    # once, from only the retrieved chunks.
+    evidence: List[EvidenceItem] = []
+    retrieved_chunks: List[Chunk] = []
+    query_text = f"{topic} {' '.join(keywords)}".strip()
+    retrieval_source = "none"
+
+    query_emb: List[float] = []
+    if query_text:
         try:
-            with embeddings_path.open("r", encoding="utf-8") as f:
-                serialized_chunks = json.load(f)
-            
-            # Reconstruct Chunk objects
-            all_chunks = []
-            chunk_embs = []
-            for item in serialized_chunks:
-                all_chunks.append(Chunk(
-                    text=item["text"],
-                    page_start=item["page_start"],
-                    page_end=item["page_end"]
-                ))
-                chunk_embs.append(item.get("embedding", []))
-                
-            # Perform query embedding
-            query_text = f"{topic} " + " ".join(keywords)
-            query_text = query_text.strip()
-            
-            if query_text and chunk_embs and any(chunk_embs):
-                embeddings_model = get_embeddings_model()
-                query_emb = embeddings_model.embed_query(query_text)
-                
-                # Compute cosine similarities
-                similarities = []
-                for emb in chunk_embs:
-                    if not emb:
-                        similarities.append(0.0)
-                        continue
-                    v_q = np.array(query_emb)
-                    v_c = np.array(emb)
-                    norm_q = np.linalg.norm(v_q)
-                    norm_c = np.linalg.norm(v_c)
-                    if norm_q > 0 and norm_c > 0:
-                        sim = np.dot(v_q, v_c) / (norm_q * norm_c)
-                    else:
-                        sim = 0.0
-                    similarities.append(sim)
-                    
-                # Rank chunks and filter by similarity threshold (0.35)
-                ranked_indices = np.argsort(similarities)[::-1]
-                top_indices = [idx for idx in ranked_indices if similarities[idx] >= 0.35]
-                
-                # If nothing passed the threshold, fall back to top 2 chunks (if similarity > 0.0)
-                if not top_indices:
-                    top_indices = [idx for idx in ranked_indices if similarities[idx] > 0.0][:2]
-                else:
-                    top_indices = top_indices[:8]
-                    
-                retrieved_chunks = [all_chunks[idx] for idx in top_indices]
-                
-                logger.info(f"RAG: Retrieved top {len(retrieved_chunks)} semantic chunks for query '{query_text}'")
-                _emit(job_id, "ingest", "working", 
-                      f"Retrieved top {len(retrieved_chunks)} relevant sections from document...")
+            query_emb = get_embeddings_model().embed_query(query_text)
         except Exception as exc:
-            logger.exception(f"Advanced RAG retrieval failed, falling back to pre-extracted evidence: {exc}")
-            
-    # If we retrieved chunks, perform dynamic evidence extraction
+            logger.warning(f"Query embedding generation failed: {exc}")
+
+    try:
+        from vector_store import get_vector_store
+        vstore = get_vector_store()
+
+        results = []
+        if query_text:
+            results = vstore.query_similar_chunks(
+                query_text=query_text, query_embedding=query_emb,
+                upload_id=upload_id, top_k=8,
+            )
+        if not results:
+            # No scoped match (or no query at all) — use the stored chunks.
+            results = vstore.get_upload_chunks(upload_id, limit=_MAX_CHUNKS)
+
+        retrieved_chunks = [
+            Chunk(
+                text=r["text"],
+                page_start=r.get("metadata", {}).get("page_start", 1),
+                page_end=r.get("metadata", {}).get("page_end", 1),
+            )
+            for r in results
+        ]
+        if retrieved_chunks:
+            retrieval_source = "chromadb"
+            _emit(job_id, "ingest", "working",
+                  f"Retrieved {len(retrieved_chunks)} relevant sections via ChromaDB...")
+    except Exception as exc:
+        logger.warning(f"ChromaDB retrieval failed: {exc}")
+
+    # ── Fallback 1: locally persisted chunk embeddings ────────────────
+    # Chroma returned nothing (unreachable, empty collection, moved persist
+    # dir). Without this the pipeline would carry on with zero evidence and
+    # write a completely ungrounded post.
+    if not retrieved_chunks:
+        retrieved_chunks = local_chunk_fallback(upload_dir, query_emb, top_k=8)
+        if retrieved_chunks:
+            retrieval_source = "local_embeddings"
+            logger.warning(
+                f"ChromaDB returned no chunks for '{upload_id}'; "
+                f"fell back to {len(retrieved_chunks)} locally stored chunk(s)."
+            )
+            _emit(job_id, "ingest", "working",
+                  f"Vector store unavailable — retrieved {len(retrieved_chunks)} "
+                  f"section(s) from local document index...")
+
     if retrieved_chunks:
         try:
             evidence, _ = extract_evidence_from_chunks(
                 retrieved_chunks, filename, topic_hint=topic, max_chunks=8
             )
         except Exception as exc:
-            logger.exception(f"Dynamic evidence extraction failed: {exc}")
+            logger.exception(f"Evidence extraction failed: {exc}")
 
-    # Fallback to pre-extracted evidence.json if dynamic RAG yielded nothing
+    # ── Fallback 2: evidence persisted by an earlier ingest run ───────
     if not evidence:
-        logger.info("Using pre-extracted evidence fallback")
-        evidence = load_upload_evidence(upload_dir)
+        evidence = load_persisted_evidence(upload_dir)
+        if evidence:
+            retrieval_source = "persisted_evidence"
+            logger.warning(
+                f"Using {len(evidence)} persisted evidence item(s) for '{upload_id}' — "
+                f"chunk retrieval produced nothing."
+            )
 
-    out: dict = {
-        "evidence": evidence,
-        "document_filename": filename,
-    }
+    out: dict = {"evidence": evidence, "document_filename": filename}
+
+    # A document was uploaded but nothing could be retrieved from it. Say so
+    # instead of quietly generating an ungrounded post that still claims to be
+    # document-grounded.
+    if not evidence:
+        msg = (
+            f"No evidence could be retrieved from '{filename}'. The document is "
+            f"indexed neither in ChromaDB nor locally — the post will NOT be "
+            f"grounded in it. Re-upload the document to rebuild the index."
+        )
+        logger.error(f"[{job_id}] {msg}")
+        _emit(job_id, "ingest", "error", msg, {"upload_id": upload_id})
 
     # Topic auto-derivation
     if source_mode == "auto_topic":
         derived = (meta.get("derived_topic") or "").strip()
-        topic = (state.get("topic") or "").strip()
-        if derived and not topic:
+        if derived and not (state.get("topic") or "").strip():
             out["topic"] = derived
 
     _emit(
@@ -717,8 +793,8 @@ def document_ingest_node(state: State) -> dict:
         {
             "evidence_count": len(evidence),
             "pages": meta.get("pages", 0),
-            "chunks": meta.get("chunks", len(retrieved_chunks) or meta.get("chunks", 0)),
-            "truncated": meta.get("truncated", False),
+            "chunks": meta.get("chunks", len(retrieved_chunks)),
+            "retrieval_source": retrieval_source,
         },
     )
     logger.info(f"✅ Ingest complete: {len(evidence)} evidence item(s)")

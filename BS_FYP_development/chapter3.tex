@@ -29,12 +29,13 @@ The application utilizes a decoupled runtime model to manage backend logic and f
 
 The core functionality of the AI Content Factory is built on several key libraries:
 \begin{itemize}
-    \item \textbf{FastAPI (v0.100+):} An asynchronous backend framework used to build REST API routes and support real-time WebSocket communication.
-    \item \textbf{LangGraph (v0.0.1+):} A framework for building stateful, multi-agent graphs, enabling cyclic workflows and Human-in-the-Loop interrupts.
+    \item \textbf{FastAPI (v0.115+):} An asynchronous backend framework used to build REST API routes and support real-time WebSocket communication.
+    \item \textbf{LangGraph (v1.2+):} A framework for building stateful, multi-agent graphs, enabling cyclic workflows and Human-in-the-Loop interrupts.
     \item \textbf{Google GenAI SDK:} Used to interface with Gemini 2.5 Flash for native audio podcast generation.
-    \item \textbf{MoviePy (v1.0.3) \& FFmpeg:} Programmatic video compiling libraries used to download B-roll clips, synchronize subtitles, and render MP4 videos.
-    \item \textbf{DeepEval (v0.21+):} An open-source LLM evaluation framework used to run G-Eval metrics locally.
-    \item \textbf{SQLite3:} Used as the local SQL database engine for storing job metadata, metrics, and LangGraph checkpointer binaries.
+    \item \textbf{MoviePy (v2.0+) \& FFmpeg:} Programmatic video compiling libraries used to download B-roll clips, synchronize subtitles, and render MP4 videos.
+    \item \textbf{DeepEval (v2.0+):} An open-source LLM evaluation framework used to run G-Eval metrics locally.
+    \item \textbf{ChromaDB (v0.5+):} A vector database used to index document chunk embeddings and serve semantic similarity queries for the retrieval-augmented generation pipeline.
+    \item \textbf{SQLite3 / PostgreSQL:} SQLite is the default engine for job metadata, metrics, and LangGraph checkpointer state; the system switches to PostgreSQL automatically when a \texttt{DATABASE\_URL} is configured, as it is in the Docker deployment.
 \end{itemize}
 
 \section{Hardware Infrastructure}

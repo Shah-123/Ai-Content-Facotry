@@ -1,48 +1,156 @@
-@book{hocking2022unity,
-	title={Unity in action: multiplatform game development in C},
-	author={Hocking, Joseph},
-	year={2022},
-	publisher={Simon and Schuster}
+@inproceedings{lewis2020retrieval,
+  title={Retrieval-augmented generation for knowledge-intensive nlp tasks},
+  author={Lewis, Patrick and Perez, Ethan and Piktus, Aleksandras and Petroni, Fabio and Karpukhin, Vladimir and Goyal, Naman and Kuttler, Heinrich and Lewis, Mike and Yih, Wen-tau and Riedel, Tim and others},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={33},
+  pages={9459--9474},
+  year={2020}
 }
-@misc{singh2023effect,
-	title={Effect of resolution on player performance and experience in virtual reality low-fidelity first-person shooting games},
-	author={Singh, Gauri and Vangavolu, Veera Venkata Sai Siva Ram},
-	year={2023}
+
+@article{liu2023geval,
+  title={G-Eval: NLG Evaluation using GPT-4 with Better Human Alignment},
+  author={Liu, Yang and Iter, Dan and Xu, Yichong and Wang, Shuohang and Xu, Ruochen and Zhu, Chenguang},
+  journal={arXiv preprint arXiv:2303.16634},
+  year={2023}
 }
+
+@article{wu2023autogen,
+  title={AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation},
+  author={Wu, Qingyun and Bansal, Gagan and Zhang, Jie and Wu, Yiran and Li, Beibin and Erkine, Ahmed and Zhang, Chen and Wang, Chi},
+  journal={arXiv preprint arXiv:2308.08155},
+  year={2023}
+}
+
 @book{kleppmann2017designing,
-	title={Designing Data-Intensive Applications: The Big Ideas Behind Reliable, Scalable, and Maintainable Systems},
-	author={Kleppmann, Martin},
-	year={2017},
-	publisher={O'Reilly Media, Inc.},
-	address={Sebastopol, CA},
-	isbn={978-1-449-37429-0}
+  title={Designing Data-Intensive Applications: The Big Ideas Behind Reliable, Scalable, and Maintainable Systems},
+  author={Kleppmann, Martin},
+  year={2017},
+  publisher={O'Reilly Media, Inc.},
+  address={Sebastopol, CA},
+  isbn={978-1-449-37429-0}
 }
+
 @misc{fowler_unit_test,
-	author = {Martin Fowler},
-	title = {Unit Test},
-	howpublished = {\url{https://martinfowler.com/bliki/UnitTest.html}},
-	year = {2021},
-	note = {Accessed: 2024-09-17}
+  author = {Martin Fowler},
+  title = {Unit Test},
+  howpublished = {\url{https://martinfowler.com/bliki/UnitTest.html}},
+  year = {2021},
+  note = {Accessed: 2024-09-17}
 }
-@book{saint_exupery_little_1943,
-	author    = {Antoine de Saint-Exupéry},
-	title     = {The Little Prince},
-	year      = {1943},
-	publisher = {Reynal \& Hitchcock},
-	address   = {New York},
-	note      = {"You become responsible, forever, for what you have tamed."}
-}
-@misc{newzoo2023,
-	author    = {Newzoo},
-	title     = {Newzoo Global Games Market Report 2023},
-	year      = {2023},
-	url       = {https://newzoo.com/insights/articles/global-games-market-revenue-2023/},
-	note      = {Accessed: 2024-09-26}
-}
+
 @book{seidl2015uml,
   title={UML @ Classroom: An Introduction to Object-Oriented Modeling},
   author={Seidl, Martina and Scholz, Marion and Huemer, Christian and Kappel, Gerti},
   year={2015},
   publisher={Springer},
   series={Undergraduate Topics in Computer Science}
+}
+
+% ===========================================================================
+% Agent architecture & reasoning
+% ===========================================================================
+
+@inproceedings{yao2023react,
+  title={{ReAct}: Synergizing Reasoning and Acting in Language Models},
+  author={Yao, Shunyu and Zhao, Jeffrey and Yu, Dian and Du, Nan and Shafran, Izhak and Narasimhan, Karthik and Cao, Yuan},
+  booktitle={International Conference on Learning Representations (ICLR)},
+  year={2023},
+  note={arXiv:2210.03629}
+}
+
+@inproceedings{wei2022chain,
+  title={Chain-of-Thought Prompting Elicits Reasoning in Large Language Models},
+  author={Wei, Jason and Wang, Xuezhi and Schuurmans, Dale and Bosma, Maarten and Ichter, Brian and Xia, Fei and Chi, Ed H. and Le, Quoc V. and Zhou, Denny},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={35},
+  year={2022}
+}
+
+@inproceedings{madaan2023selfrefine,
+  title={{Self-Refine}: Iterative Refinement with Self-Feedback},
+  author={Madaan, Aman and Tandon, Niket and Gupta, Prakhar and Hallinan, Skyler and Gao, Luyu and Wiegreffe, Sarah and Alon, Uri and Dziri, Nouha and Prabhumoye, Shrimai and Yang, Yiming and Gupta, Shashank and Majumder, Bodhisattwa Prasad and Hermann, Katherine and Welleck, Sean and Yazdanbakhsh, Amir and Clark, Peter},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={36},
+  year={2023},
+  note={arXiv:2303.17651}
+}
+
+% ===========================================================================
+% Evaluation & LLM-as-judge
+% ===========================================================================
+
+@inproceedings{zheng2023judging,
+  title={Judging {LLM-as-a-Judge} with {MT-Bench} and {Chatbot Arena}},
+  author={Zheng, Lianmin and Chiang, Wei-Lin and Sheng, Ying and Zhuang, Siyuan and Wu, Zhanghao and Zhuang, Yonghao and Lin, Zi and Li, Zhuohan and Li, Dacheng and Xing, Eric P. and Zhang, Hao and Gonzalez, Joseph E. and Stoica, Ion},
+  booktitle={Advances in Neural Information Processing Systems (Datasets and Benchmarks Track)},
+  volume={36},
+  year={2023},
+  note={arXiv:2306.05685}
+}
+
+@inproceedings{panickssery2024llm,
+  title={{LLM} Evaluators Recognize and Favor Their Own Generations},
+  author={Panickssery, Arjun and Bowman, Samuel R. and Feng, Shi},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={37},
+  year={2024},
+  note={arXiv:2404.13076}
+}
+
+% ===========================================================================
+% Grounding, retrieval & hallucination
+% ===========================================================================
+
+@article{ji2023survey,
+  title={Survey of Hallucination in Natural Language Generation},
+  author={Ji, Ziwei and Lee, Nayeon and Frieske, Rita and Yu, Tiezheng and Su, Dan and Xu, Yan and Ishii, Etsuko and Bang, Yejin and Madotto, Andrea and Fung, Pascale},
+  journal={ACM Computing Surveys},
+  volume={55},
+  number={12},
+  pages={1--38},
+  year={2023},
+  doi={10.1145/3571730}
+}
+
+@article{gao2023ragsurvey,
+  title={Retrieval-Augmented Generation for Large Language Models: A Survey},
+  author={Gao, Yunfan and Xiong, Yun and Gao, Xinyu and Jia, Kangxiang and Pan, Jinliu and Bi, Yuxi and Dai, Yixin and Sun, Jiawei and Wang, Haofen},
+  journal={arXiv preprint arXiv:2312.10997},
+  year={2023}
+}
+
+@inproceedings{reimers2019sentencebert,
+  title={{Sentence-BERT}: Sentence Embeddings using Siamese {BERT}-Networks},
+  author={Reimers, Nils and Gurevych, Iryna},
+  booktitle={Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP)},
+  pages={3982--3992},
+  year={2019},
+  address={Hong Kong, China},
+  publisher={Association for Computational Linguistics},
+  doi={10.18653/v1/D19-1410}
+}
+
+% ===========================================================================
+% Human-in-the-loop & usability
+% ===========================================================================
+
+@article{wu2022hitl,
+  title={A Survey of Human-in-the-Loop for Machine Learning},
+  author={Wu, Xingjiao and Xiao, Luwei and Sun, Yixuan and Zhang, Junhang and Ma, Tianlong and He, Liang},
+  journal={Future Generation Computer Systems},
+  volume={135},
+  pages={364--381},
+  year={2022},
+  doi={10.1016/j.future.2022.05.014}
+}
+
+@incollection{brooke1996sus,
+  title={{SUS}: A `Quick and Dirty' Usability Scale},
+  author={Brooke, John},
+  booktitle={Usability Evaluation in Industry},
+  editor={Jordan, Patrick W. and Thomas, Bruce and Weerdmeester, Bernard A. and McClelland, Ian L.},
+  pages={189--194},
+  year={1996},
+  publisher={Taylor and Francis},
+  address={London}
 }

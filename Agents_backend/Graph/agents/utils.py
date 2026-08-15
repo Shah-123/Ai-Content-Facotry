@@ -1,6 +1,10 @@
 import os
 import re
 import logging
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from langchain_openai import ChatOpenAI
 from event_bus import emit as event_emit
 
@@ -25,8 +29,28 @@ def _safe_slug(title: str) -> str:
     s = re.sub(r"\s+", "_", s).strip("_")
     return s or "blog"
 
-_FAST_MODEL = os.getenv("LLM_FAST_MODEL", "gpt-4o-mini")
-_QUALITY_MODEL = os.getenv("LLM_QUALITY_MODEL", "gpt-4o-mini")
+def get_llm(state: dict = None, temperature: float = 0.0) -> ChatOpenAI:
+    """Return a ChatOpenAI instance for the model selected in state, if available.
+
+    Only OpenAI models are supported — this builds a ChatOpenAI client, so a
+    non-OpenAI model id (e.g. 'claude-3-5-sonnet') would be sent to the OpenAI
+    API and fail. Anything unrecognised falls back to the configured default
+    rather than blowing up mid-generation.
+    """
+    model_name = _QUALITY_MODEL
+    requested = state.get("selected_model") if isinstance(state, dict) else None
+    if requested:
+        if requested.startswith(("gpt-", "o1", "o3", "o4", "chatgpt-")):
+            model_name = requested
+        else:
+            logger.warning(
+                f"Ignoring unsupported model '{requested}' — get_llm only builds "
+                f"OpenAI clients. Falling back to '{model_name}'."
+            )
+    return ChatOpenAI(model=model_name, temperature=temperature)
+
+_FAST_MODEL = os.getenv("LLM_FAST_MODEL", "gpt-5-mini")
+_QUALITY_MODEL = os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini")
 
 llm_fast = ChatOpenAI(model=_FAST_MODEL, temperature=0)
 llm_quality = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.1)

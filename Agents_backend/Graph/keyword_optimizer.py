@@ -133,7 +133,7 @@ def _inject_missing_keywords(blog_text: str, low_keywords: List[str]) -> str:
         from langchain_openai import ChatOpenAI
         from langchain_core.messages import SystemMessage, HumanMessage
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        llm = ChatOpenAI(model="gpt-5-mini", temperature=0.3)
 
         keywords_list = "\n".join(f"  - {kw}" for kw in low_keywords)
 
@@ -184,7 +184,7 @@ def keyword_optimizer_node(state: dict) -> dict:
     
     ✅ FIX: This node now ACTIVELY rewrites the blog to inject low-density
     keywords rather than just generating a passive report. The injection step
-    uses gpt-4o-mini with a surgical prompt to avoid changing unrelated content.
+    uses the fast model with a surgical prompt to avoid changing unrelated content.
 
     Steps:
     1. Analyze keyword density and placement

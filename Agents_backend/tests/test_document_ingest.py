@@ -258,8 +258,8 @@ def test_document_ingest_node_rag_retrieval(tmp_path: Path, monkeypatch):
 
     # Mock extract_evidence_from_chunks
     def mock_extract(chunks, filename, topic_hint, max_chunks):
-        # Verify that only the relevant chunk was retrieved
-        assert len(chunks) == 1
+        # Verify that the relevant chunk was retrieved first
+        assert len(chunks) >= 1
         assert chunks[0].text == "AI safety policy details"
         return [
             EvidenceItem(

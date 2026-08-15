@@ -1,20 +1,31 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-class CreateJobRequest(BaseModel):
-    topic: str
+
+class GenerationConfig(BaseModel):
+    """Every user-controlled setting required to reproduce a generation job."""
+
     tone: str = "professional"
     audience: str = "general"
     sections: int = 3
-    # SEO keywords the writer should weave into the blog. Empty list skips
-    # keyword optimization. The frontend passes a comma-split list.
-    keywords: list[str] = []
+    keywords: list[str] = Field(default_factory=list)
     generate_podcast: bool = False
     generate_video: bool = False
     generate_campaign: bool = False
     generate_qa: bool = True
-    # — Document upload (optional) —
+    generate_images: bool = False
+    num_images: int = 0
     upload_id: str | None = None
-    source_mode: str = "hybrid"   # "closed_book" | "hybrid" | "auto_topic"
+    source_mode: str = "hybrid"
+    selected_model: str = "gpt-5-mini"
+    image_model: str = "dall-e-3"
+    image_size: str = "1024x1024"
+    image_quality: str = "standard"
+    image_style: str = "vivid"
+    export_formats: list[str] = Field(default_factory=lambda: ["html"])
+
+
+class CreateJobRequest(GenerationConfig):
+    topic: str
 
 
 class RevisePlanRequest(BaseModel):
@@ -23,7 +34,8 @@ class RevisePlanRequest(BaseModel):
 
 class UpdatePlanRequest(BaseModel):
     """Accepts a directly-edited plan from the frontend outline editor."""
+
     blog_title: str
     tone: str = "professional"
     audience: str = "general"
-    tasks: list[dict]  # Each dict has: title, goal, bullets, target_words, tags
+    tasks: list[dict]

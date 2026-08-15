@@ -1,5 +1,24 @@
-from typing import List, Literal
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
+
+
+# ============================================================================
+# SEO METADATA SCHEMAS
+# ============================================================================
+
+class FAQItem(BaseModel):
+    """A single FAQ entry for SEO schema markup."""
+    question: str = Field(description="A commonly searched question related to the blog topic")
+    answer: str = Field(description="A concise, factual answer (2-4 sentences) drawn from the blog content")
+
+class SEOMetadata(BaseModel):
+    """Comprehensive SEO metadata for a blog post."""
+    meta_title: str = Field(description="SEO-optimized title ≤60 characters, different from the H1")
+    meta_description: str = Field(description="Compelling meta description ≤160 characters with primary keyword")
+    primary_keywords: List[str] = Field(description="2-3 main SEO keywords the post targets")
+    secondary_keywords: List[str] = Field(description="3-5 related/LSI keywords", default=[])
+    reading_time_minutes: int = Field(description="Estimated reading time in minutes")
+    faq: List[FAQItem] = Field(description="3-5 frequently asked questions with answers", default=[])
 
 # ============================================================================
 # QA AGENT SCHEMAS (COMBINED FACT, COMPLETION, EVALUATION)
@@ -8,6 +27,10 @@ from pydantic import BaseModel, Field
 class QAIssue(BaseModel):
     """A single issue found during the QA audit."""
     claim: str = Field(description="The statement or section in the blog that is problematic")
+    section_title: str | None = Field(
+        default=None,
+        description="The exact section title (H2 header) where this issue occurs, or null if general/entire post"
+    )
     issue_type: Literal["fact_error", "hallucination", "missing_content", "poor_flow", "other"] = Field(
         description="Category of the issue"
     )

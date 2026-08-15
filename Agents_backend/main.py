@@ -6,6 +6,18 @@ from datetime import date, datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Force UTF-8 encoding for stdout/stderr to prevent CP1252/charmap crashes on Windows when printing emojis
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 # Environment Setup — load .env but do NOT sys.exit here; api.py loads
 # the key at runtime. The CLI path validates inside run_app() instead.
 load_dotenv()
@@ -41,8 +53,7 @@ from Graph.agents.topic_guard import evaluate_topic
 from Graph.agents.revision import MAX_REVISIONS
 from Graph.keyword_optimizer import keyword_optimizer_node
 from Graph.completion_validator import validate_completion
-from Graph.export_manager import export_all
-from validators import blog_evaluator_node
+from exporters import export_all
 
 import logging
 logger = logging.getLogger("blog_pipeline")
@@ -80,7 +91,7 @@ def create_blog_structure(topic: str) -> dict:
 def refine_plan_with_llm(current_plan: Plan, feedback: str) -> Plan:
     """Refines the plan based on human feedback."""
     print(f"\n   🤖 Refining plan based on: '{feedback}'...")
-    llm    = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm    = ChatOpenAI(model="gpt-5-mini", temperature=0)
     editor = llm.with_structured_output(Plan)
 
     return editor.invoke([
@@ -360,6 +371,12 @@ Rubric Evaluations:
         "word_count":            len(state.get("final", "").split()),
         "target_tone":           state.get("target_tone"),
         "target_keywords":       state.get("target_keywords", []),
+        "num_images":            state.get("num_images", 2),
+        "generate_images":       state.get("generate_images", True),
+        "image_model":           state.get("image_model", "dall-e-3"),
+        "image_size":            state.get("image_size", "1024x1024"),
+        "image_quality":         state.get("image_quality", "standard"),
+        "image_style":           state.get("image_style", "vivid"),
         "qa_score":              state.get("qa_score"),
         "qa_verdict":            state.get("qa_verdict"),
         "blog_evaluator_score":  state.get("blog_evaluator_score"),
@@ -437,7 +454,6 @@ def build_graph(memory=None):
     workflow.add_node("qa_agent",             qa_agent_node)
     workflow.add_node("revision",              revision_node)
     workflow.add_node("keyword_optimizer",    keyword_optimizer_node)
-    workflow.add_node("blog_evaluator",       blog_evaluator_node)
     workflow.add_node("geval_evaluator",       geval_evaluation_node)
     # NOTE: `deepeval_evaluator` is NOT wired into the graph.
     # The official deepeval G-Eval (Liu et al. 2023) makes 4 extra LLM calls
@@ -517,8 +533,7 @@ def build_graph(memory=None):
     )
     workflow.add_edge("revision", "qa_agent")  # ← the feedback loop
 
-    workflow.add_edge("keyword_optimizer", "blog_evaluator")
-    workflow.add_edge("blog_evaluator", "geval_evaluator")
+    workflow.add_edge("keyword_optimizer", "geval_evaluator")
 
     def after_evaluator_router(s):
         destinations = []
@@ -639,11 +654,13 @@ def run_app(
     if not api_mode:
         print("\n💰 Cost-Saving Options (Press Enter for Yes):")
         generate_images   = input("Generate Images (Gemini)? [Y/n]: ").strip().lower() != "n"
+        generate_qa       = input("Run QA fact-check + revision loop? [Y/n]: ").strip().lower() != "n"
         generate_campaign = input("Generate Social Media Campaign? [Y/n]: ").strip().lower() != "n"
         generate_video    = input("Generate Short Video (Voiceover + Captions + Pexels)? [Y/n]: ").strip().lower() != "n"
         generate_podcast  = input("Generate Audio Podcast (Gemini)? [Y/n]: ").strip().lower() != "n"
     else:
         generate_images   = True  # always generate images in API mode
+        generate_qa       = True
         generate_campaign = include_campaign
         generate_video    = include_video
         generate_podcast  = include_podcast
@@ -686,7 +703,7 @@ def run_app(
     print(f"\n✅ Tone: {target_tone}")
     print(f"✅ Sections: {target_sections} body + {TOTAL_FIXED_SECTIONS} fixed (intro/closing) = {total_sections} total")
     export_labels = ['MD'] + [f.upper() for f in export_formats] if export_formats else ['MD']
-    print(f"✅ Options: Images={'ON' if generate_images else 'OFF'} | Campaign={'ON' if generate_campaign else 'OFF'} | Video={'ON' if generate_video else 'OFF'} | Podcast={'ON' if generate_podcast else 'OFF'}")
+    print(f"✅ Options: Images={'ON' if generate_images else 'OFF'} | QA={'ON' if generate_qa else 'OFF'} | Campaign={'ON' if generate_campaign else 'OFF'} | Video={'ON' if generate_video else 'OFF'} | Podcast={'ON' if generate_podcast else 'OFF'}")
     print(f"✅ Export Formats: {' + '.join(export_labels)}")
     print(f"✅ Keywords: {', '.join(target_keywords) if target_keywords else 'None specified'}")
 
@@ -712,6 +729,7 @@ def run_app(
         "target_keywords":   target_keywords,
         "target_sections":   target_sections,
         "generate_images":   generate_images,
+        "generate_qa":       generate_qa,
         "generate_campaign": generate_campaign,
         "generate_video":    generate_video,
         "generate_podcast":  generate_podcast,

@@ -39,10 +39,22 @@ class GEvalScorecard(BaseModel):
         ..., 
         description="Match with requested tone (e.g. conversational, professional) and target audience."
     )
+    # NOTE: computed in Python from the four sub-scores (see WEIGHTS below).
+    # The LLM is not asked to do the weighted arithmetic — it is unreliable at it.
     overall_score: float = Field(
-        ..., 
-        description="Calculated weighted average score (1.0 to 5.0)."
+        default=0.0,
+        description="Filled in by code, not the model. Leave as 0."
     )
+
+
+# Weighted-average weights for the overall G-Eval score.
+# 30% Coherence, 20% Relevance, 30% Accuracy, 20% Tone.
+GEVAL_WEIGHTS = {"coherence": 0.30, "relevance": 0.20, "accuracy": 0.30, "tone_alignment": 0.20}
+
+
+def weighted_overall(scorecard: "GEvalScorecard") -> float:
+    """Weighted average of the four 1-5 sub-scores. Computed in code, not by the LLM."""
+    return round(sum(getattr(scorecard, dim).score * w for dim, w in GEVAL_WEIGHTS.items()), 2)
 
 # ============================================================================
 # 2. RUBRIC DEFINITIONS
@@ -73,7 +85,7 @@ Your task is to grade the provided blog post on a scale of 1 to 5 across four di
 
 Scoring Guideline:
 - Do NOT give perfect 5s unless the content is exceptional. Be critical and rigorous.
-- The overall_score must be a weighted score: 30% Coherence, 20% Relevance, 30% Accuracy, 20% Tone.
+- Score each of the four dimensions independently. Do NOT compute an overall score — leave overall_score at 0.
 - Output your evaluation using the requested structured output format."""
 
 # ============================================================================
@@ -140,23 +152,67 @@ BLOG CONTENT UNDER EVALUATION:
             HumanMessage(content=human_prompt)
         ])
 
+        # Compute the weighted overall score in code (not via the LLM).
+        scorecard.overall_score = weighted_overall(scorecard)
+
         # Serialize scorecard into dictionary format
         scores_dict = scorecard.model_dump()
         logger.info(f"[{job_id}] G-Eval complete. Overall Score: {scorecard.overall_score}/5.0")
         
-        _emit(job_id, "geval_evaluator", "completed", "G-Eval analysis finished successfully.", {
+        # Calculate raw text metrics
+        import re
+        words = len(blog_content.split())
+        links = len(re.findall(r'\[.*?\]\(https?://', blog_content))
+        domains = len(set(re.findall(r'https?://(?:www\.)?([^/]+)', blog_content)))
+
+        # Scaled quality score (0.0 - 10.0) for backward compatibility across UI & reports
+        blog_eval_score = round(scorecard.overall_score * 2.0, 1)
+        
+        blog_eval_report = f"""BLOG QUALITY EVALUATION REPORT
+============================================================
+Overall Quality Score: {blog_eval_score}/10.0 (G-Eval Equivalent: {scorecard.overall_score}/5.0)
+
+Raw Article Statistics:
+- Word Count: {words}
+- Inline Links: {links}
+- Citation Domains: {domains}
+
+Rubric Breakdown:
+------------------------------------------------------------
+1. COHERENCE (Structure & Flow): {scorecard.coherence.score}/5 ({scorecard.coherence.score * 2}/10)
+   Reasoning: {scorecard.coherence.reasoning}
+
+2. RELEVANCE (Topic Coverage): {scorecard.relevance.score}/5 ({scorecard.relevance.score * 2}/10)
+   Reasoning: {scorecard.relevance.reasoning}
+
+3. ACCURACY & GROUNDING: {scorecard.accuracy.score}/5 ({scorecard.accuracy.score * 2}/10)
+   Reasoning: {scorecard.accuracy.reasoning}
+
+4. TONE ALIGNMENT: {scorecard.tone_alignment.score}/5 ({scorecard.tone_alignment.score * 2}/10)
+   Reasoning: {scorecard.tone_alignment.reasoning}
+"""
+
+        _emit(job_id, "geval_evaluator", "completed", "G-Eval & Quality analysis finished successfully.", {
             "overall_score": scorecard.overall_score,
+            "quality_score": blog_eval_score,
             "scores": scores_dict
         })
 
         return {
-            "geval_scores": scores_dict
+            "geval_scores": scores_dict,
+            "blog_evaluator_score": blog_eval_score,
+            "blog_evaluator_report": blog_eval_report
         }
 
     except Exception as e:
+        # Do NOT fabricate a passing score on failure — that hides the error
+        # behind a mediocre-but-fine grade. Report the failure honestly and
+        # leave the score unset (downstream renders it as "N/A").
         logger.exception(f"[{job_id}] G-Eval node failed: {e}")
         _emit(job_id, "geval_evaluator", "error", f"G-Eval failed: {str(e)}")
-        return {}
+        return {
+            "blog_evaluator_report": f"G-Eval evaluation failed: {e}. No score assigned."
+        }
 
 
 # ============================================================================

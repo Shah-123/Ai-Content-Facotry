@@ -58,88 +58,104 @@ _DATA_DIR.mkdir(parents=True, exist_ok=True)
 # Active manual tasks currently running in the process
 _active_tasks = set()
 
-def register_active_task(job_id: str, task_name: str):
-    """Register a manual task as currently running in memory."""
-    _active_tasks.add((job_id, task_name))
+# Jobs already scanned for restart-orphaned tasks in THIS process. Orphan
+# detection only needs to run once per job per process: a task killed by a
+# server restart is caught on the first reconnect, and any task that dies while
+# the process is alive always writes its own terminal (completed/error) event.
+# This guard turns the per-reconnect whole-file re-scan-and-append into a
+# one-time cost.
+_healed_jobs: set = set()
+_heal_lock = threading.Lock()
+
+def register_active_task(job_id: str, task_name: str) -> bool:
+    """Register a manual task as currently running in memory. Returns False if already active."""
+    key = (job_id, task_name)
+    if key in _active_tasks:
+        return False
+    _active_tasks.add(key)
+    return True
 
 def unregister_active_task(job_id: str, task_name: str):
     """Unregister a manual task from memory."""
     _active_tasks.discard((job_id, task_name))
 
+def _read_events(job_id: str) -> List[dict]:
+    """Read and parse a job's event log from disk. Pure — never writes."""
+    file_path = _DATA_DIR / f"{job_id}.jsonl"
+    if not file_path.exists():
+        return []
+    events_list: List[dict] = []
+    try:
+        with _get_file_lock(job_id):
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped:
+                        try:
+                            events_list.append(json.loads(stripped))
+                        except json.JSONDecodeError:
+                            pass
+    except Exception as e:
+        logger.error(f"Error reading events for job {job_id}: {e}")
+    return events_list
+
+
 def _heal_stuck_events(job_id: str) -> List[dict]:
     """
-    Read events from disk, check for stuck/orphaned manual tasks,
-    write a recovery event if needed, and return the list of events.
-    """
-    file_path = _DATA_DIR / f"{job_id}.jsonl"
-    file_lock = _get_file_lock(job_id)
-    events_list = []
-    
-    if not file_path.exists():
-        return events_list
+    Return a job's events, healing tasks orphaned by a server restart.
 
-    try:
-        with file_lock:
-            with open(file_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            
-            for line in lines:
-                stripped = line.strip()
-                if stripped:
-                    try:
-                        events_list.append(json.loads(stripped))
-                    except json.JSONDecodeError:
-                        pass
-                        
-            # Analyze event sequence to find orphaned tasks
-            pending_starts = {}
-            for idx, ev in enumerate(events_list):
-                status = ev.get("status")
-                agent = ev.get("agent_name")
-                if status == "started":
-                    pending_starts[agent] = ev
-                elif status in ("completed", "error"):
-                    pending_starts.clear()
-            
-            # If there are pending starts, check if they are still active
-            stuck_agents = []
-            for agent, start_ev in pending_starts.items():
-                task_name = agent
-                if agent == "podcast_generator":
-                    task_name = "podcast"
-                elif agent == "campaign_generator":
-                    task_name = "campaign"
-                elif agent == "qa_agent":
-                    task_name = "qa"
-                
-                # Check if it is a manual task
-                if task_name in {"podcast", "campaign", "video", "qa", "images", "deepeval"}:
-                    # Check if it is currently registered as active in memory
-                    if (job_id, task_name) not in _active_tasks:
-                        stuck_agents.append(agent)
-            
-            if stuck_agents:
-                # We have stuck tasks! Write a system error event to heal them.
-                agents_str = ", ".join(stuck_agents)
-                healing_event = {
-                    "job_id": job_id,
-                    "agent_name": "system",
-                    "status": "error",
-                    "message": f"Task(s) [{agents_str}] aborted (server restarted or crashed).",
-                    "timestamp": time.time(),
-                    "metrics": {}
-                }
-                events_list.append(healing_event)
-                
-                # Persist the healing event to disk
-                with open(file_path, "a", encoding="utf-8") as f:
+    A 'started' event with no matching terminal (completed/error) event, whose
+    task is not currently registered as active in memory, means the process
+    died mid-task — we append one synthetic error event so the UI unblocks.
+
+    This runs at most ONCE per job per process (see `_healed_jobs`): the only
+    orphan source is a restart, which the first reconnect catches; tasks that
+    fail while the process lives always emit their own terminal event. Repeat
+    calls (history polling, extra subscribers) just read.
+    """
+    events_list = _read_events(job_id)
+
+    with _heal_lock:
+        if job_id in _healed_jobs:
+            return events_list
+        _healed_jobs.add(job_id)
+
+    # Find the last 'started' per agent with no later terminal event.
+    pending_starts = {}
+    for ev in events_list:
+        status = ev.get("status")
+        if status == "started":
+            pending_starts[ev.get("agent_name")] = ev
+        elif status in ("completed", "error"):
+            pending_starts.clear()
+
+    _agent_to_task = {"podcast_generator": "podcast", "campaign_generator": "campaign", "qa_agent": "qa"}
+    _manual_tasks = {"podcast", "campaign", "video", "qa", "images", "deepeval"}
+    stuck_agents = [
+        agent for agent in pending_starts
+        if _agent_to_task.get(agent, agent) in _manual_tasks
+        and (job_id, _agent_to_task.get(agent, agent)) not in _active_tasks
+    ]
+
+    if stuck_agents:
+        agents_str = ", ".join(stuck_agents)
+        healing_event = {
+            "job_id": job_id,
+            "agent_name": "system",
+            "status": "error",
+            "message": f"Task(s) [{agents_str}] aborted (server restarted or crashed).",
+            "timestamp": time.time(),
+            "metrics": {},
+        }
+        events_list.append(healing_event)
+        try:
+            with _get_file_lock(job_id):
+                with open(_DATA_DIR / f"{job_id}.jsonl", "a", encoding="utf-8") as f:
                     f.write(json.dumps(healing_event) + "\n")
-                    
-                logger.info(f"🩹 Healed stuck manual tasks [{agents_str}] for job {job_id}")
-                
-    except Exception as e:
-        logger.error(f"Error healing stuck events for job {job_id}: {e}")
-        
+            logger.info(f"🩹 Healed stuck manual tasks [{agents_str}] for job {job_id}")
+        except Exception as e:
+            logger.error(f"Error writing healing event for job {job_id}: {e}")
+
     return events_list
 
 
@@ -267,6 +283,9 @@ def unsubscribe(job_id: str, queue: asyncio.Queue):
 def clear_job(job_id: str):
     """Immediately clean up all data for a completed/failed job."""
     _subscribers.pop(job_id, None)
+    _file_locks.pop(job_id, None)
+    with _heal_lock:
+        _healed_jobs.discard(job_id)
     file_path = _DATA_DIR / f"{job_id}.jsonl"
     if file_path.exists():
         try:

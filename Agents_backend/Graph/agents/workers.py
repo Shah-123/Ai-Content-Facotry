@@ -3,8 +3,8 @@ from langgraph.types import Send
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from Graph.state import State, Plan, Task, EvidenceItem
-from Graph.templates import WORKER_SYSTEM
-from .utils import logger, llm_quality, _job, _emit
+from Graph.templates import WORKER_SYSTEM, SEO_METADATA_SYSTEM
+from .utils import logger, llm_quality, llm, get_llm, _job, _emit
 
 
 def _make_section(task_id: int, content: str) -> tuple:
@@ -103,6 +103,7 @@ def fanout(state: State):
             "evidence": _get_assigned_evidence_dicts(task, all_evidence_dicts),
 
             # Cost-saving toggle flags
+            "selected_model":    state.get("selected_model", ""),
             "generate_images":   state.get("generate_images", True),
             "generate_campaign": state.get("generate_campaign", True),
             "generate_video":    state.get("generate_video", True),
@@ -143,7 +144,27 @@ def worker_node(payload: dict) -> dict:
         ]
         other_sections_str = "\n".join(other_section_titles)
 
-        response = llm_quality.invoke(
+        # Build Section Context Bridges for seamless inter-section transitions
+        prev_task = plan.tasks[task.id - 1] if task.id > 0 and task.id - 1 < len(plan.tasks) else None
+        next_task = plan.tasks[task.id + 1] if task.id + 1 < len(plan.tasks) else None
+
+        transition_guidance = []
+        if task.id == 0:
+            transition_guidance.append(f"POSITION: Section 1 of {len(plan.tasks)} (Opening Section). Start with a compelling, direct hook that engages the reader. Avoid cliché preambles.")
+        else:
+            prev_info = f"'{prev_task.title}' (Goal: {prev_task.goal})" if prev_task else "the previous section"
+            transition_guidance.append(f"POSITION: Section {task.id + 1} of {len(plan.tasks)}.\nPREVIOUS SECTION WAS: {prev_info}\nTRANSITION REQUIREMENT: Open with a smooth 1-sentence transition that naturally bridges from {prev_info} into your topic.")
+
+        if next_task:
+            next_info = f"'{next_task.title}' (Goal: {next_task.goal})"
+            transition_guidance.append(f"NEXT SECTION WILL BE: {next_info}.\nFLOW REQUIREMENT: Conclude your section smoothly so it leads into {next_info} without discussing its specific details.")
+        else:
+            transition_guidance.append(f"POSITION: Final Section ({task.id + 1} of {len(plan.tasks)}). Conclude your topic naturally without using cliché wrap-up phrases ('In conclusion', 'To summarize').")
+
+        transition_str = "\n".join(transition_guidance)
+
+        worker_llm = get_llm(payload, temperature=0.3)
+        response = worker_llm.invoke(
             [
                 SystemMessage(content=WORKER_SYSTEM.format(
                     tone=plan.tone,
@@ -159,6 +180,8 @@ def worker_node(payload: dict) -> dict:
                     f"Tone: {plan.tone} (MAINTAIN THIS TONE CONSISTENTLY)\n"
                     f"Keywords to integrate naturally: {keywords_str}\n"
                     f"Bullets to Cover:{bullets_text}\n\n"
+                    f"SECTION CONTEXT BRIDGES & TRANSITIONS:\n"
+                    f"{transition_str}\n\n"
                     f"OTHER SECTIONS IN THIS BLOG (do NOT repeat their facts):\n"
                     f"{other_sections_str}\n\n"
                     f"Available Evidence (Cite these URLs — these are YOUR assigned sources):\n"
@@ -181,12 +204,45 @@ def worker_node(payload: dict) -> dict:
             section_md += "\n```\n"
 
         lines = section_md.split('\n')
-        if lines and re.match(r'^#{1,4}\s+', lines[0]):
+        if len(lines) > 1 and re.match(r'^#{1,4}\s+', lines[0]) and any(l.strip() for l in lines[1:]):
             lines      = lines[1:]
             section_md = '\n'.join(lines).strip()
         section_md = f"## {task.title}\n\n{section_md}"
 
         word_count = len(section_md.split())
+
+        # Auto-retry if output section is unusually short
+        if word_count < 80:
+            logger.warning(f"Section {task.id + 1} output was too short ({word_count} words). Retrying generation...")
+            retry_llm = get_llm(payload, temperature=0.5)
+            response = retry_llm.invoke([
+                SystemMessage(content=WORKER_SYSTEM.format(
+                    tone=plan.tone,
+                    keywords=keywords_str,
+                    target_words=task.target_words
+                )),
+                HumanMessage(content=(
+                    f"IMPORTANT: Write a FULL, detailed {task.target_words}-word section. Do NOT provide a short summary.\n\n"
+                    f"Blog Title: {plan.blog_title}\n"
+                    f"Section Number: {task.id + 1} of {len(plan.tasks)}\n"
+                    f"Section Title: {task.title}\n"
+                    f"Goal: {task.goal}\n"
+                    f"Bullets to Cover:{bullets_text}\n"
+                    f"Evidence:\n{evidence_text}\n"
+                ))
+            ])
+            retry_md = response.content.strip()
+            if retry_md and len(retry_md.split()) > word_count:
+                section_md = retry_md
+                if section_md.count("```") % 2 != 0:
+                    section_md += "\n```\n"
+                lines = section_md.split('\n')
+                if len(lines) > 1 and re.match(r'^#{1,4}\s+', lines[0]) and any(l.strip() for l in lines[1:]):
+                    lines = lines[1:]
+                    section_md = '\n'.join(lines).strip()
+                section_md = f"## {task.title}\n\n{section_md}"
+                word_count = len(section_md.split())
+
         if word_count < (task.target_words * 0.7):
             logger.warning(
                 f"Section {task.id + 1} seems short "
@@ -210,6 +266,108 @@ def worker_node(payload: dict) -> dict:
         _emit(job_id, "writer", "error", f"Failed section {task.id + 1}: {str(e)}")
 
     return {"sections": [_make_section(task.id, section_md)]}
+
+
+def _generate_seo_metadata(body: str, plan, state: dict) -> tuple:
+    """
+    Generates SEO metadata block (meta title, description, FAQ, reading time)
+    using the SEO_METADATA_SYSTEM prompt.
+
+    Returns (seo_dict, seo_markdown_block).
+    seo_dict is the raw JSON for state storage.
+    seo_markdown_block is the formatted Markdown to append to the blog.
+    """
+    import json
+    import math
+
+    word_count = len(body.split())
+    reading_time = max(1, math.ceil(word_count / 238))
+
+    try:
+        from Graph.structured_data import SEOMetadata
+        seo_extractor = llm.with_structured_output(SEOMetadata)
+    except (ImportError, Exception):
+        # If structured output schema doesn't exist yet, use raw JSON parsing
+        seo_extractor = None
+
+    if seo_extractor:
+        try:
+            seo = seo_extractor.invoke([
+                SystemMessage(content=SEO_METADATA_SYSTEM),
+                HumanMessage(content=(
+                    f"Blog Title: {plan.blog_title}\n"
+                    f"Word Count: {word_count}\n"
+                    f"Target Keywords: {', '.join(plan.primary_keywords) if plan.primary_keywords else 'general'}\n\n"
+                    f"BLOG CONTENT (first 8000 chars):\n{body[:8000]}"
+                )),
+            ])
+            seo_dict = seo.model_dump()
+        except Exception as e:
+            logger.warning(f"SEO structured extraction failed: {e}")
+            seo_dict = None
+    else:
+        # Fallback: raw LLM call with JSON parsing
+        try:
+            response = llm.invoke([
+                SystemMessage(content=SEO_METADATA_SYSTEM),
+                HumanMessage(content=(
+                    f"Blog Title: {plan.blog_title}\n"
+                    f"Word Count: {word_count}\n"
+                    f"Target Keywords: {', '.join(plan.primary_keywords) if plan.primary_keywords else 'general'}\n\n"
+                    f"BLOG CONTENT (first 8000 chars):\n{body[:8000]}"
+                )),
+            ])
+            # Try to parse JSON from response
+            content = response.content.strip()
+            # Strip markdown code fences if present
+            if content.startswith("```"):
+                content = content.split("\n", 1)[1] if "\n" in content else content
+                if content.endswith("```"):
+                    content = content[:-3]
+            seo_dict = json.loads(content)
+        except Exception as e:
+            logger.warning(f"SEO raw extraction failed: {e}")
+            seo_dict = None
+
+    if not seo_dict:
+        # Minimal fallback with just reading time
+        seo_block = (
+            f"\n\n---\n\n"
+            f"**⏱️ Estimated Reading Time:** {reading_time} minute{'s' if reading_time != 1 else ''}\n"
+        )
+        return None, seo_block
+
+    # Ensure reading_time is set
+    if not seo_dict.get("reading_time_minutes"):
+        seo_dict["reading_time_minutes"] = reading_time
+
+    # Build the SEO Markdown block
+    lines = ["\n\n---\n"]
+
+    # Reading time
+    rt = seo_dict.get("reading_time_minutes", reading_time)
+    lines.append(f"**⏱️ Estimated Reading Time:** {rt} minute{'s' if rt != 1 else ''}\n")
+
+    # Meta info block
+    meta_title = seo_dict.get("meta_title", "")
+    meta_desc = seo_dict.get("meta_description", "")
+    if meta_title or meta_desc:
+        lines.append("\n#### 🎯 SEO Metadata\n")
+        if meta_title:
+            lines.append(f"**Meta Title:** {meta_title}\n")
+        if meta_desc:
+            lines.append(f"**Meta Description:** {meta_desc}\n")
+
+    # Keywords
+    primary_kw = seo_dict.get("primary_keywords", [])
+    secondary_kw = seo_dict.get("secondary_keywords", [])
+    if primary_kw or secondary_kw:
+        all_kw = primary_kw + secondary_kw
+        lines.append(f"**Keywords:** {', '.join(all_kw)}\n")
+
+    seo_block = "\n".join(lines)
+    logger.info(f"✅ SEO metadata generated (Reading: {rt}min)")
+    return seo_dict, seo_block
 
 
 def merge_content(state: State) -> dict:
@@ -250,11 +408,86 @@ def merge_content(state: State) -> dict:
 
     ordered_content = [unique_sections[k] for k in sorted(unique_sections.keys())]
 
-    body       = "\n\n".join(ordered_content).strip()
-    merged_md  = f"# {plan.blog_title}\n\n{body}\n"
+    body = "\n\n".join(ordered_content).strip()
+
+    # ── Automated References & Cited Sources Reducer ─────────────────────────
+    evidence_items = state.get("evidence", [])
+    references_md = ""
+
+    if evidence_items:
+        seen_urls = set()
+        unique_ev = []
+        for ev in evidence_items:
+            url = getattr(ev, "url", None) or getattr(ev, "source", None) or ""
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                unique_ev.append(ev)
+
+        if unique_ev:
+            rows = []
+            for idx, ev in enumerate(unique_ev, 1):
+                title = getattr(ev, "title", "Reference Source") or "Reference Source"
+                url = getattr(ev, "url", None) or getattr(ev, "source", None) or "#"
+                # ✅ FIX: Use real author/organization name from evidence extraction.
+                # Previously fell back to generic "Verified Web Source" which provided
+                # no credibility signal. Now uses ev.authors (populated by the upgraded
+                # RESEARCH_SYSTEM prompt), falling back to the source domain name.
+                author = getattr(ev, "authors", None) or getattr(ev, "source", None) or "Unknown"
+                # Clean up any remaining generic fallbacks
+                if author in ("Verified Web Source", "Unknown Author", ""):
+                    author = getattr(ev, "source", None) or "Unknown"
+                rows.append(f"| [{idx}] | {title} | {author} | [View Source]({url}) |")
+
+            references_md = (
+                "\n\n---\n\n"
+                "### 📚 References & Cited Sources\n\n"
+                "| # | Source Title | Publisher / Author | Direct Link |\n"
+                "|---|--------------|--------------------|--------------|\n" +
+                "\n".join(rows)
+            )
+
+    if not references_md and "http" in body:
+        # Extract inline markdown links from body [Title](http...)
+        import re
+        links = re.findall(r'\[([^\]]+)\]\((https?://[^\)]+)\)', body)
+        seen_urls = set()
+        unique_links = []
+        for title, url in links:
+            if url not in seen_urls:
+                seen_urls.add(url)
+                unique_links.append((title, url))
+
+        if unique_links:
+            # ✅ FIX: Extract domain from URL for attribution instead of "Verified Citation"
+            from urllib.parse import urlparse
+            rows = []
+            for idx, (title, url) in enumerate(unique_links, 1):
+                try:
+                    domain = urlparse(url).netloc.replace("www.", "")
+                except Exception:
+                    domain = "Unknown"
+                rows.append(f"| [{idx}] | {title} | {domain} | [View Source]({url}) |")
+
+            references_md = (
+                "\n\n---\n\n"
+                "### 📚 References & Cited Sources\n\n"
+                "| # | Source Title | Publisher / Author | Direct Link |\n"
+                "|---|--------------|--------------------|--------------|\n" +
+                "\n".join(rows)
+            )
+
+    # ── SEO Metadata & FAQ Block ──────────────────────────────────────────────
+    seo_block = ""
+    seo_metadata = None
+    try:
+        seo_metadata, seo_block = _generate_seo_metadata(body, plan, state)
+    except Exception as e:
+        logger.warning(f"⚠️ SEO metadata generation failed (non-fatal): {e}")
+
+    merged_md  = f"# {plan.blog_title}\n\n{body}{seo_block}{references_md}\n"
     word_count = len(merged_md.split())
 
-    logger.info(f"✅ Merged {len(ordered_content)} sections")
+    logger.info(f"✅ Merged {len(ordered_content)} sections (References: {bool(references_md)}, SEO: {bool(seo_block)})")
     _emit(_job(state), "merger", "completed",
           f"Merged {len(ordered_content)} sections ({word_count} words)",
           {"sections": len(ordered_content), "words": word_count})
@@ -262,4 +495,7 @@ def merge_content(state: State) -> dict:
           f"All {len(ordered_content)} sections written",
           {"sections": len(ordered_content), "words": word_count})
 
-    return {"merged_md": merged_md, "final": merged_md}
+    result = {"merged_md": merged_md, "final": merged_md}
+    if seo_metadata:
+        result["seo_metadata"] = seo_metadata
+    return result

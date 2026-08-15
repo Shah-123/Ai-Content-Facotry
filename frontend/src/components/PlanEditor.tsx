@@ -97,48 +97,50 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
   };
 
   return (
-    <div className="self-start max-w-3xl flex gap-3 w-full mt-2">
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-signal-warning-dim">
-        <Bot className="w-4 h-4 text-signal-warning" />
+    <div className="self-start max-w-3xl flex gap-3.5 w-full mt-2">
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-signal-warning-dim border border-signal-warning/15">
+        <Bot className="w-4 h-4 text-signal-warning animate-bounce" />
       </div>
-      <div className="glass-panel p-6 rounded-2xl rounded-tl-sm flex-1 border border-signal-warning/20">
+      <div className="glass-panel p-6 rounded-2xl rounded-tl-sm flex-1 border border-signal-warning/15">
         <h3 className="text-lg font-bold text-signal-warning mb-1">Plan Ready for Approval</h3>
-        <p className="text-sm text-base-300 mb-4">Edit the outline below, add or remove sections, then approve.</p>
+        <p className="text-sm text-base-300 mb-4.5">Edit the outline below, add or remove sections, then approve.</p>
 
         {/* Blog Title */}
-        <div className="bg-base-900 p-4 rounded-xl border border-white/4 mb-4">
-          <label className="text-[10px] font-semibold text-base-500 uppercase tracking-wider mb-1.5 block">Blog Title</label>
+        <div className="bg-base-950/40 p-4.5 rounded-2xl border border-white/5 mb-4.5 focus-within:border-accent-500/25 transition-all duration-300">
+          <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Blog Title</label>
           <input
             type="text"
-            className="w-full bg-base-800 border border-white/6 rounded-lg px-3 py-2 text-sm text-base-100 font-medium focus:outline-none focus:border-accent-500/40 transition-colors"
+            className="w-full bg-base-900/60 border border-white/6 rounded-xl px-3.5 py-2.5 text-sm text-base-100 font-medium focus:outline-none focus:border-accent-500/40 transition-all focus:shadow-[0_0_10px_var(--color-accent-glow)]"
             value={editedTitle}
             onChange={e => { setEditedTitle(e.target.value); markEdited(); }}
           />
         </div>
 
         {/* Sections */}
-        <div className="space-y-2 mb-4">
+        <div className="space-y-3.5 mb-5">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] font-semibold text-base-500 uppercase tracking-wider">Sections ({tasks.length})</span>
+            <span className="text-[10px] font-bold text-base-400 uppercase tracking-widest">Sections ({tasks.length})</span>
           </div>
 
           {tasks.map((task, idx) => (
-            <div key={idx} className="bg-base-900 rounded-xl border border-white/6 overflow-hidden group transition-all duration-200 hover:border-white/10">
+            <div key={idx} className="bg-base-950/30 rounded-xl border border-white/6 overflow-hidden group transition-all duration-200 hover:border-white/12 hover:bg-base-950/40">
               {/* Section Header — always visible */}
-              <div className="flex items-center gap-2 px-4 py-3">
-                <GripVertical className="w-3.5 h-3.5 text-base-600 shrink-0" />
-                <span className="text-accent-500 text-xs font-bold shrink-0 w-5">{idx + 1}</span>
+              <div className="flex items-center gap-3 px-4 py-3">
+                <GripVertical className="w-3.5 h-3.5 text-base-500 shrink-0" />
+                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/10 text-accent-400 text-[10px] font-bold shrink-0">
+                  {idx + 1}
+                </span>
                 <input
                   ref={el => { titleRefs.current[idx] = el; }}
                   type="text"
-                  className="flex-1 bg-transparent border-none text-sm text-base-100 font-medium focus:outline-none placeholder:text-base-500"
+                  className="flex-1 bg-transparent border-none text-sm text-base-100 font-bold focus:ring-0 focus:outline-none placeholder:text-base-600"
                   placeholder="Section title..."
                   value={task.title}
                   onChange={e => updateTask(idx, 'title', e.target.value)}
                 />
                 <button
                   onClick={() => setExpandedSection(expandedSection === idx ? null : idx)}
-                  className="p-1.5 rounded-lg text-base-500 hover:text-accent-400 hover:bg-white/4 transition-all"
+                  className="p-1.5 rounded-lg text-base-400 hover:text-accent-400 hover:bg-white/4 transition-all"
                   title="Edit details"
                 >
                   <Pencil className="w-3.5 h-3.5" />
@@ -146,7 +148,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
                 <button
                   onClick={() => removeTask(idx)}
                   disabled={tasks.length <= 1}
-                  className={`p-1.5 rounded-lg transition-all ${tasks.length <= 1 ? 'text-base-700 cursor-not-allowed' : 'text-base-500 hover:text-signal-error hover:bg-signal-error-dim'}`}
+                  className={`p-1.5 rounded-lg transition-all ${tasks.length <= 1 ? 'text-base-700 cursor-not-allowed' : 'text-base-400 hover:text-signal-error hover:bg-signal-error-dim'}`}
                   title="Remove section"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -155,21 +157,21 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
 
               {/* Expanded Details */}
               {expandedSection === idx && (
-                <div className="px-4 pb-4 pt-1 border-t border-white/4 space-y-3">
+                <div className="px-4 pb-4.5 pt-1.5 border-t border-white/4 space-y-4">
                   <div>
-                    <label className="text-[10px] font-semibold text-base-500 uppercase tracking-wider mb-1 block">Goal</label>
+                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Goal</label>
                     <input
                       type="text"
-                      className="w-full bg-base-800 border border-white/6 rounded-lg px-3 py-2 text-sm text-base-300 focus:outline-none focus:border-accent-500/40 transition-colors"
+                      className="w-full bg-base-900/60 border border-white/6 rounded-lg px-3.5 py-2.5 text-sm text-base-200 focus:outline-none focus:border-accent-500/40 transition-colors"
                       placeholder="What should the reader learn from this section?"
                       value={task.goal}
                       onChange={e => updateTask(idx, 'goal', e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-semibold text-base-500 uppercase tracking-wider mb-1 block">Key Points (one per line)</label>
+                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Key Points (one per line)</label>
                     <textarea
-                      className="w-full bg-base-800 border border-white/6 rounded-lg px-3 py-2 text-sm text-base-300 focus:outline-none focus:border-accent-500/40 transition-colors resize-none h-20"
+                      className="w-full bg-base-900/60 border border-white/6 rounded-lg px-3.5 py-2.5 text-sm text-base-200 focus:outline-none focus:border-accent-500/40 transition-colors resize-none h-24"
                       placeholder="Enter key points, one per line..."
                       value={task.bullets.join('\n')}
                       onChange={e => updateTask(idx, 'bullets', e.target.value.split('\n').filter((b: string) => b.trim()))}
@@ -177,22 +179,19 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
                   </div>
                   <div className="flex gap-3">
                     <div className="flex-1">
-                      <label className="text-[10px] font-semibold text-base-500 uppercase tracking-wider mb-1 block">Target Words</label>
+                      <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Target Words</label>
                       <input
                         type="number"
-                        className="w-full bg-base-800 border border-white/6 rounded-lg px-3 py-2 text-sm text-base-300 focus:outline-none focus:border-accent-500/40 transition-colors"
+                        className="w-full bg-base-900/60 border border-white/6 rounded-lg px-3.5 py-2.5 text-sm text-base-200 focus:outline-none focus:border-accent-500/40 transition-colors"
                         value={task.target_words}
                         min={100}
                         max={1000}
                         onChange={e => {
-                          // Allow free typing — store raw numeric value (or 0 while empty)
-                          // so the user can clear the field and type a new number.
                           const raw = e.target.value;
                           const parsed = raw === '' ? 0 : parseInt(raw, 10);
                           updateTask(idx, 'target_words', isNaN(parsed) ? 0 : parsed);
                         }}
                         onBlur={e => {
-                          // Clamp only when the user leaves the field.
                           const parsed = parseInt(e.target.value, 10);
                           const safe = isNaN(parsed) ? 350 : Math.min(1000, Math.max(100, parsed));
                           updateTask(idx, 'target_words', safe);
@@ -200,10 +199,10 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
                       />
                     </div>
                     <div className="flex-1">
-                      <label className="text-[10px] font-semibold text-base-500 uppercase tracking-wider mb-1 block">SEO Tags (comma-sep)</label>
+                      <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">SEO Tags (comma-sep)</label>
                       <input
                         type="text"
-                        className="w-full bg-base-800 border border-white/6 rounded-lg px-3 py-2 text-sm text-base-300 focus:outline-none focus:border-accent-500/40 transition-colors"
+                        className="w-full bg-base-900/60 border border-white/6 rounded-lg px-3.5 py-2.5 text-sm text-base-200 focus:outline-none focus:border-accent-500/40 transition-colors"
                         placeholder="tag1, tag2"
                         value={task.tags.join(', ')}
                         onChange={e => updateTask(idx, 'tags', e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean))}
@@ -218,7 +217,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
           {/* Add Section Button */}
           <button
             onClick={addTask}
-            className="w-full py-2.5 rounded-xl border border-dashed border-white/8 text-base-400 hover:text-accent-400 hover:border-accent-500/30 hover:bg-accent-500/5 transition-all flex items-center justify-center gap-2 text-sm"
+            className="w-full py-3 rounded-xl border border-dashed border-white/10 text-base-400 hover:text-accent-400 hover:border-accent-500/35 hover:bg-accent-500/5 transition-all flex items-center justify-center gap-2 text-sm font-semibold"
           >
             <PlusSquare className="w-4 h-4" />
             Add Section
@@ -226,9 +225,9 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
         </div>
 
         {/* AI Revision Feedback */}
-        <div className="mb-4">
+        <div className="mb-5">
           <textarea
-            className="w-full bg-base-800 border border-white/6 rounded-xl p-3 text-sm text-base-100 focus:outline-none focus:border-accent-500/40 resize-none h-16 placeholder:text-base-500"
+            className="w-full bg-base-900/60 border border-white/6 rounded-xl p-3.5 text-sm text-base-100 focus:outline-none focus:border-accent-500/40 focus:shadow-[0_0_10px_var(--color-accent-glow)] transition-all duration-200 resize-none h-20 placeholder:text-base-500"
             placeholder="Or describe changes and let AI revise the plan..."
             value={feedback}
             onChange={e => setFeedback(e.target.value)}
@@ -236,11 +235,11 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
         </div>
 
         {/* Action Buttons */}
-        <div className="flex gap-2 justify-end flex-wrap">
+        <div className="flex gap-3.5 justify-end flex-wrap">
           {feedback.trim().length > 0 && (
             <button
               onClick={() => { onRevise(feedback); setFeedback(''); }}
-              className="px-4 py-2 bg-base-700 hover:bg-base-600 text-base-200 rounded-xl text-sm font-semibold transition-colors border border-white/6"
+              className="px-4.5 py-2.5 bg-base-800 hover:bg-base-750 text-base-200 rounded-xl text-sm font-semibold transition-all border border-white/6 hover:border-white/10 shadow-sm"
             >
               Revise with AI
             </button>
@@ -248,7 +247,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
           {isEdited && (
             <button
               onClick={handleSaveAndApprove}
-              className="px-5 py-2 bg-accent-500/20 hover:bg-accent-500/30 text-accent-400 border border-accent-500/30 rounded-xl text-sm font-semibold transition-colors flex items-center gap-1.5"
+              className="px-5 py-2.5 bg-accent-500/10 hover:bg-accent-500/20 text-accent-400 border border-accent-500/20 rounded-xl text-sm font-bold transition-all flex items-center gap-2"
             >
               <Pencil className="w-3.5 h-3.5" />
               Save Edits & Generate
@@ -256,7 +255,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
           )}
           <button
             onClick={onApprove}
-            className="px-5 py-2 bg-signal-success/20 hover:bg-signal-success/30 text-signal-success border border-signal-success/30 rounded-xl text-sm font-semibold transition-colors"
+            className="btn-primary px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all"
           >
             {isEdited ? 'Approve Original' : 'Approve & Generate'}
           </button>

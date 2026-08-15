@@ -1,6 +1,22 @@
-version: '3.8'
-
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: ai_content_factory_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_content_factory
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_content_factory"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -9,12 +25,17 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Mount the entire backend folder for persistent SQLite storage and hot-reloading code changes
+      # Mount the backend folder for persistent assets and hot-reloading code changes
       - ./Agents_backend:/app/Agents_backend
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/ai_content_factory
     # Run uvicorn with hot-reload enabled, excluding data/blogs/uploads directories to prevent restart loops
     command: uvicorn api:app --host 0.0.0.0 --port 8000 --reload --reload-exclude "data/*" --reload-exclude "blogs/*" --reload-exclude "uploads/*"
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -35,3 +56,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  postgres_data:

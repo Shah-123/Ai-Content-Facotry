@@ -106,6 +106,16 @@ def _verify_and_clean_job_files(job: dict) -> dict:
             except Exception as e:
                 logger.warning(f"Failed to update metadata.json during healing for job {job_id}: {e}")
 
+    images_dir = Path(base_path) / "assets" / "images"
+    if images_dir.exists() and images_dir.is_dir():
+        image_files = []
+        for img_file in sorted(images_dir.glob("*")):
+            if img_file.is_file() and img_file.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+                image_files.append(f"assets/images/{img_file.name}")
+        job["image_files"] = image_files
+    else:
+        job["image_files"] = []
+
     return job
 
 

@@ -123,3 +123,32 @@ class TestClearJob:
 
     def test_no_error_on_nonexistent_job(self):
         clear_job("nonexistent_" + uuid.uuid4().hex[:8])  # should not raise
+
+
+# ========================================================================
+# restart-orphan healing (once per process)
+# ========================================================================
+
+class TestHealing:
+    def test_orphaned_manual_task_heals_once(self):
+        jid = _job_id("heal")
+        try:
+            # 'started' with no terminal event, not registered active → orphaned.
+            emit(jid, "podcast_generator", "started", "Generating podcast...")
+            h1 = get_history(jid)
+            assert any(e["status"] == "error" and "aborted" in e["message"] for e in h1)
+            # Second read must NOT append a duplicate healing event.
+            assert len(get_history(jid)) == len(h1)
+        finally:
+            clear_job(jid)
+
+    def test_active_task_is_not_healed(self):
+        from event_bus import register_active_task, unregister_active_task
+        jid = _job_id("active")
+        try:
+            register_active_task(jid, "podcast")
+            emit(jid, "podcast_generator", "started", "Generating...")
+            assert all(e["status"] != "error" for e in get_history(jid))
+        finally:
+            unregister_active_task(jid, "podcast")
+            clear_job(jid)

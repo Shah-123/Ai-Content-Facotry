@@ -19,9 +19,23 @@ from unittest.mock import MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # ===========================================================================
-# 2. Set dummy API keys BEFORE any project code is imported.
-#    main.py calls sys.exit(1) if OPENAI_API_KEY is missing at import time.
+# 2. API keys.
+#
+#    The golden harness makes REAL API calls, so it needs the real keys from
+#    .env. Everything else must never reach a live API, so it gets dummies.
+#
+#    Order matters and is easy to get wrong: `setdefault` below wins over a
+#    later `load_dotenv()`, because load_dotenv defaults to override=False.
+#    Loading .env here FIRST (only when the golden tests are enabled) is what
+#    lets the real key through — otherwise every golden run 401s on a dummy.
 # ===========================================================================
+if os.getenv("RUN_GOLDEN_TESTS") == "1":
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+
+# Fallbacks for the ordinary (mocked) test run. main.py exits if
+# OPENAI_API_KEY is missing at import time, so one must always be present.
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy-key-for-unit-tests")
 os.environ.setdefault("TAVILY_API_KEY", "tvly-test-dummy-key")
 os.environ.setdefault("GOOGLE_API_KEY", "AIzaSy-test-dummy-key")

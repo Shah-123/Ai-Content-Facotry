@@ -25,6 +25,8 @@ generated_videos/
 # Databases
 *.db
 *.sqlite
+*.sqlite3
+data/
 Agents_backend/data/
 *qoder
 

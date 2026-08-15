@@ -251,6 +251,11 @@ def research_node(state: State) -> dict:
             f"Topic: {state['topic']}\n"
             f"Read the following full articles and extract 8–10 UNIQUE hard facts, statistics, and verifiable claims.\n"
             f"Ensure evidence comes from DIVERSE sources — do not extract multiple items from the same article unless they contain genuinely distinct facts.\n\n"
+            f"CRITICAL EXTRACTION PRIORITIES:\n"
+            f"1. EXPERT QUOTES: Find direct quotes from named experts, executives, or researchers. Include the person's name, title, and organization.\n"
+            f"2. SPECIFIC DATA: Extract concrete numbers (dollar amounts, percentages, dates, sample sizes) — NOT vague summaries.\n"
+            f"3. REAL AUTHOR NAMES: The 'authors' field MUST contain a real person or organization name — NEVER 'Verified Web Source' or 'Unknown Author'.\n"
+            f"4. NAMED ENTITIES: Prioritize evidence that mentions specific companies, products, studies, or methodologies by name.\n\n"
             f"SCRAPED ARTICLES:\n{deep_evidence_context}"
         )),
     ])

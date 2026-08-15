@@ -33,6 +33,24 @@ Filter to a single topic:
 $env:RUN_GOLDEN_TESTS=1; pytest tests/golden -k closed_book_evergreen -v -s
 ```
 
+## Choosing the writer model
+
+`GOLDEN_MODEL` sets the model the section writers use (default `gpt-5-mini`).
+It does **not** change the judge — the in-house G-Eval judge reads
+`LLM_QUALITY_MODEL` — so varying only `GOLDEN_MODEL` keeps scores comparable
+across models and lets you report a writer-model comparison:
+
+```powershell
+$env:RUN_GOLDEN_TESTS=1; $env:GOLDEN_MODEL="gpt-4o-mini"; pytest tests/golden -v -s
+```
+
+Changing both at once confounds writer quality with judge behaviour and makes
+the resulting numbers uncomparable. A per-case `"model"` key in `topics.json`
+overrides `GOLDEN_MODEL` for that case.
+
+Only OpenAI model ids work — the agent layer builds a `ChatOpenAI` client, and
+`get_llm` falls back to the default for anything else.
+
 ## What's checked
 
 For every case in `topics.json`, after the pipeline finishes the harness asserts:
@@ -75,4 +93,24 @@ The test harness picks it up automatically via `pytest.mark.parametrize`.
 
 ## Where outputs go
 
-Each case writes its run artifacts to `tests/golden/_runs/<case_id>/` (gitignored). Inspect them after a failure to see what the pipeline actually produced.
+Each case writes to `tests/golden/_runs/<case_id>/` (gitignored), **whether it passes or fails** — a run that violates a bound is the one you most want to inspect:
+
+| File | Contents |
+|---|---|
+| `summary.json` | All metrics for the run, plus `writer_model` and `judge_model` so results stay attributable |
+| `qa_report.txt` | The QA agent's report — evidence it actually executed |
+| `blog.md` | The final generated post |
+
+`summary.json` is the raw data for a results table. To collect several runs:
+
+```bash
+python -c "import json,glob; [print(json.load(open(f))) for f in glob.glob('tests/golden/_runs/*/summary.json')]"
+```
+
+Note these are **overwritten** on each run of the same case id. Copy them elsewhere before re-running if you're accumulating data across models.
+
+## A null `qa_score` is not a low score
+
+The harness fails loudly and separately when `qa_score` is `None`, because that
+means the QA agent never executed — a structural break, not a quality dip. It
+is the exact regression that went unnoticed while these tests sat disabled.

@@ -77,19 +77,68 @@ def _get_audio_file_clip():
             return None
 
 
+def _generate_podcast_audio_gemini(script_prompt_or_text: str, output_path: str) -> bool:
+    """Generate audio using Gemini 2.5 Flash native audio modality."""
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        logger.warning("google-genai not installed. Skipping Gemini audio synthesis.")
+        return False
+
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        logger.warning("GOOGLE_API_KEY not set for Gemini audio generation.")
+        return False
+
+    try:
+        logger.info("🎙️ Attempting Gemini 2.5 Flash native audio synthesis...")
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=(
+                "You are a professional podcast host. Read the following script naturally "
+                f"with clear tone and conversational pacing:\n\n{script_prompt_or_text}"
+            ),
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede")
+                    )
+                ),
+            ),
+        )
+        if resp.candidates and resp.candidates[0].content.parts:
+            for part in resp.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.data:
+                    output_p = Path(output_path)
+                    output_p.parent.mkdir(parents=True, exist_ok=True)
+                    output_p.write_bytes(part.inline_data.data)
+                    logger.info(f"   ✅ Gemini 2.5 Flash native audio podcast saved → {output_path}")
+                    return True
+        return False
+    except Exception as e:
+        logger.warning(f"   ⚠️ Gemini native audio generation failed ({e}). Retrying / falling back...")
+        return False
+
+
 # ============================================================================
 # PODCAST AUDIO GENERATION
 # ============================================================================
 
 def generate_podcast_audio(state: dict, output_path: str) -> bool:
     """
-    Generate a 2-speaker dialogue podcast using:
-      1. LLM (llm_quality / GPT-4o) for scriptwriting
-      2. OpenAI TTS (tts-1-hd) for audio synthesis
-    Outputs a single merged audio file at `output_path` (MP3 or WAV).
+    Generate a podcast audio episode using:
+      1. Gemini 2.5 Flash Native Audio (if GOOGLE_API_KEY is present)
+      2. OpenAI TTS (tts-1-hd) 2-speaker dialogue synthesis (if OPENAI_API_KEY is present)
+    Outputs a single audio file at `output_path`.
     """
     client = _get_openai_client()
-    if not client:
+    google_key = os.getenv("GOOGLE_API_KEY")
+
+    if not client and not google_key:
+        logger.error("Neither OPENAI_API_KEY nor GOOGLE_API_KEY is available for podcast synthesis.")
         return False
 
     plan  = state.get("plan")
@@ -156,7 +205,19 @@ Guidelines:
         logger.error(f"   ❌ Script generation failed: {e}")
         return False
 
-    # ── Synthesise each turn with OpenAI TTS ─────────────────────────────
+    # ── Primary: Attempt Gemini 2.5 Flash Native Audio Synthesis ─────────
+    if google_key:
+        script_full_text = f"Title: {script.title}\n\n" + "\n\n".join(f"{t.speaker}: {t.text}" for t in script.turns)
+        gemini_success = _generate_podcast_audio_gemini(script_full_text, output_path)
+        if gemini_success:
+            return True
+        logger.info("   ⚠️ Gemini native audio generation unavailable/failed. Falling back to OpenAI HD dual-speaker TTS...")
+
+    if not client:
+        logger.error("OpenAI API key missing and Gemini audio synthesis failed. Aborting podcast generation.")
+        return False
+
+    # ── Secondary: Synthesise each turn with OpenAI HD TTS ─────────────
     import io
     import wave as wave_lib
 

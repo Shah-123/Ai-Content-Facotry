@@ -2,14 +2,23 @@ import asyncio
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import event_bus as events
+from api.auth import api_key_is_valid
 
 logger = logging.getLogger("api.routes.websocket")
 router = APIRouter(prefix="/ws", tags=["websocket"])
 
 
 @router.websocket("/{job_id}")
-async def websocket_endpoint(websocket: WebSocket, job_id: str):
-    """Stream agent events to the browser in real-time."""
+async def websocket_endpoint(websocket: WebSocket, job_id: str, api_key: str | None = None):
+    """Stream agent events to the browser in real-time.
+
+    Auth is checked here rather than via a router dependency because the browser
+    WebSocket API cannot set headers — the key arrives as `?api_key=`. No-op
+    unless API_KEY is configured.
+    """
+    if not api_key_is_valid(api_key):
+        await websocket.close(code=1008)  # policy violation
+        return
     await websocket.accept()
     queue = events.subscribe(job_id)
 
@@ -53,6 +62,6 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str):
         try:
             from starlette.websockets import WebSocketState
             if websocket.application_state != WebSocketState.DISCONNECTED:
-                await websocket.close()
+                await websocket.close(code=1000)
         except Exception:
             pass

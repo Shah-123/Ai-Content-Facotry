@@ -96,8 +96,15 @@ class State(TypedDict, total=False):
     as_of: str          # Date string
     blog_folder: str    # Path to save outputs
     target_tone: Optional[str]        # e.g., "professional", "conversational"
+    target_audience: Optional[str]    # e.g., "software engineers", "general"
     target_keywords: List[str]        # e.g., ["AI healthcare", "medical automation"]
     target_sections: int              # How many body sections to generate
+    num_images: int                   # Exact number of pictures user wants (0-5)
+    # Which foundation LLM the agents should use. Read by get_llm() in
+    # Graph/agents/utils.py; empty string means "use the configured default".
+    selected_model: str
+    # NOTE: generate_images (and the other generate_* toggles) are declared
+    # once below under "Cost Saving Flags".
 
     # --- Document Upload (optional) ---
     # When set, a `document_ingest_node` runs before the orchestrator and
@@ -163,6 +170,9 @@ class State(TypedDict, total=False):
     keyword_analysis: dict      # Detailed keyword metrics
     keyword_report: str         # Human-readable report
 
+    # --- SEO Metadata ---
+    seo_metadata: Optional[dict]  # Meta title, description, FAQ, reading time
+
     # --- Campaign Outputs ---
     linkedin_post: str
     youtube_script: str
@@ -177,10 +187,22 @@ class State(TypedDict, total=False):
     whisper_model_size: Optional[str]  # Optional Whisper model size configuration
 
     # --- Cost Saving Flags ---
+    # NOTE: every flag the API puts in initial_state MUST be declared here.
+    # LangGraph silently drops keys that are not in the State schema, so an
+    # undeclared flag reads back as its `.get()` default forever — which is
+    # exactly how `generate_qa` disabled the QA agent + revision loop for
+    # every web-app run. test_state_schema.py guards this now.
     generate_images: bool
+    generate_qa: bool
     generate_campaign: bool
     generate_video: bool
     generate_podcast: bool
+
+    # --- Image Generation Configurations ---
+    image_model: str
+    image_size: str
+    image_quality: str
+    image_style: str
 
     # --- Export Formats ---
     export_formats: List[str]  # e.g., ["html", "pdf", "docx"]

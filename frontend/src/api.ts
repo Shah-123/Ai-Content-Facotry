@@ -1,5 +1,18 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8000`;
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8000`;
 const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || `ws://${window.location.hostname}:8000`;
+
+// Optional shared secret. Only needed when the backend has API_KEY set in .env
+// (see Agents_backend/api/auth.py); empty by default so local dev is unchanged.
+const API_KEY = import.meta.env.VITE_API_KEY || '';
+
+/** Append the key as a query param — for URLs the browser fetches itself
+ *  (WebSocket, <img src>, download links) and so cannot attach a header to. */
+export const withApiKey = (url: string): string =>
+  API_KEY ? `${url}${url.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(API_KEY)}` : url;
+
+/** fetch() with the API key header attached when one is configured. */
+const apiFetch = (url: string, init: RequestInit = {}): Promise<Response> =>
+  fetch(url, API_KEY ? { ...init, headers: { ...init.headers, 'X-API-Key': API_KEY } } : init);
 
 export type SourceMode = 'closed_book' | 'hybrid' | 'auto_topic';
 
@@ -14,9 +27,16 @@ export interface CreateJobParams {
   generate_podcast?: boolean;
   generate_video?: boolean;
   generate_campaign?: boolean;
+  generate_images?: boolean;
+  num_images?: number;
   // Document upload (optional)
   upload_id?: string;
   source_mode?: SourceMode;
+  selected_model?: string;
+  image_model?: string;
+  image_size?: string;
+  image_quality?: string;
+  image_style?: string;
 }
 
 export interface UploadResult {
@@ -64,6 +84,11 @@ export interface Job {
   blog_html_file?: string;
   podcast_file?: string;
   video_file?: string;
+  image_files?: string[];
+  image_model?: string;
+  image_size?: string;
+  image_quality?: string;
+  image_style?: string;
   plan?: any;
   error_message?: string;
   word_count?: number;
@@ -84,7 +109,7 @@ export interface AgentEvent {
 
 export class APIClient {
   static async fetchJobs(): Promise<Job[]> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs`);
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs`);
     if (!res.ok) throw new Error('Failed to fetch jobs');
     return res.json();
   }
@@ -92,7 +117,7 @@ export class APIClient {
   static async uploadDocument(file: File): Promise<UploadResult> {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(`${API_BASE_URL}/api/uploads`, {
+    const res = await apiFetch(`${API_BASE_URL}/api/uploads`, {
       method: 'POST',
       body: form,
     });
@@ -108,7 +133,7 @@ export class APIClient {
   }
 
   static async createJob(params: CreateJobParams): Promise<Job> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs`, {
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -131,25 +156,36 @@ export class APIClient {
   }
 
   static async getJob(id: string): Promise<Job> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}`);
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}`);
     if (!res.ok) throw new Error('Failed to get job');
     return res.json();
   }
 
+  static async getJobEvents(id: string): Promise<AgentEvent[]> {
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/events`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.events || [];
+    } catch {
+      return [];
+    }
+  }
+
   static async deleteJob(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}`, {
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}`, {
       method: 'DELETE',
     });
     if (!res.ok) throw new Error('Failed to delete job');
   }
 
   static async approvePlan(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/approve-plan`);
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/approve-plan`);
     if (!res.ok) throw new Error('Failed to approve plan');
   }
 
   static async revisePlan(id: string, feedback: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/revise-plan`, {
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/revise-plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ feedback }),
@@ -163,7 +199,7 @@ export class APIClient {
     audience: string;
     tasks: Array<{ title: string; goal: string; bullets: string[]; target_words: number; tags: string[] }>;
   }): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/update-plan`, {
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/update-plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(plan),
@@ -172,51 +208,78 @@ export class APIClient {
   }
 
   static async triggerImages(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/generate-images`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/generate-images`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger images');
   }
 
   static async triggerVideo(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/generate-video`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/generate-video`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger video');
   }
 
   static async triggerPodcast(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/generate-podcast`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/generate-podcast`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger podcast');
   }
 
   static async triggerSocial(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/generate-social`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/generate-social`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger social');
   }
 
   static async triggerQA(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/run-qa`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/run-qa`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger QA');
   }
 
   static async runDeepEval(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/api/jobs/${id}/run-deepeval`, { method: 'POST' });
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/run-deepeval`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger deepeval academic audit');
   }
 
+  static async resumeJob(id: string): Promise<void> {
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/resume`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to resume job');
+  }
+
   static getFileUrl(jobId: string, filename: string): string {
-    return `${API_BASE_URL}/api/files/${jobId}/${filename}`;
+    return withApiKey(`${API_BASE_URL}/api/files/${jobId}/${filename}`);
+  }
+
+  static getExportUrl(jobId: string, format: 'pdf' | 'docx' | 'html'): string {
+    return withApiKey(`${API_BASE_URL}/api/jobs/${jobId}/export/${format}`);
   }
 }
 
 export class WebSocketClient {
-  private ws: WebSocket | null = null;
+  private ws: (WebSocket & { isClosedByClient?: boolean }) | null = null;
+  private currentJobId: string | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectTimer: any = null;
 
   connect(jobId: string, onMessage: (event: AgentEvent) => void, onDisconnect?: () => void) {
+    // If a socket is already open or opening, mark it as intentionally closed before closing
     if (this.ws) {
+      this.ws.isClosedByClient = true;
       this.ws.close();
+      this.ws = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
 
-    this.ws = new WebSocket(`${WS_BASE_URL}/ws/${jobId}`);
+    this.currentJobId = jobId;
+    const socket = new WebSocket(withApiKey(`${WS_BASE_URL}/ws/${jobId}`)) as (WebSocket & { isClosedByClient?: boolean });
+    socket.isClosedByClient = false;
+    this.ws = socket;
 
-    this.ws.onmessage = (event) => {
+    socket.onopen = () => {
+      this.reconnectAttempts = 0;
+    };
+
+    socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'ping') return; // Ignore keepalive pings
@@ -226,20 +289,40 @@ export class WebSocketClient {
       }
     };
 
-    this.ws.onerror = (err) => {
+    socket.onerror = (err) => {
       console.error('WebSocket error:', err);
     };
 
-    this.ws.onclose = () => {
-      console.log(`WebSocket disconnected for job ${jobId}`);
+    socket.onclose = (event: CloseEvent) => {
+      console.log(`WebSocket disconnected for job ${jobId} (code=${event.code})`);
       if (onDisconnect) onDisconnect();
+
+      // Only attempt reconnection if socket was dropped unexpectedly (NOT clean close 1000/1001)
+      const isCleanClose = event.wasClean || event.code === 1000 || event.code === 1001;
+
+      if (!socket.isClosedByClient && !isCleanClose && this.ws === socket && this.reconnectAttempts < this.maxReconnectAttempts) {
+        const delay = Math.pow(2, this.reconnectAttempts) * 1000;
+        console.log(`Attempting WebSocket reconnection in ${delay}ms for job ${jobId}...`);
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectAttempts++;
+          if (this.currentJobId === jobId) {
+            this.connect(jobId, onMessage, onDisconnect);
+          }
+        }, delay);
+      }
     };
   }
 
   disconnect() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
+      this.ws.isClosedByClient = true;
       this.ws.close();
       this.ws = null;
     }
+    this.currentJobId = null;
   }
 }

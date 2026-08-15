@@ -40,9 +40,9 @@ count collapsing to 200, or QA score dropping below 5).
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -73,24 +73,44 @@ _TOPIC_CASES = _GOLDEN["topics"]
 # Helpers
 # ===========================================================================
 
+# Writer model for the run. Override to compare arms while holding the JUDGE
+# fixed — the in-house G-Eval judge reads LLM_QUALITY_MODEL, not this, so
+# varying only this keeps scores comparable across models:
+#     GOLDEN_MODEL=gpt-4o-mini RUN_GOLDEN_TESTS=1 pytest tests/golden -v -s
+GOLDEN_MODEL = os.getenv("GOLDEN_MODEL", "gpt-5-mini")
+
+
 def _build_initial_state(case: dict) -> dict:
-    """Construct the initial graph state for a single golden topic."""
-    return {
-        "topic":             case["topic"],
-        "as_of":             date.today().isoformat(),
-        "sections":          [],
-        "blog_folder":       str(_GOLDEN_DIR / "_runs" / case["id"]),
-        "target_tone":       case.get("tone", "professional"),
-        "target_keywords":   [],
-        "target_sections":   case.get("sections", 3),
-        "generate_images":   False,   # too slow / expensive for a regression run
-        "generate_qa":       True,
-        "generate_campaign": False,
-        "generate_video":    False,
-        "generate_podcast":  False,
-        "export_formats":    [],
-        "_job_id":           f"golden_{case['id']}",
-    }
+    """Construct the initial graph state for a single golden topic.
+
+    Delegates to the API's build_initial_state() so this harness cannot drift
+    from what the web app actually sends the graph. That drift is not
+    hypothetical — `generate_qa` was missing from the State schema for every
+    web run while this file set it correctly, and the mismatch went unnoticed
+    because these tests were never executed.
+    """
+    from api.background import build_initial_state
+    from api.schemas import GenerationConfig
+
+    config = GenerationConfig(
+        tone=case.get("tone", "professional"),
+        sections=case.get("sections", 3),
+        selected_model=case.get("model", GOLDEN_MODEL),
+        generate_qa=True,
+        # Media generation is slow and expensive; the graph edges it guards are
+        # exercised by unit tests instead.
+        generate_images=False,
+        generate_campaign=False,
+        generate_video=False,
+        generate_podcast=False,
+        export_formats=[],
+    )
+    return build_initial_state(
+        job_id=f"golden_{case['id']}",
+        topic=case["topic"],
+        blog_folder=str(_GOLDEN_DIR / "_runs" / case["id"]),
+        generation_config=config,
+    )
 
 
 def _run_pipeline(case: dict) -> dict[str, Any]:
@@ -118,6 +138,57 @@ def _run_pipeline(case: dict) -> dict[str, Any]:
         pass
 
     return app.get_state(thread).values
+
+
+def _save_run_artifacts(case: dict, final_state: dict[str, Any]) -> Path:
+    """Persist per-run metrics and the QA report next to the run folder.
+
+    The harness previously asserted against in-memory state and saved nothing,
+    so a passing run left no evidence behind. These files are the raw data for
+    the report's results table, and `qa_report.txt` is the artifact that shows
+    the QA agent genuinely executed.
+
+    Writes to tests/golden/_runs/<case_id>/ (gitignored).
+    """
+    run_dir = _GOLDEN_DIR / "_runs" / case["id"]
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    geval = final_state.get("geval_scores") or {}
+    summary = {
+        "case_id": case["id"],
+        "topic": case["topic"],
+        "run_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        # Recorded so the report can state exactly which model produced these
+        # numbers, and so writer-model arms stay distinguishable.
+        "writer_model": case.get("model", GOLDEN_MODEL),
+        "judge_model": os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini"),
+        "tone": case.get("tone", "professional"),
+        "router_mode": final_state.get("mode"),
+        "word_count": len(final_state.get("final", "").split()),
+        "evidence_count": len(final_state.get("evidence", [])),
+        "qa_score": final_state.get("qa_score"),
+        "qa_verdict": final_state.get("qa_verdict"),
+        "qa_critical_issues": sum(
+            1 for i in final_state.get("qa_issues", []) if i.get("severity") == "critical"
+        ),
+        "revision_count": final_state.get("revision_count", 0),
+        "blog_evaluator_score": final_state.get("blog_evaluator_score"),
+        "geval": {
+            dim: (geval.get(dim) or {}).get("score")
+            for dim in ("coherence", "relevance", "accuracy", "tone_alignment")
+        },
+        "geval_overall": geval.get("overall_score"),
+    }
+
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
+    if final_state.get("qa_report"):
+        (run_dir / "qa_report.txt").write_text(final_state["qa_report"], encoding="utf-8")
+    if final_state.get("final"):
+        (run_dir / "blog.md").write_text(final_state["final"], encoding="utf-8")
+
+    return run_dir
 
 
 def _assert_within_bounds(case: dict, final_state: dict[str, Any]) -> list[str]:
@@ -198,16 +269,33 @@ def test_golden_topic(case: dict) -> None:
     """
     final_state = _run_pipeline(case)
 
+    # Save BEFORE asserting: a run that violates a bound is exactly the one
+    # whose artifacts you want to inspect.
+    run_dir = _save_run_artifacts(case, final_state)
+
     # Diagnostic dump — printed when -s is used, stays silent otherwise
     print(
         f"\n[{case['id']}] "
+        f"model={case.get('model', GOLDEN_MODEL)} "
         f"qa={final_state.get('qa_score')} "
         f"eval={final_state.get('blog_evaluator_score')} "
+        f"geval={(final_state.get('geval_scores') or {}).get('overall_score')} "
         f"words={len(final_state.get('final', '').split())} "
         f"evidence={len(final_state.get('evidence', []))} "
         f"verdict={final_state.get('qa_verdict')} "
-        f"mode={final_state.get('mode')}"
+        f"mode={final_state.get('mode')} "
+        f"→ {run_dir}"
     )
+
+    # A null qa_score means the QA agent never ran (the regression that hid
+    # behind the State schema), not that it ran and scored badly. Call it out
+    # distinctly so a real structural break isn't read as a quality dip.
+    if final_state.get("qa_score") is None:
+        pytest.fail(
+            f"'{case['id']}': qa_score is None — the QA agent did not execute. "
+            f"Check that 'generate_qa' is still declared in Graph.state.State "
+            f"(see tests/test_state_schema.py)."
+        )
 
     failures = _assert_within_bounds(case, final_state)
     if failures:

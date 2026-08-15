@@ -3,13 +3,72 @@ import { motion } from 'motion/react';
 import {
   ListOrdered, PlusCircle, Send, Network,
   CheckCircle2, RefreshCw, ShieldAlert, X, Hash,
-  FileText, Film, Podcast
+  FileText, Film, Podcast, Search, Bot,
+  RotateCcw, AlertTriangle, Cpu, Sparkles, Paperclip, ChevronDown, CornerDownLeft, SlidersHorizontal
 } from 'lucide-react';
 import { APIClient, Job, AgentEvent, CreateJobParams, UploadResult, SourceMode } from '../api';
 import { ViewState } from '../types';
 import { PlanEditor } from './PlanEditor';
 import { UploadChip } from './UploadChip';
 import { ProgressTracker } from './ProgressTracker';
+
+function getAgentConfig(agentName: string) {
+  const name = agentName.toLowerCase();
+  if (name.includes('research')) {
+    return {
+      icon: Search,
+      iconColor: 'text-sky-400',
+      bgColor: 'bg-sky-500/10 border-sky-500/20',
+      textColor: 'text-sky-400',
+    };
+  }
+  if (name.includes('orchestrat') || name.includes('plan')) {
+    return {
+      icon: ListOrdered,
+      iconColor: 'text-purple-400',
+      bgColor: 'bg-purple-500/10 border-purple-500/20',
+      textColor: 'text-purple-400',
+    };
+  }
+  if (name.includes('writer') || name.includes('edit')) {
+    return {
+      icon: FileText,
+      iconColor: 'text-amber-400',
+      bgColor: 'bg-amber-500/10 border-amber-500/20',
+      textColor: 'text-amber-400',
+    };
+  }
+  if (name.includes('quality') || name.includes('control') || name.includes('validator') || name.includes('critic')) {
+    return {
+      icon: ShieldAlert,
+      iconColor: 'text-emerald-400',
+      bgColor: 'bg-emerald-500/10 border-emerald-500/20',
+      textColor: 'text-emerald-400',
+    };
+  }
+  if (name.includes('video')) {
+    return {
+      icon: Film,
+      iconColor: 'text-pink-400',
+      bgColor: 'bg-pink-500/10 border-pink-500/20',
+      textColor: 'text-pink-400',
+    };
+  }
+  if (name.includes('audio') || name.includes('podcast')) {
+    return {
+      icon: Podcast,
+      iconColor: 'text-indigo-400',
+      bgColor: 'bg-indigo-500/10 border-indigo-500/20',
+      textColor: 'text-indigo-400',
+    };
+  }
+  return {
+    icon: Bot,
+    iconColor: 'text-base-400',
+    bgColor: 'bg-base-500/10 border-white/6',
+    textColor: 'text-base-300',
+  };
+}
 
 
 const ACCEPTED_UPLOAD_TYPES = '.pdf,.docx,.txt,.md';
@@ -24,13 +83,17 @@ interface ChatViewProps {
   handleApprovePlan:  (jobId: string) => void;
   handleRevisePlan:   (jobId: string, feedback: string) => void;
   handleUpdatePlan:   (jobId: string, plan: any) => void;
+  handleResumeJob?:   (jobId: string) => void;
   tone: string;
   setTone: (t: string) => void;
   sections: number;
   setSections: (s: number) => void;
+  numImages?: number;
+  setNumImages?: (n: number) => void;
   keywordsInput: string;
   setKeywordsInput: (k: string) => void;
   selectedModel: string;
+  openSettings?: () => void;
 }
 
 /* ---------- Hero Feature Cards ---------- */
@@ -65,11 +128,14 @@ const HERO_FEATURES = [
 ] as const;
 
 export function ChatView({
-  currentJob, events, topicError, clearTopicError,
-  handleCreateJob, handleApprovePlan, handleRevisePlan, handleUpdatePlan,
-  tone, setTone, sections, setSections, keywordsInput, setKeywordsInput, selectedModel
+  navTo, currentJob, events, topicError, clearTopicError,
+  handleCreateJob, handleApprovePlan, handleRevisePlan, handleUpdatePlan, handleResumeJob,
+  tone, setTone, sections, setSections, numImages = 0, setNumImages, keywordsInput, setKeywordsInput, selectedModel,
+  openSettings
 }: ChatViewProps) {
   const [topicInput, setTopicInput] = useState('');
+  const [isResuming, setIsResuming] = useState(false);
+  const [isGenerationSettingsOpen, setIsGenerationSettingsOpen] = useState(false);
 
   // Document upload state
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'ready' | 'error'>('idle');
@@ -125,6 +191,8 @@ export function ChatView({
     handleCreateJob({
       topic, tone, sections, keywords,
       generate_podcast: false, generate_video: false, generate_campaign: false,
+      generate_images: numImages > 0,
+      num_images: numImages,
       upload_id,
       source_mode: upload_id ? sourceMode : undefined,
     });
@@ -133,17 +201,24 @@ export function ChatView({
     clearUpload();
   };
 
-
-
-
   const isAwaitingApproval = currentJob?.status === 'awaiting_approval';
   const showHero = !currentJob && events.length === 0;
 
   return (
-    <main className="flex-1 flex flex-col p-6 md:p-8 relative overflow-hidden">
-      <div className="flex-1 overflow-y-auto pr-2 md:pr-4 flex flex-col gap-5 pb-4 scroll-smooth">
+    <main className="flex-1 flex flex-col p-4 md:p-8 relative overflow-y-auto md:overflow-hidden">
+      <div className="md:flex-1 overflow-visible md:overflow-y-auto pr-0 md:pr-4 flex flex-col gap-5 pb-4 scroll-smooth">
         <header className="mb-2 shrink-0 fade-in">
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-base-50 mb-1.5">AI Content Factory</h2>
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-base-50 mb-1.5">
+            {!currentJob
+              ? 'Dashboard'
+              : currentJob.status === 'completed'
+                ? 'Generation Complete'
+                : currentJob.status === 'failed'
+                  ? 'Pipeline Interrupted'
+                  : currentJob.status === 'awaiting_approval'
+                    ? 'Review Outline'
+                    : 'Generating…'}
+          </h2>
           <p className="text-base-400 text-sm flex items-center gap-2.5">
             <span className="font-mono text-[11px] text-base-500">Powered by LangGraph</span>
             {currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed' && (
@@ -164,17 +239,17 @@ export function ChatView({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6 }}
-            className="flex flex-col items-center justify-center py-6 md:py-12 relative"
+            className="flex flex-col items-center justify-center py-3 md:py-12 relative"
           >
             {/* Ambient glow behind heading */}
-            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[400px] h-[200px] bg-accent-500/8 rounded-full blur-[80px] pointer-events-none" />
+            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[400px] h-[200px] bg-accent-500/8 rounded-full blur-[80px] pointer-events-none hidden md:block" />
 
             {/* Version Badge & Active Model */}
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.1, duration: 0.4 }}
-              className="flex items-center gap-2.5 mb-5 relative z-10"
+              className="hidden sm:flex items-center gap-2.5 mb-5 relative z-10"
             >
               <span className="glass-pill px-3 py-1 text-[10px] font-bold text-accent-400 tracking-wider uppercase border border-accent-500/20">
                 Orchestration Engine v2.0
@@ -189,7 +264,7 @@ export function ChatView({
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15, duration: 0.5 }}
-              className="text-4xl md:text-5xl font-extrabold tracking-tight text-center mb-3 text-shimmer relative z-10"
+              className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-center mb-2 md:mb-3 text-shimmer relative z-10"
             >
               Create Something Amazing
             </motion.h3>
@@ -197,13 +272,13 @@ export function ChatView({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.4 }}
-              className="text-base-400 text-center max-w-lg mb-8 text-sm leading-relaxed relative z-10"
+              className="text-base-400 text-center max-w-lg mb-4 md:mb-8 px-2 text-[13px] md:text-sm leading-relaxed relative z-10"
             >
               Enter a topic below and our multi-agent pipeline will research, write, and polish a publication-ready blog — with optional video, podcast, and social campaigns.
             </motion.p>
 
             {/* Feature cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-3xl relative z-10">
+            <div className="hidden md:grid md:grid-cols-3 gap-4 w-full max-w-3xl relative z-10">
               {HERO_FEATURES.map((feat, i) => (
                 <motion.div
                   key={feat.title}
@@ -230,7 +305,69 @@ export function ChatView({
                 </motion.div>
               ))}
             </div>
+
+            {/* Keep templates available on mobile without pushing the prompt below the fold. */}
+            <div className="flex md:hidden flex-wrap justify-center gap-2 w-full relative z-10">
+              {HERO_FEATURES.map((feat) => {
+                const Icon = feat.icon;
+                return (
+                  <button
+                    key={feat.title}
+                    type="button"
+                    onClick={() => {
+                      setTopicInput(feat.sampleTopic);
+                      setTone(feat.sampleTone);
+                      setSections(feat.sampleSections);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/8 bg-base-900/70 px-2.5 py-1.5 text-[11px] font-semibold text-base-300 transition-colors hover:border-accent-500/35 hover:text-accent-400"
+                  >
+                    <Icon className="h-3.5 w-3.5 text-accent-400" />
+                    {feat.title}
+                  </button>
+                );
+              })}
+            </div>
           </motion.div>
+        )}
+
+        {/* -------- Job Controls Banner (Resume Checkpoint & Actions) -------- */}
+        {currentJob && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl glass-panel border border-white/8 backdrop-blur-md mb-2 w-full">
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${
+                currentJob.status === 'completed' ? 'bg-emerald-400' :
+                currentJob.status === 'failed' ? 'bg-signal-error' :
+                currentJob.status === 'awaiting_approval' ? 'bg-amber-400 animate-ping' :
+                'bg-accent-400 animate-pulse'
+              }`} />
+              <span className="text-xs font-bold text-base-100 uppercase tracking-wider">
+                Job #{currentJob.id.slice(0, 8)} — {currentJob.status.replace('_', ' ')}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {(currentJob.status === 'failed' || currentJob.status === 'running') && handleResumeJob && (
+                <button
+                  onClick={() => handleResumeJob(currentJob.id)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent-500/20 text-accent-400 hover:bg-accent-500/30 border border-accent-500/30 transition-all cursor-pointer shadow-sm"
+                  title="Resume pipeline execution from the last saved SQLite checkpoint"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Resume Checkpoint
+                </button>
+              )}
+
+              {currentJob.status === 'completed' && (
+                <button
+                  onClick={() => navTo('content')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 transition-all cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  View Studio Draft
+                </button>
+              )}
+            </div>
+          </div>
         )}
 
         {/* -------- Progress Tracker (when a job is running) -------- */}
@@ -248,36 +385,44 @@ export function ChatView({
           </div>
         )}
 
-        {events.map((event, i) => (
-          <motion.div
-            key={i}
-            className="self-start max-w-3xl flex gap-3 w-full"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: Math.min(i * 0.03, 0.3) }}
-          >
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${event.status === 'error' ? 'bg-signal-error-dim' : 'bg-base-800 border border-white/6'}`}>
-              <Network className={`w-4 h-4 ${event.status === 'error' ? 'text-signal-error' : 'text-accent-400'}`} />
-            </div>
-            <div className="glass-panel p-4 rounded-2xl rounded-tl-sm flex-1">
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className={`font-semibold text-sm ${event.status === 'error' ? 'text-signal-error' : 'text-accent-400'} capitalize`}>{event.agent_name}</span>
-                <span className="text-[11px] text-base-500 font-mono">{new Date(event.timestamp * 1000).toLocaleTimeString()}</span>
+        {events.map((event, i) => {
+          const config = getAgentConfig(event.agent_name);
+          const AgentIcon = config.icon;
+          return (
+            <motion.div
+              key={i}
+              className="self-start max-w-3xl flex gap-3.5 w-full"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: Math.min(i * 0.03, 0.3) }}
+            >
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${config.bgColor}`}>
+                <AgentIcon className={`w-4 h-4 ${config.iconColor}`} />
               </div>
-              <p className="text-base-200 text-sm flex items-center gap-2 leading-relaxed">
-                {event.status === 'error'
-                  ? <span className="text-signal-error font-bold text-xs">ERR</span>
-                  : (event.status === 'working' || event.status === 'started')
-                       && i === events.length - 1
-                       && currentJob?.status !== 'completed'
-                       && currentJob?.status !== 'failed'
-                    ? <RefreshCw className="w-3.5 h-3.5 text-accent-400 animate-spin shrink-0" />
-                    : <CheckCircle2 className="w-4 h-4 text-signal-success shrink-0" />}
-                {event.message}
-              </p>
-            </div>
-          </motion.div>
-        ))}
+              <div className="glass-panel p-4.5 rounded-2xl rounded-tl-sm flex-1 border border-white/5 shadow-sm">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${config.bgColor} ${config.textColor}`}>
+                      {event.agent_name}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-base-500 font-mono">{new Date(event.timestamp * 1000).toLocaleTimeString()}</span>
+                </div>
+                <p className="text-base-200 text-sm flex items-center gap-2.5 leading-relaxed mt-2.5">
+                  {event.status === 'error'
+                    ? <span className="text-signal-error font-bold text-xs shrink-0">ERR</span>
+                    : (event.status === 'working' || event.status === 'started')
+                         && i === events.length - 1
+                         && currentJob?.status !== 'completed'
+                         && currentJob?.status !== 'failed'
+                      ? <RefreshCw className="w-3.5 h-3.5 text-accent-400 animate-spin shrink-0" />
+                      : <CheckCircle2 className="w-4 h-4 text-signal-success shrink-0" />}
+                  <span className="flex-1">{event.message}</span>
+                </p>
+              </div>
+            </motion.div>
+          );
+        })}
 
         {events.length === 0 && currentJob?.status === 'completed' && (
           <div className="self-start max-w-3xl flex gap-3 w-full">
@@ -310,6 +455,90 @@ export function ChatView({
             onRevise={(fb) => handleRevisePlan(currentJob.id, fb)}
             onUpdatePlan={(plan) => handleUpdatePlan(currentJob.id, plan)}
           />
+        )}
+
+        {/* -------- Failed Job Resume Banner -------- */}
+        {currentJob?.status === 'failed' && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+            className="w-full max-w-3xl self-start"
+          >
+            <div className="relative overflow-hidden rounded-2xl border border-signal-error/30 bg-signal-error-dim/20 backdrop-blur-xl shadow-md">
+              {/* Subtle animated glow bar at top */}
+              <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-signal-error/60 to-transparent" />
+
+              <div className="p-5 md:p-6">
+                {/* Header */}
+                <div className="flex items-start gap-3.5 mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-signal-error-dim border border-signal-error/25 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-signal-error" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-base font-bold text-signal-error mb-0.5">Pipeline Interrupted</h4>
+                    <p className="text-sm text-base-300 leading-relaxed">
+                      This job encountered an error and was halted. Your progress is checkpointed — you can resume from exactly where it stopped.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Error Details */}
+                {currentJob.error_message && (
+                  <div className="mb-4 p-3 rounded-xl bg-base-950/60 border border-signal-error/20">
+                    <div className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1.5">Error Details</div>
+                    <p className="text-xs text-signal-error font-mono leading-relaxed break-all font-medium">
+                      {currentJob.error_message}
+                    </p>
+                  </div>
+                )}
+
+                {/* Resume Action */}
+                <div className="flex items-center gap-3">
+                  <motion.button
+                    onClick={async () => {
+                      if (!handleResumeJob || isResuming) return;
+                      setIsResuming(true);
+                      try {
+                        await handleResumeJob(currentJob.id);
+                      } finally {
+                        // Reset after a short delay to allow the UI to update
+                        setTimeout(() => setIsResuming(false), 2000);
+                      }
+                    }}
+                    disabled={isResuming || !handleResumeJob}
+                    className={`resume-btn flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
+                      isResuming
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-wait'
+                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-base-950 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-[0.98]'
+                    }`}
+                    whileHover={!isResuming ? { scale: 1.03 } : undefined}
+                    whileTap={!isResuming ? { scale: 0.97 } : undefined}
+                  >
+                    {isResuming ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Resuming…
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-4 h-4" />
+                        Resume from Checkpoint
+                      </>
+                    )}
+                  </motion.button>
+                  <span className="text-[11px] text-base-500">
+                    Picks up from the last completed step — no work is repeated.
+                  </span>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Show progress tracker for failed jobs too (shows where it stopped) */}
+        {currentJob?.status === 'failed' && events.length > 0 && (
+          <ProgressTracker events={events} jobStatus={currentJob.status} />
         )}
 
 
@@ -348,7 +577,7 @@ export function ChatView({
           )}
 
 
-          <div className="glass-panel rounded-2xl p-4 flex flex-col gap-3 max-w-4xl mx-auto bg-base-900/90">
+          <div className="w-full max-w-4xl mx-auto rounded-3xl p-3.5 bg-base-900/90 dark:bg-base-950/90 backdrop-blur-2xl border border-base-750/80 hover:border-accent-500/40 focus-within:border-accent-500/60 focus-within:shadow-[0_8px_35px_rgba(245,158,11,0.14)] shadow-2xl transition-all duration-300 flex flex-col gap-2.5">
 
             {uploadStatus !== 'idle' && (
               <UploadChip
@@ -370,53 +599,155 @@ export function ChatView({
               onChange={e => { handleFileSelected(e.target.files?.[0]); }}
             />
 
-            <div className="flex items-end gap-2 bg-base-800 rounded-xl p-2 border border-white/6 focus-within:border-accent-500/30 transition-colors">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadStatus === 'uploading'}
-                title="Attach a document (PDF, DOCX, TXT, MD)"
-                className={`p-2.5 transition-colors hidden sm:block rounded-lg ${
-                  uploadStatus === 'ready'
-                    ? 'text-accent-400 bg-accent-500/10 hover:bg-accent-500/15'
-                    : 'text-base-500 hover:text-accent-400 hover:bg-white/3'
-                } ${uploadStatus === 'uploading' ? 'opacity-50 cursor-wait' : ''}`}
-              >
-                <PlusCircle className="w-5 h-5" />
-              </button>
+            {/* Prompt Textarea */}
+            <div className="w-full px-1">
               <textarea
-                className="flex-1 bg-transparent border-none text-base-100 focus:ring-0 resize-none py-2.5 px-2 placeholder-base-500 text-sm h-[44px] focus:outline-none leading-relaxed"
+                className="w-full bg-transparent border-none text-base-100 placeholder-base-400/70 text-base font-medium min-h-[52px] max-h-[180px] resize-none focus:outline-none focus:ring-0 leading-relaxed font-sans"
                 placeholder={
                   uploadStatus === 'ready' && sourceMode === 'auto_topic'
                     ? (uploadResult?.derived_topic
                         ? `Auto-topic ready — press Send (or override: "${uploadResult.derived_topic}")`
                         : 'Auto-topic mode — enter or override the title...')
-                    : 'Enter a topic to generate a new blog...'
+                    : 'Enter a topic to generate a publication-ready blog...'
                 }
                 value={topicInput}
                 onChange={e => setTopicInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitJob(); } }}
               />
-              <motion.button
-                onClick={() => submitJob()}
-                disabled={
-                  uploadStatus === 'uploading'
-                  || (!topicInput.trim()
-                      && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic))
-                }
-                className={`btn-primary w-10 h-10 rounded-xl flex items-center justify-center shrink-0 group ${
-                  (uploadStatus === 'uploading'
-                   || (!topicInput.trim()
-                       && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic)))
-                    ? 'opacity-40 cursor-not-allowed shadow-none! transform-none!'
-                    : ''
-                }`}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Send className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-              </motion.button>
             </div>
+
+            <div className="border-t border-base-800/80 pt-2.5 px-1">
+              <button
+                type="button"
+                onClick={() => setIsGenerationSettingsOpen(open => !open)}
+                aria-expanded={isGenerationSettingsOpen}
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold text-base-400 transition-colors hover:bg-white/5 hover:text-accent-400"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                Generation settings
+                <span className="text-[10px] font-normal text-base-500">{tone} · {sections} sections · {numImages} images</span>
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isGenerationSettingsOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isGenerationSettingsOpen && (
+                <div className="mt-2 grid gap-3 rounded-xl border border-white/6 bg-base-950/35 p-3 sm:grid-cols-2">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+                    Tone
+                    <select
+                      value={tone}
+                      onChange={(e) => setTone(e.target.value)}
+                      className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-2 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+                    >
+                      <option value="professional">Professional</option>
+                      <option value="conversational">Conversational</option>
+                      <option value="technical">Technical</option>
+                      <option value="educational">Educational</option>
+                      <option value="persuasive">Persuasive</option>
+                      <option value="inspirational">Inspirational</option>
+                    </select>
+                  </label>
+
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+                    Target keywords
+                    <input
+                      value={keywordsInput}
+                      onChange={(e) => setKeywordsInput(e.target.value)}
+                      placeholder="e.g. AI agents, content strategy"
+                      className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-2 text-xs font-medium normal-case tracking-normal text-base-200 placeholder:text-base-600 focus:border-accent-500/50 focus:outline-none"
+                    />
+                  </label>
+
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+                    <span className="flex justify-between"><span>Body sections</span><span className="text-accent-400">{sections}</span></span>
+                    <input
+                      type="range"
+                      min={2}
+                      max={6}
+                      value={sections}
+                      onChange={(e) => setSections(Number(e.target.value))}
+                      className="mt-3 w-full cursor-pointer accent-accent-500"
+                    />
+                  </label>
+
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+                    <span className="flex justify-between"><span>AI images</span><span className="text-accent-400">{numImages}</span></span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={5}
+                      value={numImages}
+                      onChange={(e) => setNumImages?.(Number(e.target.value))}
+                      className="mt-3 w-full cursor-pointer accent-accent-500"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+
+            {/* Control Toolbar */}
+            <div className="flex items-center justify-between pt-2.5 px-1">
+              {/* Left Side Tools: Attach Doc + Model Selector */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadStatus === 'uploading'}
+                  title="Attach a document (PDF, DOCX, TXT, MD)"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
+                    uploadStatus === 'ready'
+                      ? 'text-accent-400 bg-accent-500/15 border border-accent-500/30'
+                      : 'text-base-300 hover:text-accent-400 bg-base-800/80 hover:bg-base-750 border border-base-700/60 hover:border-accent-500/30'
+                  } ${uploadStatus === 'uploading' ? 'opacity-50 cursor-wait' : ''}`}
+                >
+                  <Paperclip className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Attach Doc</span>
+                </button>
+
+                {openSettings && (
+                  <button
+                    type="button"
+                    onClick={openSettings}
+                    title="Change Foundation LLM"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent-500/10 hover:bg-accent-500/20 border border-accent-500/25 hover:border-accent-500/50 text-accent-400 text-xs font-mono font-bold transition-all shadow-sm group"
+                  >
+                    <Cpu className="w-3.5 h-3.5 text-accent-400 group-hover:rotate-12 transition-transform" />
+                    <span>{selectedModel}</span>
+                    <ChevronDown className="w-3 h-3 text-accent-400/70" />
+                  </button>
+                )}
+              </div>
+
+              {/* Right Side Tools: Shortcut Hint + Send Button */}
+              <div className="flex items-center gap-3">
+                <span className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-base-400">
+                  <span>Multi-agent synthesis</span>
+                  <span className="opacity-40">•</span>
+                  <span>Press <kbd className="px-1.5 py-0.5 rounded-md bg-base-800 border border-base-700 text-[10px] text-base-300 font-sans shadow-inner">Enter ↵</kbd></span>
+                </span>
+
+                <motion.button
+                  onClick={() => submitJob()}
+                  disabled={
+                    uploadStatus === 'uploading'
+                    || (!topicInput.trim()
+                        && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic))
+                  }
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition-all ${
+                    (uploadStatus === 'uploading'
+                     || (!topicInput.trim()
+                         && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic)))
+                      ? 'bg-base-800 text-base-500 border border-base-700 cursor-not-allowed shadow-none'
+                      : 'bg-gradient-to-r from-accent-500 via-amber-500 to-accent-600 hover:from-accent-400 hover:to-accent-500 text-base-950 shadow-accent-500/25 active:scale-95'
+                  }`}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  <span>Generate</span>
+                  <Send className="w-3.5 h-3.5" />
+                </motion.button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

@@ -5,4 +5,4 @@
  * App.tsx and the sub-components in components/.
  */
 
-export type ViewState = 'chat' | 'content';
+export type ViewState = 'graph' | 'chat' | 'content';

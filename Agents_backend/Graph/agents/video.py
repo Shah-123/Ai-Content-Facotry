@@ -14,12 +14,10 @@ Improvements over the original:
     3. Hook title card       — the first 2.5 seconds show the blog title as an
                                animated pop-in overlay with a dark scrim, grabbing
                                attention before the main content starts.
-    4. Crossfade transitions — a 0.3-second crossfade dissolve is inserted between
-                               every clip so cuts feel smooth rather than jarring.
-    5. Dark gradient overlay — a semi-transparent gradient at the bottom of every
+    4. Dark gradient overlay — a semi-transparent gradient at the bottom of every
                                frame ensures caption text is always readable over
                                any background footage.
-    6. Progress bar          — a thin progress bar at the very top of the frame
+    5. Progress bar          — a thin progress bar at the very top of the frame
                                fills left-to-right over the video's duration, giving
                                the viewer a visual cue about remaining time.
 
@@ -85,9 +83,6 @@ PROGRESS_BAR_COLOR = (255, 255, 255, 220)  # white, slightly transparent
 HOOK_DURATION   = 2.5     # seconds the hook title card is shown
 HOOK_FONT_SIZE  = 80
 HOOK_SUB_SIZE   = 48
-
-# Crossfade
-CROSSFADE_DURATION = 0.3  # seconds
 
 # TTS retry
 _TTS_MAX_ATTEMPTS = 5
@@ -224,6 +219,52 @@ def fetch_pexels_video(query: str, download_dir: str, index: int) -> Optional[st
         return None
 
 
+def create_synthetic_background_clip(duration: float, output_path: str) -> Optional[str]:
+    """
+    Generates a dark ambient gradient MP4 clip (1080x1920) as a fallback
+    when Pexels API key is missing or stock clip downloads fail.
+    """
+    try:
+        try:
+            from moviepy import VideoClip
+        except (ImportError, AttributeError):
+            from moviepy.video.VideoClip import VideoClip
+    except ImportError:
+        logger.error("MoviePy VideoClip import failed for synthetic background.")
+        return None
+
+    def make_frame(t):
+        w, h = SHORTS_W, SHORTS_H
+        y = np.linspace(0, 1, h, dtype=np.float32)[:, None]
+        phase = (t / max(duration, 1.0)) * 2 * np.pi
+        
+        r = (22 + 12 * np.sin(phase) + y * 8).astype(np.uint8)
+        g = (18 + 14 * np.cos(phase) + y * 18).astype(np.uint8)
+        b = (48 + 24 * np.sin(phase + np.pi / 2) + y * 42).astype(np.uint8)
+
+        frame = np.dstack([
+            np.broadcast_to(r, (h, w)),
+            np.broadcast_to(g, (h, w)),
+            np.broadcast_to(b, (h, w))
+        ])
+        return frame
+
+    try:
+        clip = VideoClip(make_frame, duration=duration)
+        clip.write_videofile(
+            output_path,
+            fps=30,
+            codec="libx264",
+            preset="ultrafast",
+            logger=None
+        )
+        clip.close()
+        return output_path
+    except Exception as e:
+        logger.error(f"Failed to create synthetic background clip: {e}")
+        return None
+
+
 # ============================================================================
 # TTS — Gemini
 # ============================================================================
@@ -273,7 +314,8 @@ def generate_tts_voiceover(text: str, voice: str = "Puck") -> Optional[str]:
                     break
 
             if audio_bytes:
-                tmp = tempfile.mktemp(suffix=".wav")
+                fd, tmp = tempfile.mkstemp(suffix=".wav")
+                os.close(fd)
                 save_pcm_as_wav(audio_bytes, tmp)
                 logger.info(f"   ✅ TTS succeeded on attempt {attempt}.")
                 return tmp
@@ -300,15 +342,51 @@ def generate_tts_voiceover(text: str, voice: str = "Puck") -> Optional[str]:
 
 def get_word_timestamps(audio_path: str, model_size: str = "tiny") -> List[dict]:
     """
-    Runs openai-whisper locally to get per-word timestamps.
-    Returns a list of {"word": str, "start": float, "end": float}.
-
-    Falls back to evenly-spaced fake timestamps if whisper is not installed,
-    so the rest of the pipeline still works without the dependency.
+    Transcribes audio using OpenAI's API to get per-word timestamps.
+    Falls back to local whisper or evenly-spaced fake timestamps if API fails or key is missing.
     """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        try:
+            from openai import OpenAI
+            logger.info("   🎙️ Transcribing audio via OpenAI Whisper API for word timestamps...")
+            client = OpenAI(api_key=api_key)
+            with open(audio_path, "rb") as audio_file:
+                response = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="verbose_json",
+                    timestamp_granularities=["word"]
+                )
+            
+            words = []
+            # Check for words in verbose_json response model or dictionary
+            if hasattr(response, "words") and response.words:
+                for w in response.words:
+                    w_dict = w if isinstance(w, dict) else getattr(w, "__dict__", w)
+                    words.append({
+                        "word": w_dict.get("word", "").strip(),
+                        "start": float(w_dict.get("start", 0.0)),
+                        "end": float(w_dict.get("end", 0.0)),
+                    })
+            elif isinstance(response, dict) and "words" in response:
+                for w in response["words"]:
+                    words.append({
+                        "word": w.get("word", "").strip(),
+                        "start": float(w.get("start", 0.0)),
+                        "end": float(w.get("end", 0.0)),
+                    })
+            
+            if words:
+                logger.info(f"   ✅ OpenAI API found {len(words)} word timestamps.")
+                return words
+        except Exception as api_err:
+            logger.warning(f"   ⚠️ OpenAI API Whisper transcription failed: {api_err}. Trying local fallback...")
+
+    # Local fallback
     try:
         import whisper
-        logger.info(f"   🎙️ Transcribing audio for word timestamps (whisper model: {model_size})...")
+        logger.info(f"   🎙️ Local Fallback: Transcribing audio (whisper model: {model_size})...")
         model = whisper.load_model(model_size)   # fast; swap for "base" for accuracy
         result = model.transcribe(audio_path, word_timestamps=True)
 
@@ -320,19 +398,18 @@ def get_word_timestamps(audio_path: str, model_size: str = "tiny") -> List[dict]
                     "start": w["start"],
                     "end":   w["end"],
                 })
-        logger.info(f"   ✅ Whisper found {len(words)} word timestamps.")
+        logger.info(f"   ✅ Local Whisper found {len(words)} word timestamps.")
         return words
 
     except ImportError:
         logger.warning(
             "   ⚠️ openai-whisper not installed. "
-            "Falling back to evenly-spaced captions. "
-            "Run: pip install openai-whisper"
+            "Falling back to evenly-spaced captions."
         )
         return []  # caller will build fallback
 
     except Exception as e:
-        logger.warning(f"   ⚠️ Whisper transcription failed: {e}. Using fallback captions.")
+        logger.warning(f"   ⚠️ Local Whisper transcription failed: {e}. Using fallback captions.")
         return []
 
 
@@ -440,13 +517,12 @@ def draw_gradient_overlay(frame_array: np.ndarray) -> np.ndarray:
     grad_start = int(h * 0.60)   # gradient begins 60% down
     grad_end   = h
 
-    # Build a 1-D alpha ramp from 0 at top to 0.75 at bottom
+    # Build a 1-D alpha ramp from 0 at top to 0.75 at bottom, then darken the
+    # strip in one broadcast multiply (was a per-row Python loop, ~768 iters ×
+    # every frame). factor shape (rows,1,1) broadcasts over (rows, W, 3).
     ramp = np.linspace(0, 0.75, grad_end - grad_start, dtype=np.float32)
-
-    # Apply ramp: darken the frame in that strip
-    strip = frame_array[grad_start:grad_end].astype(np.float32)
-    for i, alpha in enumerate(ramp):
-        strip[i] = strip[i] * (1 - alpha)
+    factor = (1.0 - ramp)[:, None, None]
+    strip = frame_array[grad_start:grad_end].astype(np.float32) * factor
 
     frame_array[grad_start:grad_end] = np.clip(strip, 0, 255).astype(np.uint8)
     return frame_array
@@ -609,48 +685,6 @@ def make_portrait_frame(frame_array: np.ndarray) -> np.ndarray:
 
 
 # ============================================================================
-# CROSSFADE HELPER
-# ============================================================================
-
-def crossfade_clips(clips: list, duration: float = CROSSFADE_DURATION) -> list:
-    """
-    Inserts a crossfade between consecutive clips by trimming the end of
-    clip[i] and the start of clip[i+1] by `duration` seconds and overlapping.
-
-    Uses moviepy's CompositeVideoClip to blend the transition region.
-    Returns a list of clips that can be concatenated normally — the crossfade
-    region is embedded as a composite clip inserted between each pair.
-    """
-    try:
-        from moviepy.video.compositing import CompositeVideoClip
-        from moviepy.video.fx import FadeOut, FadeIn
-    except ImportError:
-        logger.warning("moviepy fx unavailable — skipping crossfades.")
-        return clips
-
-    if len(clips) <= 1:
-        return clips
-
-    result = []
-    for i, clip in enumerate(clips):
-        if i < len(clips) - 1:
-            # Apply fadeout to end of this clip
-            try:
-                faded = clip.with_effects([FadeOut(duration)])
-                result.append(faded)
-            except Exception:
-                result.append(clip)
-        else:
-            try:
-                faded = clip.with_effects([FadeIn(duration)])
-                result.append(faded)
-            except Exception:
-                result.append(clip)
-
-    return result
-
-
-# ============================================================================
 # BRIEF BUILDER
 # ============================================================================
 
@@ -727,11 +761,6 @@ def composite_shorts_video(
             clip      = clip.subclipped(0, dur)
 
             # Re-render every frame as portrait
-            def _make_portrait_maker(c):
-                def _process(get_frame, t):
-                    return make_portrait_frame(get_frame(t))
-                return _process
-
             clip = clip.image_transform(
                 lambda frame: make_portrait_frame(frame)
             )
@@ -745,12 +774,10 @@ def composite_shorts_video(
         return False
 
     # ------------------------------------------------------------------
-    # 2. Crossfade transitions
-    # ------------------------------------------------------------------
-    video_clips = crossfade_clips(video_clips, CROSSFADE_DURATION)
-
-    # ------------------------------------------------------------------
-    # 3. Concatenate + loop to match audio duration
+    # 2. Concatenate + loop to match audio duration
+    #    (clips hard-cut; the old "crossfade" only dipped to black and was
+    #     removed. ponytail: re-add a real crossfade via CrossFadeIn +
+    #     concatenate(padding=-d) if smooth dissolves are actually wanted.)
     # ------------------------------------------------------------------
     try:
         combined = concatenate_videoclips(video_clips, method="compose")
@@ -897,7 +924,7 @@ def video_generator_node(state: State) -> dict:
     brief = _build_voiceover_brief(blog_content, topic)
 
     _emit(_job(state), "video", "working", "Writing voiceover script...")
-    text_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+    text_llm = ChatOpenAI(model="gpt-5-mini", temperature=0.7)
     response = text_llm.invoke([
         SystemMessage(content=VOICEOVER_SYSTEM_PROMPT),
         HumanMessage(content=f"TOPIC: {topic}\n\nBLOG BRIEF:\n{brief}"),
@@ -977,8 +1004,16 @@ def video_generator_node(state: State) -> dict:
             downloaded.append(fallback)
 
     if not downloaded:
-        logger.error("No stock clips available. Aborting.")
-        _emit(_job(state), "video", "error", "No stock footage downloaded.")
+        logger.info("   🎨 Pexels unavailable — generating procedural ambient background clip...")
+        _emit(_job(state), "video", "working", "Generating ambient background animation...")
+        synthetic_path = os.path.join(temp_dir, "synthetic_bg.mp4")
+        fallback_clip = create_synthetic_background_clip(audio_dur + 2.0, synthetic_path)
+        if fallback_clip:
+            downloaded.append(fallback_clip)
+
+    if not downloaded:
+        logger.error("No video footage available. Aborting.")
+        _emit(_job(state), "video", "error", "No stock footage or background clip available.")
         _cleanup()
         return {"video_path": None}
 

@@ -75,20 +75,20 @@ graph TD
 
 | Agent Node | Core LLM Model | Code Implementation | Primary Responsibility & Logic |
 | :--- | :--- | :--- | :--- |
-| **Topic Guard** | `gpt-4o-mini` | [topic_guard.py](topic_guard.py) | Sanitizes topic inputs, flags unsafe topics, and recommends corrections before running the graph. |
-| **Router** | `gpt-4o-mini` | [routing.py](routing.py) | Analyzes the prompt and decides whether to fetch online research via Tavily or use a closed-book generation approach. |
-| **Researcher** | `gpt-4o-mini` + Tavily | [research.py](research.py) | Generates query strings, scrapes web search results, and parses findings into structured evidence. |
+| **Topic Guard** | `gpt-5-mini` | [topic_guard.py](topic_guard.py) | Sanitizes topic inputs, flags unsafe topics, and recommends corrections before running the graph. |
+| **Router** | `gpt-5-mini` | [routing.py](routing.py) | Analyzes the prompt and decides whether to fetch online research via Tavily or use a closed-book generation approach. |
+| **Researcher** | `gpt-5-mini` + Tavily | [research.py](research.py) | Generates query strings, scrapes web search results, and parses findings into structured evidence. |
 | **Ingest / RAG** | `text-embedding-3-small` | [document_ingest.py](document_ingest.py) | Performs semantic chunking and embedding generation on user documents. Dynamically retrieves relevant chunks for grounding. |
-| **Orchestrator** | `gpt-4o-mini` | [orchestrator.py](orchestrator.py) | Creates the global blog structure and assigns evidence records to matching sections. |
-| **Worker (xN)** | `gpt-4o-mini` | [workers.py](workers.py) | Writes assigned sections in parallel. |
-| **Reducer** | `gpt-4o-mini` | [workers.py](workers.py) | Combines sections and identifies paragraph locations for image placements. |
-| **Quality Control** | `gpt-4o-mini` | [quality_control.py](quality_control.py) | Compares the blog draft against evidence, flagging inaccuracies or logical gaps. |
-| **Revision** | `gpt-4o-mini` | [revision.py](frevision.py) | Revises drafts to address issues raised by the Quality Control agent. |
-| **SEO Optimizer** | `gpt-4o-mini` | [keyword_optimizer.py](keyword_optimizer.py) | Integrates target keywords naturally into headers and body text. |
-| **Campaign Gen** | `gpt-4o-mini` | [campaign.py](campaign.py) | Creates promotional materials like emails, landing pages, LinkedIn posts, and Twitter threads. |
+| **Orchestrator** | `gpt-5-mini` | [orchestrator.py](orchestrator.py) | Creates the global blog structure and assigns evidence records to matching sections. |
+| **Worker (xN)** | `gpt-5-mini` | [workers.py](workers.py) | Writes assigned sections in parallel. |
+| **Reducer** | `gpt-5-mini` | [workers.py](workers.py) | Combines sections and identifies paragraph locations for image placements. |
+| **Quality Control** | `gpt-5-mini` | [quality_control.py](quality_control.py) | Compares the blog draft against evidence, flagging inaccuracies or logical gaps. |
+| **Revision** | `gpt-5-mini` | [revision.py](frevision.py) | Revises drafts to address issues raised by the Quality Control agent. |
+| **SEO Optimizer** | `gpt-5-mini` | [keyword_optimizer.py](keyword_optimizer.py) | Integrates target keywords naturally into headers and body text. |
+| **Campaign Gen** | `gpt-5-mini` | [campaign.py](campaign.py) | Creates promotional materials like emails, landing pages, LinkedIn posts, and Twitter threads. |
 | **Podcast Studio** | `Gemini 2.5 Flash` | [podcast_studio.py](podcast_studio.py) | Generates a 2-3 minute audio podcast discussing the post using Gemini's native audio modality. |
-| **Video Gen** | `gpt-4o-mini` + MoviePy | [video.py](video.py) | Creates an MP4 video complete with stock footage, text-to-speech audio, and synchronized captions. |
-| **Academic Judge** | `gpt-4o` + `deepeval` | [evaluation.py](evaluation.py) | Evaluates quality across academic rubrics using in-house prompts and DeepEval G-Eval. |
+| **Video Gen** | `gpt-5-mini` + MoviePy | [video.py](video.py) | Creates an MP4 video complete with stock footage, text-to-speech audio, and synchronized captions. |
+| **Academic Judge** | `gpt-5-mini` + `deepeval` | [evaluation.py](evaluation.py) | Evaluates quality across academic rubrics using in-house prompts and DeepEval G-Eval. |
 
 ---
 
@@ -102,9 +102,9 @@ The system evaluates the final content across four academic rubrics, generating 
 4. **Tone Alignment:** Evaluates target tone suitability and flags typical AI-generated phrases.
 
 ### In-House vs. DeepEval Scoring Modes
-The evaluation engine runs both validation workflows in parallel:
-* **Custom Judge Node (`geval_scores`):** Uses structured LLM outputs to rate sections on a **1.0 to 5.0** scale, calculating a weighted average (30% Coherence, 20% Relevance, 30% Accuracy, 20% Tone).
-* **DeepEval G-Eval Node (`deepeval_scores`):** Leverages Confident AI's `deepeval` library to execute Chain-of-Thought grading based on the G-Eval framework (Liu et al. 2023). Scores are normalized to a **0.0 to 1.0** scale.
+The system provides two evaluation workflows:
+* **Custom Judge Node (`geval_scores`):** Runs automatically in the graph. Uses structured LLM outputs to rate sections on a **1.0 to 5.0** scale; the overall score is a code-computed weighted average (30% Coherence, 20% Relevance, 30% Accuracy, 20% Tone).
+* **DeepEval G-Eval Node (`deepeval_scores`):** Runs **on demand** (the "Run Academic Audit" button → `POST /api/jobs/{job_id}/run-deepeval`), not inside the graph, since it makes 4 extra LLM calls per blog. Leverages Confident AI's `deepeval` library to execute Chain-of-Thought grading based on the G-Eval framework (Liu et al. 2023). Scores are normalized to a **0.0 to 1.0** scale.
 
 Both reports are written to the `reports/` folder of each generated blog for academic audit trails.
 
@@ -143,7 +143,7 @@ Both reports are written to the `reports/` folder of each generated blog for aca
   - [main.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/main.tsx) — Main entry point for Vite React.
   - [App.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/App.tsx) — Main application layout, sidebar, and tab routes.
   - [ContentView.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/ContentView.tsx) — Displays rich-text rendering of articles, evaluation scorecards, and SEO details.
-  - [MediaView.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/MediaView.tsx) — Dedicated player for synthesized MP4 videos and WAV podcasts.
+  - [components/PodcastPlayer.tsx](frontend/src/components/PodcastPlayer.tsx) — Player for synthesized podcast audio. Video playback lives in `ContentView`'s media tab. (Replaces the former `MediaView.tsx`.)
   - [api.ts](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/api.ts) — Handles HTTP request routing and WebSocket connections.
   - [index.css](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/index.css) — Custom styling variables and theme configurations.
 * **Reusable UI Components (`frontend/src/components/`):**
@@ -199,6 +199,22 @@ GOOGLE_API_KEY=AIzaSy...
 
 # Pexels API Key — Used for B-roll Video Search
 PEXELS_API_KEY=...
+
+# ── Optional ────────────────────────────────────────────────────────────────
+# Shared-secret API key. When set, all REST routes and the WebSocket require it.
+# The frontend must be given the same value as VITE_API_KEY. Unset = open API.
+# API_KEY=choose-a-long-random-string
+
+# CORS allowlist (comma-separated). Defaults to the local Vite dev origins.
+# ALLOWED_ORIGINS=http://localhost:3000
+
+# Override the default models. LLM_QUALITY_MODEL also sets the G-Eval judge,
+# so keep it fixed when comparing writer models across runs.
+# LLM_FAST_MODEL=gpt-5-mini
+# LLM_QUALITY_MODEL=gpt-5-mini
+
+# PostgreSQL instead of SQLite (set automatically by docker-compose).
+# DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_content_factory
 ```
 
 ---
@@ -269,7 +285,8 @@ blogs/quantum_computing_20260521_103000/
 
 * **In-Memory Checkpointer:** Uses `MemorySaver`/`SqliteSaver`. For high-volume multi-user environments, migrate to a PostgreSQL checkpointer backend.
 * **Single-Speaker Audio:** The Gemini Podcast studio is set to a single-speaker voice (`Aoede`). Future updates could add two-speaker dialogue scripts using two distinct Gemini audio voices.
-* **Authentication:** The current endpoints are open to all origins (`allow_origins=["*"]`). Secure the API using OAuth2 tokens before deploying to public staging servers.
+* **Authentication:** Access control is a single shared secret, not per-user auth. Setting `API_KEY` in `.env` makes every REST route and the WebSocket require it (`X-API-Key` header, or `?api_key=` for browser-initiated requests such as `<img>` and downloads); leaving it unset keeps the API open, which is only appropriate on `localhost`. CORS defaults to the local dev origins and is configurable via `ALLOWED_ORIGINS`. A public deployment needs real per-user authentication (OAuth2) and per-user job ownership — currently any authenticated caller can read and delete every job.
+* **Single-Process Concurrency:** Jobs run in background threads, and HITL approval blocks one of those threads for up to 20 minutes. The approval events are held in an in-process dictionary, so the API must run as a single worker; a multi-worker or multi-replica deployment needs an external task queue and a shared store. The SqliteSaver/PostgresSaver checkpointer is what makes crash recovery possible without one.
 
 ---
 

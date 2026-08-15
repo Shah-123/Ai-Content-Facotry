@@ -51,20 +51,28 @@ The codebase of the AI Content Factory is split into specialized modules, each i
     \item \textbf{SEO Optimizer Module (\texttt{keyword\_optimizer.py}):} Integrates keywords naturally into the text.
     \item \textbf{Podcast Studio Module (\texttt{podcast\_studio.py}):} Calls the Google GenAI SDK to synthesize WAV podcasts.
     \item \textbf{Video Generator Module (\texttt{video.py}):} Searches Pexels, matches B-roll, and uses MoviePy to render subtitled MP4 videos.
+    \item \textbf{Multimedia \& Image Decider Module (\texttt{multimedia.py}):} Plans image placements using detailed visual prompts and synthesizes high-resolution AI visuals via OpenAI (gpt-image-1 / DALL-E) and Pollinations AI (Flux engine).
     \item \textbf{Academic Judge Module (\texttt{evaluation.py}):} Calculates G-Eval scores using DeepEval and custom prompt rubrics.
 \end{itemize}
 
 \section{User Interface Implementation}
 
-The user interface was built using Vite React, Vanilla CSS, and Tailwind CSS. The interface is styled with a modern dark theme to present a professional dashboard experience. The core interactive components of the system are detailed below:
+The user interface was built using Vite React, Vanilla CSS, and Tailwind CSS. The interface is styled with a modern dark theme to present a professional dashboard experience, with dynamic accent token inheritance for light theme mode (`data-theme="light"`). The core interactive components of the system are detailed below:
 
 \begin{itemize}
-    \item \textbf{Sidebar View \& Live Console Stream:} Lists all active and previous content generation runs, displaying their status (completed, running, paused, failed). It features a terminal window that displays WebSocket streams, printing colored logs in real-time as agents execute nodes. Figure \ref{fig:ui_dashboard} illustrates the main dashboard view.
+    \item \textbf{Sidebar View \& Live Console Stream:} Lists all active and previous content generation runs, displaying their status (completed, running, paused, failed). It features a terminal window that displays WebSocket streams, printing colored logs in real-time as agents execute nodes. Additionally, it hosts theme-adaptive range sliders for section counts and image quantities. Figure \ref{fig:ui_dashboard} illustrates the main dashboard view.
     
     \begin{figure}[htbp]
         \centering
-        % TODO: Save your main dashboard screenshot as 'dashboard_main.png' in the BS_FYP_development directory
-        \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{dashboard_main.png}
+        \IfFileExists{Mian UI.png}{%
+            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{Mian UI.png}%
+        }{%
+            \IfFileExists{dashboard_main.png}{%
+                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{dashboard_main.png}%
+            }{%
+                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: Main Dashboard with Live Console]}\\\small(Save screenshot as `Mian UI.png` or `dashboard_main.png` in `BS_FYP_development` folder)\vfil}}%
+            }%
+        }
         \caption{AI Content Factory Main Dashboard with Live Console}
         \label{fig:ui_dashboard}
     \end{figure}
@@ -73,20 +81,68 @@ The user interface was built using Vite React, Vanilla CSS, and Tailwind CSS. Th
     
     \begin{figure}[htbp]
         \centering
-        % TODO: Save your plan editor drawer screenshot as 'plan_editor.png' in the BS_FYP_development directory
-        \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{plan_editor.png}
+        \IfFileExists{Plan editor.png}{%
+            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{Plan editor.png}%
+        }{%
+            \IfFileExists{plan_editor.png}{%
+                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{plan_editor.png}%
+            }{%
+                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: Interactive Plan Editor Drawer]}\\\small(Save screenshot as `Plan editor.png` or `plan_editor.png` in `BS_FYP_development` folder)\vfil}}%
+            }%
+        }
         \caption{Interactive Plan Editor and Outline Approval Drawer}
         \label{fig:ui_plan_editor}
     \end{figure}
 
-    \item \textbf{Media Preview Windows:} Integrates HTML5 players to play and preview synthesized WAV podcasts and MP4 videos directly from local backend execution storage paths. Figure \ref{fig:ui_media_preview} displays the media generation and evaluation results panel.
+    \item \textbf{Media Preview Windows \& Podcast Audio Player:} Integrates HTML5 video and audio players to play and preview synthesized WAV podcasts (generated natively via Gemini GenAI SDK) and MP4 videos, allowing users to verify audio narration quality and download generated media assets directly. Figure \ref{fig:ui_media_preview} displays the synthetic video preview player.
+
+    \item \textbf{Agent Analytics \& Telemetry Dashboard:} Provides a centralized monitoring view for system performance, displaying real-time metrics including total estimated token consumption, API execution cost breakdowns, active worker node counts, section parallelization rates, and individual node execution latency statistics.
+
+    \item \textbf{Quality Audit Scorecard:} Features an interactive DeepEval G-Eval Audit Scorecard panel displaying multi-dimensional quality metrics (Coherence, Relevance, Accuracy, Tone) and radar breakdown charts. Figure \ref{fig:ui_geval_scorecard} illustrates the DeepEval G-Eval audit scorecard, while Figure \ref{fig:ui_image_gallery} shows the Generated Images Gallery.
     
     \begin{figure}[htbp]
         \centering
-        % TODO: Save your media preview screenshot as 'media_preview.png' in the BS_FYP_development directory
-        \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{media_preview.png}
-        \caption{Media Player Previews and DeepEval Scorecard Panel}
+        \IfFileExists{Media Preview.png}{%
+            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{Media Preview.png}%
+        }{%
+            \IfFileExists{media_preview.png}{%
+                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{media_preview.png}%
+            }{%
+                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: Media Player Previews]}\\\small(Save screenshot as `Media Preview.png` or `media_preview.png` in `BS_FYP_development` folder)\vfil}}%
+            }%
+        }
+        \caption{Synthetic Video Player and Media Preview Panel}
         \label{fig:ui_media_preview}
+    \end{figure}
+
+    \begin{figure}[htbp]
+        \centering
+        \IfFileExists{G-Eval Scorecard.png}{%
+            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{G-Eval Scorecard.png}%
+        }{%
+            \IfFileExists{geval_scorecard.png}{%
+                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{geval_scorecard.png}%
+            }{%
+                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: G-Eval Audit Scorecard]}\\\small(Save screenshot as `G-Eval Scorecard.png` or `geval_scorecard.png` in `BS_FYP_development` folder)\vfil}}%
+            }%
+        }
+        \caption{DeepEval G-Eval Audit Scorecard and Multi-Dimensional Quality Metrics Panel}
+        \label{fig:ui_geval_scorecard}
+    \end{figure}
+
+    \begin{figure}[htbp]
+        \centering
+        \IfFileExists{Image Gallery.png}{%
+            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{Image Gallery.png}%
+        }{%
+            \IfFileExists{image_gallery.png}{%
+                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{image_gallery.png}%
+            }{%
+                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: Generated Images Gallery Grid]}\\\small(Save screenshot as `Image Gallery.png` or `image_gallery.png` in `BS_FYP_development` folder)\vfil}}%
+            }%
+        }
+        \caption{Generated Images Gallery Grid and High-Resolution Visual Download Interface}
+        \label{fig:ui_image_gallery}
     \end{figure}
 \end{itemize}
 
@@ -189,6 +245,8 @@ Black-box testing verifies that the system produces the correct output for a giv
 		TC8 & Video Generator node triggered & System searches Pexels, matches B-roll, and renders subtitled MP4 video & Pass \\
 		\hline
 		TC9 & Evaluation node triggered & System generates Coherence, Relevance, Accuracy, and Tone scores & Pass \\
+		\hline
+		TC10 & User requests AI images & System generates 8k visual prompts via gpt-image-1/Flux and displays Gallery in UI & Pass \\
 		\hline
 	\end{tabular}
 }

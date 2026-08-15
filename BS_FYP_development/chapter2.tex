@@ -20,7 +20,7 @@ The manual nature of this workflow makes it slow and expensive, requiring days o
 
 To automate complex workflows, developers are moving toward agentic architectures. Early frameworks, such as LangChain, modeled LLMs as linear chains. However, linear chains cannot handle complex loops or conditional decisions (e.g., repeating a task if editing validation fails).
 
-Frameworks like \textbf{CrewAI} and \textbf{Microsoft AutoGen} introduced multi-agent cooperation. In CrewAI, agents work in a sequential or hierarchical structure. However, CrewAI abstracts the execution logic, making it difficult to define fine-grained state transitions or save execution states mid-run. AutoGen models agents as conversational threads. While flexible, this conversational model is hard to configure for structured, predictable software pipelines, which can lead to infinite loops or off-topic outputs.
+Frameworks like \textbf{CrewAI} and \textbf{Microsoft AutoGen} \cite{wu2023autogen} introduced multi-agent cooperation. In CrewAI, agents work in a sequential or hierarchical structure. However, CrewAI abstracts the execution logic, making it difficult to define fine-grained state transitions or save execution states mid-run. AutoGen models agents as conversational threads. While flexible, this conversational model is hard to configure for structured, predictable software pipelines, which can lead to infinite loops or off-topic outputs.
 
 This research highlights the need for stateful, graph-based agent orchestration, where transitions are modeled as nodes and edges in a defined graph, as detailed in UML modeling principles \cite{seidl2015uml}.
 
@@ -35,7 +35,7 @@ Large Language Models (LLMs), such as OpenAI's GPT models and Google's Gemini, h
 
 \section{Retrieval-Augmented Generation and Grounding}
 
-Retrieval-Augmented Generation (RAG) resolves the hallucination problem by fetching relevant document chunks or search queries before generating text. The LLM uses this retrieved context as grounding evidence, keeping its outputs accurate.
+Retrieval-Augmented Generation (RAG) resolves the hallucination problem by fetching relevant document chunks or search queries before generating text \cite{lewis2020retrieval}. The LLM uses this retrieved context as grounding evidence, keeping its outputs accurate.
 
 Recent research has focused on optimizing RAG pipelines. Query reformulation helps refine search terms, while semantic chunking splits documents based on conceptual similarity rather than arbitrary character limits. However, standard RAG tools typically operate in a single-turn, sequential format. The AI Content Factory addresses these limits by combining RAG with parallel worker agents and an active quality control auditing node that fact-checks drafts against source data.
 
