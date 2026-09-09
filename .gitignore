@@ -46,3 +46,15 @@ Agents_backend/uploads/
 # Node.js
 node_modules/
 
+# FYP Development & Thesis Files
+# The LaTeX SOURCES are tracked — they are small, they are the writing, and
+# they benefit from history. Everything else in the folder is ignored: the
+# diagram exports run to several megabytes and change on every re-export, and
+# main.pdf is a build artefact.
+#
+# Note the syntax: the directory itself must NOT be excluded, only its
+# contents. Git cannot re-include a file whose parent directory is excluded,
+# so `BS_FYP_development/` followed by a negation would silently not work.
+BS_FYP_development/*
+!BS_FYP_development/*.tex
+!BS_FYP_development/*.bib
