@@ -386,6 +386,14 @@ def get_embeddings_model():
     """
     from langchain_openai import OpenAIEmbeddings
     from .utils import _REQUEST_TIMEOUT, _MAX_RETRIES
+
+    # NOT metered by usage.py. OpenAIEmbeddings does not accept `callbacks`:
+    # passing it does not raise, it silently moves the value into
+    # `model_kwargs`, which is then sent to the API as a request parameter.
+    # Embedding spend is therefore excluded from the reported cost. At
+    # $0.02/1M tokens, a 200-page upload contributes well under a cent against
+    # a run costing tens of cents, so the totals are a close lower bound —
+    # but say "chat completions" rather than "all API calls" when reporting.
     return OpenAIEmbeddings(
         model="text-embedding-3-small",
         timeout=_REQUEST_TIMEOUT,

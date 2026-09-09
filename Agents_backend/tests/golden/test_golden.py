@@ -136,7 +136,15 @@ def _run_pipeline(case: dict) -> dict[str, Any]:
     from main import build_graph
     import uuid as _uuid
 
+    import usage
+
     _run_dir(case["id"]).mkdir(parents=True, exist_ok=True)
+
+    # Token accounting baseline. Taken here rather than via a contextvar because
+    # LangGraph dispatches the section writers to worker threads, which
+    # contextvar-based accounting does not follow — and those writers are the
+    # bulk of a run's spend.
+    usage_before = usage.snapshot()
 
     app = build_graph()
     thread = {"configurable": {"thread_id": f"golden_{_uuid.uuid4().hex[:12]}"}}
@@ -151,7 +159,11 @@ def _run_pipeline(case: dict) -> dict[str, Any]:
     for _ in app.stream(None, thread, stream_mode="values", recursion_limit=150):
         pass
 
-    return app.get_state(thread).values
+    values = dict(app.get_state(thread).values)
+    # Attached under a private key so it reaches _save_run_artifacts without
+    # being declared in the graph State (LangGraph would drop it anyway).
+    values["_usage"] = usage.delta(usage_before)
+    return values
 
 
 def _save_run_artifacts(case: dict, final_state: dict[str, Any]) -> Path:
@@ -211,6 +223,8 @@ def _save_run_artifacts(case: dict, final_state: dict[str, Any]) -> Path:
         "geval_overall": geval.get("overall_score"),
         # Ablation dependent variables (deterministic, no LLM involved).
         **article_metrics(final_md),
+        # Token counts and estimated cost for this run (see usage.py).
+        "usage": final_state.get("_usage", {}),
     }
 
     (run_dir / "summary.json").write_text(

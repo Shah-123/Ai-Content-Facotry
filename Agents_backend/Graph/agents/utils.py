@@ -7,6 +7,12 @@ load_dotenv()
 
 from langchain_openai import ChatOpenAI
 from event_bus import emit as event_emit
+from usage import UsageCallback
+
+# One shared callback records token usage for every completion, including
+# calls made through .with_structured_output(). Attaching it here means no
+# call site needs to know about accounting. See usage.py.
+_usage_cb = UsageCallback()
 
 logger = logging.getLogger("blog_pipeline")
 if not logger.handlers:
@@ -48,7 +54,8 @@ def get_llm(state: dict = None, temperature: float = 0.0) -> ChatOpenAI:
                 f"OpenAI clients. Falling back to '{model_name}'."
             )
     return ChatOpenAI(model=model_name, temperature=temperature,
-                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
+                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
+                      callbacks=[_usage_cb])
 
 _FAST_MODEL = os.getenv("LLM_FAST_MODEL", "gpt-5-mini")
 _QUALITY_MODEL = os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini")
@@ -107,15 +114,19 @@ _MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 # tests/test_evaluation.py::TestTemperatureIsInertOnReasoningModels guards this
 # so the finding is not silently rediscovered.
 llm_fast = ChatOpenAI(model=_FAST_MODEL, temperature=0,
-                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
+                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
+                      callbacks=[_usage_cb])
 llm_quality = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.1,
-                         timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
+                         timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
+                      callbacks=[_usage_cb])
 llm_judge = ChatOpenAI(model=_JUDGE_MODEL, temperature=0,
-                       timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
+                       timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
+                      callbacks=[_usage_cb])
 # Planner LLM uses higher temperature so blog outlines vary across runs
 # instead of converging on the same headings for the same topic.
 llm_planner = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.7,
-                         timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
+                         timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
+                      callbacks=[_usage_cb])
 
 # Backward compat alias
 llm = llm_fast

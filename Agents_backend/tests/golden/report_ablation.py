@@ -89,6 +89,21 @@ def main() -> int:
         print(f"{name:<28}{m['assigned']:>13.3f}{m['full_pool']:>12.3f}"
               f"{m['delta']:>+10.3f}{pct:>10}")
 
+    # Cost is measured, not modelled — report it with n, and as an estimate.
+    runs_with_usage = [r for r in on + off if r.get("usage", {}).get("total")]
+    if runs_with_usage:
+        print("\nToken usage and estimated cost (chat completions only)")
+        print("-" * 72)
+        print(f"{'case':<26}{'arm':<11}{'calls':>7}{'tokens':>10}{'cost USD':>11}")
+        costs = []
+        for row in sorted(runs_with_usage, key=lambda r: (r["case_id"], r.get("arm", ""))):
+            t = row["usage"]["total"]
+            costs.append(t["cost_usd"])
+            print(f"{row['case_id'][:25]:<26}{row.get('arm','?'):<11}"
+                  f"{t['calls']:>7}{t['total_tokens']:>10,}{t['cost_usd']:>11.4f}")
+        print(f"{'MEAN':<37}{'':>7}{'':>10}{sum(costs)/len(costs):>11.4f}")
+        print(f"  n = {len(costs)} run(s). Excludes embeddings (see usage.py).")
+
     print("\nLaTeX table body for the results chapter")
     print("-" * 72)
     label = {

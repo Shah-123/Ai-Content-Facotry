@@ -102,3 +102,102 @@ class TestRequestTimeoutsAreConfigured:
             "these construct ChatOpenAI directly and so inherit the SDK's "
             "600s default; use get_llm() instead:\n  " + "\n  ".join(offenders)
         )
+
+
+class TestUsageAccounting:
+    """Token/cost accounting must be accurate, thread-safe, and never fatal.
+
+    The project previously had no instrumentation at all, so cost and latency
+    claims could not be defended and were removed from the thesis. These pin the
+    behaviour the replacement numbers will rest on.
+    """
+
+    def test_self_check_passes(self):
+        import usage
+
+        usage.demo()  # asserts internally; raises on any regression
+
+    def test_callback_is_attached_to_every_client(self):
+        from Graph.agents import utils
+        from usage import UsageCallback
+
+        for name in ("llm_fast", "llm_quality", "llm_judge", "llm_planner"):
+            cbs = getattr(utils, name).callbacks or []
+            assert any(isinstance(c, UsageCallback) for c in cbs), f"{name} is unmetered"
+
+        cbs = utils.get_llm().callbacks or []
+        assert any(isinstance(c, UsageCallback) for c in cbs)
+
+    def test_embeddings_client_must_not_be_given_callbacks(self):
+        """OpenAIEmbeddings has no `callbacks` field and does not reject one.
+
+        Passing it does not raise — langchain-openai moves the value into
+        `model_kwargs`, which is then serialised into the API request. That
+        breaks every embedding call, so embedding spend is deliberately
+        excluded from the usage totals rather than metered this way.
+        """
+        import inspect
+        from langchain_openai import OpenAIEmbeddings
+        from Graph.agents import document_ingest
+
+        assert "callbacks" not in OpenAIEmbeddings.model_fields, (
+            "OpenAIEmbeddings now supports callbacks — embeddings could be metered"
+        )
+        src = inspect.getsource(document_ingest.get_embeddings_model)
+        code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+        assert "callbacks" not in code, (
+            "callbacks passed to OpenAIEmbeddings would be forwarded to the API "
+            "as a request parameter and break document ingestion"
+        )
+
+    def test_counts_survive_worker_threads(self):
+        """LangGraph fans section writers out to threads; those must be counted.
+
+        This is why accounting uses a locked global plus snapshot/delta rather
+        than a contextvar — a contextvar does not follow execution into threads
+        it did not create, which would silently omit the bulk of a run's spend.
+        """
+        import threading
+        import usage
+        from langchain_core.messages import AIMessage
+        from langchain_core.outputs import ChatGeneration, LLMResult
+
+        usage.reset()
+        cb = usage.UsageCallback()
+
+        def emit_one():
+            msg = AIMessage(
+                content="x",
+                usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            )
+            cb.on_llm_end(
+                LLMResult(
+                    generations=[[ChatGeneration(message=msg)]],
+                    llm_output={"model_name": "gpt-5-mini"},
+                )
+            )
+
+        before = usage.snapshot()
+        threads = [threading.Thread(target=emit_one) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        d = usage.delta(before)
+        assert d["total"]["calls"] == 20, "lost calls made on worker threads"
+        assert d["total"]["input_tokens"] == 2000
+        usage.reset()
+
+    def test_accounting_failure_never_breaks_a_run(self):
+        """A malformed response must be swallowed, not propagated into the graph."""
+        import usage
+
+        usage.UsageCallback().on_llm_end(object())          # no generations
+        usage.UsageCallback().on_llm_end(None)              # not a result at all
+
+    def test_price_override_via_environment(self, monkeypatch):
+        import usage
+
+        monkeypatch.setenv("LLM_PRICE_GPT_5_MINI", "1.00,4.00")
+        assert usage._price_for("gpt-5-mini") == (1.00, 4.00)
