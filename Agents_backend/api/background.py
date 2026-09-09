@@ -80,6 +80,7 @@ def build_initial_state(job_id: str, topic: str, blog_folder: str,
         "generate_video":    generation_config.generate_video,
         "generate_podcast":  generation_config.generate_podcast,
         "export_formats":    generation_config.export_formats,
+        "assign_evidence":   generation_config.assign_evidence,
         "_job_id":           job_id,
         # — Document upload —
         "upload_id":         generation_config.upload_id or "",

@@ -207,12 +207,12 @@ async def approve_plan(job_id: str):
 @router.post("/api/jobs/{job_id}/revise-plan")
 async def revise_plan(job_id: str, req: RevisePlanRequest):
     """Submit feedback and unblock the worker to apply revision."""
-    job = get_job_healed(job_id)
+    job = await asyncio.to_thread(get_job_healed, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     _plan_revisions[job_id] = req.feedback
     _ensure_pipeline_running(job_id)
-    update_job(job_id, status="running")
+    await asyncio.to_thread(update_job, job_id, status="running")
     return {"status": "revision_queued"}
 
 
@@ -221,7 +221,7 @@ async def update_plan_direct(job_id: str, req: UpdatePlanRequest):
     """Accept a directly-edited plan from the frontend outline editor and unblock the worker."""
     from Graph.state import Plan, Task
 
-    job = get_job_healed(job_id)
+    job = await asyncio.to_thread(get_job_healed, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
 
@@ -250,18 +250,20 @@ async def update_plan_direct(job_id: str, req: UpdatePlanRequest):
     _direct_plan_updates[job_id] = new_plan
     _ensure_pipeline_running(job_id)
     updated_config = {**job.get("config", {}), "tone": req.tone, "audience": req.audience}
-    update_job(job_id, status="running", tone=req.tone, config_json=updated_config)
+    await asyncio.to_thread(
+        update_job, job_id, status="running", tone=req.tone, config_json=updated_config
+    )
     return {"status": "plan_updated", "sections": len(tasks)}
 
 
 @router.post("/api/jobs/{job_id}/resume")
 async def resume_job_endpoint(job_id: str):
     """Manually resumes a failed or halted job from its last persisted checkpoint."""
-    job = get_job_healed(job_id)
+    job = await asyncio.to_thread(get_job_healed, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
 
-    update_job(job_id, status="running")
+    await asyncio.to_thread(update_job, job_id, status="running")
     _ensure_pipeline_running(job_id)
     return {"status": "resumed", "job_id": job_id}
 
@@ -269,21 +271,32 @@ async def resume_job_endpoint(job_id: str):
 @router.get("/api/jobs/{job_id}/qa-report")
 async def get_qa_report(job_id: str):
     """Return the QA report text for a completed job."""
-    job = get_job_healed(job_id)
+    job = await asyncio.to_thread(get_job_healed, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    report_text = ""
-    if job.get("blog_folder"):
+
+    def _read() -> str:
+        if not job.get("blog_folder"):
+            return ""
         report_path = Path(job["blog_folder"]) / "reports" / "qa_report.txt"
-        if report_path.exists():
-            report_text = report_path.read_text(encoding="utf-8")
-    return {"report": report_text}
+        return report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+
+    return {"report": await asyncio.to_thread(_read)}
 
 
 @router.get("/api/files/{job_id}/{filepath:path}")
 async def serve_file(job_id: str, filepath: str):
-    """Serve any file from a job's blog folder."""
-    job = get_job_healed(job_id)
+    """Serve any file from a job's blog folder.
+
+    Uses `get_job` rather than `get_job_healed` deliberately. Healing globs the
+    whole images directory, stats every registered artefact and may issue a DB
+    write — sensible when listing jobs, wasteful on a static asset fetch. A page
+    with five images triggered five of those scans, each blocking the event loop
+    that is concurrently streaming agent events over the WebSocket. Serving a
+    file only needs `blog_folder`; a stale entry elsewhere in the row cannot
+    affect the containment check below.
+    """
+    job = await asyncio.to_thread(get_job, job_id)
     if not job or not job.get("blog_folder"):
         raise HTTPException(404, "Job not found")
     base = Path(job["blog_folder"]).resolve()
@@ -292,7 +305,7 @@ async def serve_file(job_id: str, filepath: str):
     # folder is `blogs/topic_123` read `blogs/topic_1234/...` via `../`.
     if not full_path.is_relative_to(base):
         raise HTTPException(403, "Invalid path")
-    if not full_path.exists():
+    if not await asyncio.to_thread(full_path.exists):
         raise HTTPException(404, f"File not found: {filepath}")
     return FileResponse(str(full_path))
 

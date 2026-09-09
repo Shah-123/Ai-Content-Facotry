@@ -239,13 +239,12 @@ def save_blog_content(folders: dict, state: State) -> dict:
                     print(f"   ✅ Exported {fmt.upper()}: {os.path.basename(fmt_path)}")
 
     # 2. Campaign Assets
+    # Only the channels campaign_generator_node actually produces. Entries for
+    # facebook / youtube / email / landing_page were removed with their state
+    # fields — they mapped to keys the node always left empty.
     platform_map = {
         "linkedin":    ("linkedin_post",  "txt"),
-        "facebook":    ("facebook_post",  "txt"),
-        "youtube":     ("youtube_script", "txt"),
         "twitter":     ("twitter_thread", "md"),
-        "email":       ("email_sequence", "md"),
-        "landing_page":("landing_page",   "md"),
     }
     for platform, (key, ext) in platform_map.items():
         if state.get(key):
@@ -317,6 +316,42 @@ Rubric Evaluations:
         saved["deepeval_report"] = path
         print(f"   ✅ Saved deepeval (official G-Eval) report")
 
+    # SEO metadata is publisher metadata, not article content, so it is written
+    # here rather than appended to the post. Keeping it out of `final` also
+    # means the QA auditor and the G-Eval/DeepEval judges score the article
+    # itself instead of a metadata footer.
+    if state.get("seo_metadata"):
+        seo = state["seo_metadata"]
+        rt = seo.get("reading_time_minutes")
+        lines = [
+            "SEO METADATA",
+            "=" * 60,
+            f"Estimated Reading Time: {rt} minute{'s' if rt != 1 else ''}",
+            "",
+        ]
+        if seo.get("meta_title"):
+            lines.append(f"Meta Title:       {seo['meta_title']}")
+        if seo.get("meta_description"):
+            lines.append(f"Meta Description: {seo['meta_description']}")
+        primary = seo.get("primary_keywords") or []
+        secondary = seo.get("secondary_keywords") or []
+        if primary:
+            lines.append(f"Primary Keywords:   {', '.join(primary)}")
+        if secondary:
+            lines.append(f"Secondary Keywords: {', '.join(secondary)}")
+        faq = seo.get("faq") or []
+        if faq:
+            lines += ["", "FAQ (schema markup candidates):", "-" * 60]
+            for i, item in enumerate(faq, 1):
+                q = item.get("question", "") if isinstance(item, dict) else ""
+                a = item.get("answer", "") if isinstance(item, dict) else ""
+                lines += [f"{i}. {q}", f"   {a}", ""]
+
+        path = f"{folders['reports']}/seo_metadata.txt"
+        Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        saved["seo_metadata"] = path
+        print(f"   ✅ Saved SEO metadata report")
+
     if state.get("keyword_report"):
         path = f"{folders['reports']}/keyword_optimization.txt"
         Path(path).write_text(state["keyword_report"], encoding="utf-8")
@@ -382,6 +417,7 @@ Rubric Evaluations:
         "blog_evaluator_score":  state.get("blog_evaluator_score"),
         "geval_scores":          state.get("geval_scores"),
         "deepeval_scores":       state.get("deepeval_scores"),
+        "seo_metadata":          state.get("seo_metadata"),
         "file_paths": {
             "blog":                  saved.get("blog"),
             "qa_report":             saved.get("qa_report"),
@@ -390,6 +426,7 @@ Rubric Evaluations:
             "deepeval_report":       saved.get("deepeval_report"),
             "completion_report":     saved.get("completion_report"),
             "keyword_report":        saved.get("keyword_report"),
+            "seo_metadata":          saved.get("seo_metadata"),
             "evidence":              saved.get("evidence"),
             "video":                 saved.get("video"),
             "podcast":               saved.get("podcast"),

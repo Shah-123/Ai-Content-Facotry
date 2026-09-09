@@ -53,6 +53,44 @@ def _is_near_duplicate(snippet: str, seen_fingerprints: List[set]) -> bool:
     return False
 
 
+def _research_result(state: State, evidence: list) -> dict:
+    """Build the research node's state update, downgrading `mode` when nothing was found.
+
+    A hybrid/open_book run that gathered ZERO evidence is a closed-book run in
+    everything but name — the workers have nothing to cite. Without this, every
+    downstream consumer still reports the post as source-grounded:
+    orchestrator_node puts "Mode: hybrid" in the planning prompt, metadata.json
+    and the run README both record the grounded mode, and the golden harness
+    asserts against it. Observed on the `closed_book_evergreen` golden run,
+    which shipped 2,825 words as mode="hybrid" with evidence_count=0 and a
+    READY verdict.
+
+    Downgrading keeps the system's self-description honest. It does not stop the
+    run — a closed-book post is a legitimate output, it just must not claim
+    grounding it does not have.
+    """
+    out: dict = {"evidence": evidence}
+    if evidence:
+        return out
+
+    if (state.get("mode") or "closed_book") != "closed_book":
+        logger.warning(
+            "No evidence gathered — downgrading mode "
+            f"{state.get('mode')!r} → 'closed_book' so downstream nodes stop "
+            "reporting this post as source-grounded."
+        )
+        _emit(
+            _job(state), "research", "error",
+            "No usable sources found. Continuing without grounding — this post "
+            "will be written from model knowledge only.",
+            {"sources": 0, "downgraded_from": state.get("mode")},
+        )
+        out["mode"] = "closed_book"
+        out["needs_research"] = False
+
+    return out
+
+
 def _tavily_search(query: str, max_results: int = 5, recency_days: int = _DEFAULT_RECENCY_DAYS) -> List[dict]:
     """
     Safe Tavily search wrapper.
@@ -208,7 +246,7 @@ def research_node(state: State) -> dict:
     if not raw_results:
         logger.warning("No results found.")
         _emit(_job(state), "research", "completed", "No results found", {"sources": 0})
-        return {"evidence": pre_existing}
+        return _research_result(state, pre_existing)
 
     # ✅ FIX: Parallelize web scraping.
     # Previously 10 URLs scraped one-by-one with 15s timeout each = ~120s.
@@ -280,4 +318,4 @@ def research_node(state: State) -> dict:
     _emit(_job(state), "research", "completed",
           f"Found {len(web_evidence)} web sources (total evidence: {len(merged)})",
           {"sources": len(web_evidence), "total": len(merged)})
-    return {"evidence": merged}
+    return _research_result(state, merged)

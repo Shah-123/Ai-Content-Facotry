@@ -174,12 +174,13 @@ class State(TypedDict, total=False):
     seo_metadata: Optional[dict]  # Meta title, description, FAQ, reading time
 
     # --- Campaign Outputs ---
+    # Only the two channels campaign_generator_node actually writes. Fields for
+    # youtube_script / facebook_post / email_sequence / landing_page were
+    # declared here and mapped to filenames in main.py, but the node always
+    # returned "" for them, so they produced empty state, no files, and a README
+    # claim the code did not honour. Removed rather than left as a promise.
     linkedin_post: str
-    youtube_script: str
-    facebook_post: str
-    email_sequence: str
     twitter_thread: str
-    landing_page: str
 
     # --- Video & Audio Outputs ---
     video_path: Optional[str]          # Path to the finalized MP4 video
@@ -197,6 +198,15 @@ class State(TypedDict, total=False):
     generate_campaign: bool
     generate_video: bool
     generate_podcast: bool
+
+    # --- Ablation Control ---
+    # When False, the orchestrator skips _assign_evidence_to_tasks() and every
+    # worker receives the FULL evidence pool instead of its own slice. This is
+    # the control arm for the evidence-distribution experiment: it reproduces
+    # the pre-fix behaviour in which parallel workers independently converged
+    # on the same two or three most prominent statistics.
+    # Defaults to True — the ablation is opt-out, never the production path.
+    assign_evidence: bool
 
     # --- Image Generation Configurations ---
     image_model: str

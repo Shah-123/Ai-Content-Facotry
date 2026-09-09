@@ -108,3 +108,81 @@ class TestAssignEvidenceToTasks:
         evidence = _make_evidence(6)
         result = _assign_evidence_to_tasks(plan, evidence)
         assert result is plan
+
+
+# ---------------------------------------------------------------------------
+# Ablation switch — the control arm for the evidence-distribution experiment
+# ---------------------------------------------------------------------------
+
+
+class TestAblationSwitch:
+    """`assign_evidence=False` must reproduce the pre-fix behaviour exactly.
+
+    The control arm is only valid if turning the flag off genuinely hands every
+    worker the full evidence pool. That relies on two things holding together:
+    the orchestrator must skip assignment, and the worker-side slicing must fall
+    back to the full list when no indices were assigned.
+    """
+
+    def test_flag_is_declared_in_state_and_defaults_on(self):
+        from Graph.state import State
+        from api.schemas import GenerationConfig
+
+        assert "assign_evidence" in State.__annotations__
+        assert GenerationConfig().assign_evidence is True
+
+    def test_flag_reaches_the_graph_state(self):
+        from api.background import build_initial_state
+        from api.schemas import GenerationConfig
+
+        on = build_initial_state("j", "t", "/tmp", GenerationConfig())
+        off = build_initial_state(
+            "j", "t", "/tmp", GenerationConfig(assign_evidence=False)
+        )
+        assert on["assign_evidence"] is True
+        assert off["assign_evidence"] is False
+
+    def test_unassigned_plan_falls_back_to_the_full_pool(self):
+        """With no indices assigned, each worker must receive every item."""
+        from Graph.agents.workers import _get_assigned_evidence_dicts
+
+        plan = _make_plan(4)
+        evidence = _make_evidence(6)
+        dicts = [e.model_dump() for e in evidence]
+
+        # Control arm: _assign_evidence_to_tasks was never called, so every
+        # task still carries the empty default.
+        for task in plan.tasks:
+            assert task.assigned_evidence_indices == []
+            assert len(_get_assigned_evidence_dicts(task, dicts)) == len(dicts)
+
+    def test_assigned_plan_gives_each_worker_a_strict_subset(self):
+        """Treatment arm: slices must be smaller than the full pool."""
+        from Graph.agents.workers import _get_assigned_evidence_dicts
+
+        plan = _make_plan(4)
+        evidence = _make_evidence(12)
+        dicts = [e.model_dump() for e in evidence]
+        _assign_evidence_to_tasks(plan, evidence)
+
+        for task in plan.tasks:
+            got = _get_assigned_evidence_dicts(task, dicts)
+            assert 0 < len(got) < len(dicts), (
+                f"task {task.id} received {len(got)} of {len(dicts)} items — "
+                f"the treatment arm must partition, not hand over everything"
+            )
+
+    def test_the_two_arms_actually_differ(self):
+        """Guards against an ablation that silently measures nothing."""
+        from Graph.agents.workers import _get_assigned_evidence_dicts
+
+        evidence = _make_evidence(12)
+        dicts = [e.model_dump() for e in evidence]
+
+        control = _make_plan(4)
+        treatment = _assign_evidence_to_tasks(_make_plan(4), evidence)
+
+        control_sizes = [len(_get_assigned_evidence_dicts(t, dicts)) for t in control.tasks]
+        treat_sizes = [len(_get_assigned_evidence_dicts(t, dicts)) for t in treatment.tasks]
+        assert control_sizes != treat_sizes, "both arms behave identically"
+        assert sum(treat_sizes) < sum(control_sizes)

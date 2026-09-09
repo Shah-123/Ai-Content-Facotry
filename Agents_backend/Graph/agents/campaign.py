@@ -103,9 +103,5 @@ def campaign_generator_node(state: State) -> dict:
 
     return {
         "linkedin_post":  linkedin,
-        "youtube_script": "",
-        "facebook_post":  "",
-        "email_sequence": "",
         "twitter_thread": twitter,
-        "landing_page":   "",
     }

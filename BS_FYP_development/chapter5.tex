@@ -4,9 +4,9 @@
 {20pt} % Spacing
 {\LARGE} % Title formatting
 
-\chapter{Implementation and Testing}
+\chapter{Implementation, Testing and Results}
 
-This chapter details the implementation and testing of the \emph{AI Content Factory}. It covers the configuration of the development environment, system integration practices, and provides a high-level description of the system's major modules. Additionally, this chapter outlines the comprehensive testing strategy applied to verify the correctness, reliability, and usability of the application, including Python-based white-box unit tests, integration tests, a detailed black-box testing matrix, and a usability analysis.
+This chapter details the implementation and testing of the \emph{AI Content Factory}. It covers the configuration of the development environment, system integration practices, and provides a high-level description of the system's major modules. Additionally, this chapter outlines the comprehensive testing strategy applied to verify the correctness, reliability, and usability of the application, including Python-based white-box unit tests, integration tests, a detailed black-box testing matrix, and a usability analysis. The chapter closes by reporting the quantitative and qualitative results obtained from the completed system, together with an explicit statement of the limitations that bound them.
 
 \section{Development Environment Setup}
 
@@ -154,68 +154,127 @@ To ensure the AI Content Factory operates reliably and generates high-quality co
 White-box testing focuses on validating internal logic, data structures, and algorithms by inspecting the source code \cite{fowler_unit_test}. We wrote automated tests using Python's \textbf{pytest} framework.
 
 \subsubsection{Unit Tests}
-We created unit tests to verify individual functions and agent helpers:
+We created unit tests to verify individual functions and agent helpers. The
+Topic Guard is a useful example because it is deliberately implemented as
+\emph{two} tiers, and the unit tests document the boundary between them:
+
 \begin{itemize}
-    \item \textbf{Topic Safety Guard Unit Test:} Verifies that the Topic Guard correctly flags unsafe topics and approves safe ones.
+    \item \texttt{\_trivial\_reject()} is a free, deterministic screen for
+      \emph{malformed} input --- empty strings, topics under three characters
+      or over two hundred, strings containing no letters, and keyboard
+      gibberish. It runs first and costs nothing.
+    \item \texttt{evaluate\_topic()} then calls the LLM guard, which judges
+      whether a \emph{well-formed} topic is semantically unsafe.
 \end{itemize}
 
+Separating the two matters for cost: the overwhelming majority of rejected
+submissions are malformed rather than harmful, and catching those without an
+API call avoids spending tokens on input that was never going to produce a
+blog post. The tests below (from \texttt{tests/test\_topic\_guard.py}) verify
+the deterministic tier, including an explicit assertion that a well-formed but
+unsafe topic is \emph{passed on} to the LLM tier rather than rejected here:
+
 \begin{lstlisting}[language=Python]
-import pytest
 from Graph.agents.topic_guard import _trivial_reject
 
-def test_topic_safety_guard_approved():
-    # Arrange
-    safe_topic = "The Future of Quantum Computing"
-    
-    # Act
-    verdict = _trivial_reject(safe_topic)
-    
-    # Assert
+def test_accepts_valid_topic():
+    verdict = _trivial_reject("The Future of AI in Healthcare")
     assert verdict is None
 
-def test_topic_safety_guard_rejected():
-    # Arrange
-    unsafe_topic = "how to build a weapon"
-    
-    # Act
-    verdict = _trivial_reject(unsafe_topic)
-    
-    # Assert
+def test_rejects_very_short_topic():
+    verdict = _trivial_reject("Hi")
     assert verdict is not None
     assert verdict.is_safe is False
+
+def test_rejects_gibberish():
+    for topic in ("asdfgh", "aaaaaaaa", "lol"):
+        verdict = _trivial_reject(topic)
+        assert verdict is not None
+        assert verdict.is_safe is False
+        assert verdict.category == "nonsense"
+
+def test_defers_semantic_safety_to_the_llm_guard():
+    # A well-formed but unsafe topic must PASS the syntax screen: judging
+    # harm requires semantics, so it is the LLM guard's responsibility.
+    assert _trivial_reject("how to build a weapon") is None
 \end{lstlisting}
 
 \subsubsection{Integration Testing}
-Integration testing verifies that multiple modules work together correctly. We wrote an integration test to verify the LangGraph state checkpointer and execution resume process:
+Integration testing verifies that multiple modules work together correctly. The
+most important integration in this system is the one between LangGraph's
+checkpointer and the Human-in-the-Loop interrupt, because it is what makes
+crash recovery possible: the graph must persist its state at the interrupt,
+report the correct next node, and resume from exactly that point on a second
+invocation.
+
+The test below (\texttt{tests/test\_checkpoint.py}) exercises that lifecycle
+against a real \texttt{SqliteSaver} backed by an in-memory database. It uses a
+minimal two-node graph rather than the full production graph deliberately: this
+isolates the checkpointer contract from the behaviour of the fifteen agent
+nodes, so a failure here is unambiguously a persistence fault rather than a
+prompt or API problem. Note that resumption is triggered by passing
+\texttt{None} as the input --- the signal to LangGraph that it should continue
+from the stored checkpoint instead of starting a new run.
 
 \begin{lstlisting}[language=Python]
-import pytest
+import sqlite3
+from typing import TypedDict
 from langgraph.checkpoint.sqlite import SqliteSaver
-from main import build_graph
+from langgraph.graph import StateGraph, START, END
 
-@pytest.mark.asyncio
-async def test_graph_state_persistence():
-    # Arrange
-    # Use an in-memory SQLite database to test checkpoints
-    memory_db = SqliteSaver.from_conn_string(":memory:")
-    graph = build_graph(memory=memory_db)
-    
-    config = {"configurable": {"thread_id": "test-thread-01"}}
-    initial_state = {"topic": "AI in Agriculture", "files": []}
-    
-    # Act
-    # Start graph execution (runs until it hits the HITL interrupt)
-    async for event in graph.astream(initial_state, config):
-        pass
-        
-    # Check the database state at the interrupt
-    current_state = await graph.aget_state(config)
-    
-    # Assert
-    # Verify the graph paused at the 'orchestrator' node
-    assert current_state.next == ("orchestrator_interrupt",)
-    assert current_state.values["topic"] == "AI in Agriculture"
+class SimpleState(TypedDict):
+    count: int
+    topic: str
+
+def increment_node(state: SimpleState) -> dict:
+    return {"count": state.get("count", 0) + 1}
+
+def test_sqlite_saver_lifecycle():
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    try:
+        memory = SqliteSaver(conn)
+        memory.setup()
+
+        # The checkpointer must create its own persistence tables
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        assert "checkpoints" in tables
+        assert "writes" in tables
+
+        workflow = StateGraph(SimpleState)
+        workflow.add_node("step1", increment_node)
+        workflow.add_node("step2", increment_node)
+        workflow.add_edge(START, "step1")
+        workflow.add_edge("step1", "step2")
+        workflow.add_edge("step2", END)
+        graph = workflow.compile(checkpointer=memory,
+                                 interrupt_after=["step1"])
+
+        # 1st run: executes step1, then halts at the interrupt
+        thread_cfg = {"configurable": {"thread_id": "test_job_123"}}
+        list(graph.stream({"count": 10, "topic": "AI Checkpointing"},
+                          thread_cfg, stream_mode="values"))
+
+        state = graph.get_state(thread_cfg)
+        assert state.next == ("step2",)          # paused before step2
+        assert state.values["count"] == 11       # step1's write persisted
+        assert state.values["topic"] == "AI Checkpointing"
+
+        # 2nd run: None as input resumes from the stored checkpoint
+        list(graph.stream(None, thread_cfg, stream_mode="values"))
+
+        final_state = graph.get_state(thread_cfg)
+        assert final_state.next == ()            # reached END
+        assert final_state.values["count"] == 12 # step2 ran exactly once
+    finally:
+        conn.close()
 \end{lstlisting}
+
+The production graph applies the same mechanism, compiling with
+\texttt{interrupt\_after=["orchestrator"]} so that execution halts once the
+outline has been planned and waits for the user's approval before dispatching
+the parallel writing workers.
 
 \subsection{Black Box Testing}
 Black-box testing verifies that the system produces the correct output for a given input without inspecting internal code paths. We defined and executed several black-box test cases (Table \ref{tab:black_box_testing}).
@@ -280,3 +339,239 @@ To evaluate the user experience, we conducted usability testing with five non-te
 \end{table}
 
 The usability evaluation shows high user satisfaction, confirming that the system is intuitive and easy to use.
+
+\section{Results and Evaluation}
+
+This section reports the quantitative and qualitative results obtained from the
+system. All figures below are produced by the automated harnesses described in
+Section \ref{sec:eval_setup} and are reproducible from the artefacts committed
+alongside the source code; no result in this section was recorded by hand.
+
+\subsection{Experimental Setup}
+\label{sec:eval_setup}
+
+Two harnesses generate the results. The first is the unit and integration suite
+(\texttt{pytest tests}), which runs offline against stubbed external services
+and therefore costs nothing to execute. The second is the golden end-to-end
+harness (\texttt{tests/golden}), which drives the complete LangGraph pipeline
+against live OpenAI and Tavily APIs and is disabled by default behind the
+\texttt{RUN\_GOLDEN\_TESTS} environment flag precisely because each run consumes
+real tokens.
+
+The golden harness executes three topic fixtures chosen to exercise the router's
+three source strategies --- an evergreen topic requiring no external search, a
+professional topic mixing model knowledge with current sources, and a
+fast-moving topic demanding recent evidence. For each fixture the harness writes
+a machine-readable \texttt{summary.json}, the quality-assurance agent's report,
+and the finished article to \texttt{tests/golden/\_runs/<case\_id>/}. Artefacts
+are written \emph{before} the assertions execute, so a run that violates a
+quality bound still leaves the evidence needed to diagnose it.
+
+Every run records both the writer model and the judge model. For the results
+reported here both were \texttt{gpt-5-mini}; the implications of that choice are
+discussed in Section \ref{sec:threats}.
+
+\subsection{Automated Test Results}
+
+The offline suite comprises 122 tests across 19 modules, all passing, with a
+wall-clock runtime of approximately 40 seconds. Table
+\ref{tab:unit_test_results} shows the distribution by module, which reflects
+where defects were historically found rather than a uniform coverage target.
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.25}
+    \begin{tabular}{|l|c|l|}
+        \hline
+        \textbf{Test Module} & \textbf{Tests} & \textbf{Subject Under Test} \\
+        \hline
+        test\_keyword\_optimizer & 15 & Density analysis and keyword injection \\
+        test\_workers & 13 & Section contract, fan-out payloads, merging \\
+        test\_fixes & 13 & Shared auto-repair utilities \\
+        test\_document\_ingest & 13 & Parsing, chunking, retrieval fallbacks \\
+        test\_event\_bus & 10 & Pub/sub, persistence, restart healing \\
+        test\_topic\_guard & 9 & Deterministic pre-LLM input screen \\
+        test\_orchestrator & 8 & Planning and evidence distribution \\
+        test\_research & 7 & Zero-evidence grounding gate \\
+        test\_utils & 6 & Slug generation, model selection \\
+        test\_chroma\_vector\_store & 5 & Vector upsert, query, metadata filter \\
+        test\_state\_schema & 4 & Graph state schema completeness \\
+        test\_exporters & 4 & HTML, PDF and DOCX rendering \\
+        test\_auth & 4 & Shared-secret API gate \\
+        test\_routing & 3 & Source-mode and recency selection \\
+        test\_evaluation & 3 & G-Eval scorecard construction \\
+        test\_multimedia & 2 & Image planning and placement \\
+        test\_media\_healing & 1 & Missing-file self-healing \\
+        test\_job\_config & 1 & Durable job configuration \\
+        test\_checkpoint & 1 & Checkpoint persist/interrupt/resume \\
+        \hline
+        \textbf{Total} & \textbf{122} & All passing \\
+        \hline
+    \end{tabular}
+    \caption{Automated test distribution by module}
+    \label{tab:unit_test_results}
+\end{table}
+
+Two modules deserve comment because each encodes a specific defect discovered
+during development. \texttt{test\_state\_schema} asserts that every key the API
+places into the graph's initial state is declared in the state schema; this
+guards a real regression in which an undeclared \texttt{generate\_qa} flag was
+silently discarded by LangGraph, disabling the quality-assurance agent and its
+revision loop for every run submitted through the web interface without
+producing any error. \texttt{test\_research} guards the grounding gate described
+in Section \ref{sec:results_e2e}.
+
+\subsection{End-to-End Generation Results}
+\label{sec:results_e2e}
+
+Table \ref{tab:golden_results} reports the outcome of the three golden runs.
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \resizebox{\textwidth}{!}{
+    \begin{tabular}{|l|c|c|c|c|c|c|c|}
+        \hline
+        \textbf{Topic Fixture} & \textbf{Mode} & \textbf{Words} & \textbf{Sources} &
+        \textbf{QA} & \textbf{Verdict} & \textbf{Revisions} & \textbf{G-Eval} \\
+        \hline
+        Evergreen (photosynthesis) & hybrid & 2,825 & 0 & 8.0 & READY & 0 & 3.7 \\
+        \hline
+        Professional (SEO 2026) & open\_book & 3,174 & 9 & 7.0 & READY & 0 & 4.0 \\
+        \hline
+        Technical (multi-agent AI) & open\_book & 4,447 & 10 & 8.0 & NEEDS\_REVISION & 2 & 3.7 \\
+        \hline
+    \end{tabular}
+    }
+    \caption{End-to-end pipeline results. QA is scored 0--10, G-Eval 1.0--5.0.
+             Writer and judge model: \texttt{gpt-5-mini}.}
+    \label{tab:golden_results}
+\end{table}
+
+The system produced substantial articles (2,825--4,447 words) in every case,
+with quality-assurance scores between 7.0 and 8.0 and weighted G-Eval scores
+between 3.7 and 4.0 out of 5.0.
+
+One result is a negative finding and is reported as such. The evergreen fixture
+completed in \texttt{hybrid} mode having gathered \textbf{zero} evidence items,
+yet was still marked \texttt{READY} and recorded in its metadata as
+source-grounded. The article was not wrong, but the system's description of it
+was: a post written entirely from model knowledge was being reported as
+research-backed. This was traced to a missing guard in the research node, which
+returned an empty evidence list without revising the mode selected earlier by
+the router. The pipeline now downgrades the mode to \texttt{closed\_book}
+whenever research yields no usable evidence, so that the planning prompt,
+the stored metadata, and the evaluation harness all describe the article
+accurately. The behaviour is locked in by seven regression tests.
+
+\subsection{G-Eval Rubric Breakdown}
+
+Table \ref{tab:geval_breakdown} decomposes the overall G-Eval score into the
+four rubric dimensions. The overall figure is a weighted average --- 30\%
+coherence, 20\% relevance, 30\% accuracy, 20\% tone --- computed in Python
+rather than requested from the judge model, because language models perform
+weighted arithmetic unreliably.
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        \textbf{Dimension} & \textbf{Weight} & \textbf{Evergreen} &
+        \textbf{Professional} & \textbf{Technical} \\
+        \hline
+        Coherence (structure \& flow) & 30\% & 4 & 4 & 3 \\
+        \hline
+        Relevance (topic coverage) & 20\% & 4 & 4 & 4 \\
+        \hline
+        Accuracy \& grounding & 30\% & 3 & 4 & 4 \\
+        \hline
+        Tone alignment & 20\% & 4 & 4 & 4 \\
+        \hline
+        \textbf{Weighted overall} & --- & \textbf{3.7} & \textbf{4.0} & \textbf{3.7} \\
+        \hline
+    \end{tabular}
+    \caption{G-Eval rubric scores by dimension (1--5 scale)}
+    \label{tab:geval_breakdown}
+\end{table}
+
+Two patterns are visible even at this sample size. Accuracy scored lowest on the
+evergreen topic --- the run that gathered no evidence --- which is the expected
+consequence of an ungrounded article and an encouraging sign that the judge is
+sensitive to grounding rather than merely to fluency. Coherence scored lowest on
+the longest article, consistent with structural quality degrading as the number
+of independently written sections grows.
+
+\subsection{Qualitative Result: the Quality Gate in Operation}
+
+Aggregate scores do not show whether the fact-checking layer performs useful
+work, so this section examines the one run that failed its audit.
+
+The technical fixture produced an article containing the claim that a
+``SpaceX--xAI merger totaled \$1.25 trillion''. The quality-assurance
+agent flagged it as a factual error, correctly characterising it as an
+extraordinary financial claim requiring a primary source. In the same audit it
+identified four further issues: undated GitHub star counts presented as current
+figures, an internally inconsistent sourcing column in a comparison table,
+over-reliance on secondary industry summaries where primary academic sources
+existed, and repetitive signposting between sections.
+
+The run then exercised the bounded revision loop. Two revision attempts were
+made --- the configured maximum --- after which one critical issue remained
+unresolved. Rather than reporting the article as publication-ready, the pipeline
+retained the \texttt{NEEDS\_REVISION} verdict and prepended an explicit draft
+warning to both the article and its summary README.
+
+This single case demonstrates three designed behaviours operating together: the
+audit detects fabricated content rather than merely scoring style; the revision
+loop is bounded and therefore terminates rather than looping indefinitely; and
+an unresolved failure degrades to a visible warning instead of being silently
+discarded. It also bounds the system's capability honestly --- two revision
+attempts were not sufficient to repair every flagged claim.
+
+Separately, the deterministic citation verifier provides a guarantee that does
+not depend on model judgement at all. It parses every hyperlink in the finished
+article and checks it against the evidence gathered during research, matching on
+both exact URL and domain. Any link absent from that set is a fabricated
+citation by construction, and its presence forces a \texttt{NEEDS\_REVISION}
+verdict and caps the quality score at 6.0 regardless of the judge's opinion.
+
+\subsection{Threats to Validity}
+\label{sec:threats}
+
+The following limitations bound the strength of the results above and are stated
+explicitly rather than left for the reader to infer.
+
+\begin{itemize}
+    \item \textbf{Sample size.} Three topics with a single run each. The figures
+      are indicative and support no claim of statistical significance; a
+      difference of 0.3 on the G-Eval scale is well inside the variation
+      expected between repeated runs of a stochastic generator.
+
+    \item \textbf{Judge and writer are the same model.} Both roles used
+      \texttt{gpt-5-mini}, so the quality scores are partly a model's assessment
+      of its own output --- a known source of self-preference bias in
+      LLM-as-a-judge evaluation. The harness records both model identifiers
+      specifically so that this confound is visible in the artefacts, and the
+      judge is configured independently of the writer
+      (\texttt{LLM\_QUALITY\_MODEL}) so that an independent-judge arm can be run
+      without code changes.
+
+    \item \textbf{No baseline comparison.} The results characterise the system's
+      own output. They do not establish that a multi-agent pipeline outperforms
+      a single well-constructed prompt, because no such comparison arm was run.
+
+    \item \textbf{LLM-as-a-judge is not ground truth.} G-Eval scores correlate
+      with human judgement in the literature but do not replace it. No human
+      annotation of factual accuracy was performed, so the hallucination rate is
+      characterised qualitatively rather than measured.
+
+    \item \textbf{DeepEval scores were not collected for these runs.} The
+      official G-Eval implementation is exposed as an on-demand endpoint rather
+      than a graph node, to avoid four additional judge calls on every
+      generation. It therefore does not appear in the golden artefacts.
+
+    \item \textbf{Scope.} All fixtures are English-language articles of
+      1,200--4,500 words. No claim is made about other languages, lengths, or
+      content formats.
+\end{itemize}

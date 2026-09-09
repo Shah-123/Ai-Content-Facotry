@@ -85,12 +85,60 @@ From an educational standpoint, this project serves as a reference implementatio
     \item \textbf{Multi-Agent Coordination:} Serving as a template for modeling complex parallel writing, reduction, and revision loops in cooperative agent systems.
 \end{itemize}
 
+\section{Known Limitations}
+
+The boundaries of the delivered system are stated explicitly below. Each is a
+consequence of a deliberate scoping decision rather than an oversight, and each
+is accompanied by the mitigation that would be required to remove it.
+
+\begin{itemize}
+    \item \textbf{Prompt injection is not mitigated.} Text scraped from the open
+      web and text extracted from uploaded documents is inserted into model
+      prompts as evidence without any instruction-hierarchy defence --- there is
+      no delimiter fencing, no escaping, and no check that an extracted
+      ``fact'' originated in the source material rather than in an
+      instruction embedded within it. A retrieved page containing adversarial
+      text is therefore presented to the extraction model as ordinary content.
+      The exposed paths are the research extractor, the document-chunk
+      extractor, the section writers, and the quality-assurance auditor.
+      Mitigation would require fencing untrusted spans within explicit
+      delimiters, instructing the extractor to treat those spans strictly as
+      data, and validating that each extracted snippet appears verbatim in its
+      source. This is the most significant unaddressed security weakness in the
+      system and is documented here rather than deferred silently.
+
+    \item \textbf{Single-worker concurrency.} Human-in-the-loop approval state
+      is held in process memory, and an awaiting-approval job blocks a worker
+      thread for up to twenty minutes. The API must therefore run as a single
+      worker; a multi-replica deployment would require an external task queue
+      and a shared approval store. The checkpointer is what makes crash
+      recovery possible without one.
+
+    \item \textbf{Access control is a single shared secret.} Setting
+      \texttt{API\_KEY} gates every REST route and the WebSocket, but there are
+      no per-user accounts and no per-job ownership: any authorised caller can
+      read and delete every job. No endpoint is rate limited, and because job
+      creation triggers billable third-party API calls, an ungated public
+      instance could be driven into unbounded cost.
+
+    \item \textbf{Evaluation scale and independence.} Quality figures come from
+      three topics with a single run each, judged by the same model family that
+      produced the text, with no baseline comparison arm and no human
+      annotation of factual accuracy. Section \ref{sec:threats} discusses these
+      constraints in detail.
+
+    \item \textbf{Single-speaker audio.} The podcast studio synthesises one
+      Gemini voice; conversational two-speaker output is not implemented.
+\end{itemize}
+
 \section{Future Directions}
 
 While the current implementation of the AI Content Factory is robust, several features have been identified for future exploration:
 
 \begin{itemize}
-    \item \textbf{Scalable PostgreSQL Checkpointing:} For multi-tenant, high-concurrency enterprise deployments, the in-memory/local SQLite checkpointer will be replaced with a distributed \textbf{PostgreSQL} database backend using PGVector for semantic embedding storage.
+    \item \textbf{Injection-Resistant Retrieval:} Fencing all retrieved and uploaded content within explicit delimiters, instructing extraction models to treat those spans strictly as data, and verifying that every extracted evidence snippet appears verbatim in its source document before it is allowed to reach a writing agent.
+    \item \textbf{Graph-Native Human-in-the-Loop:} Replacing the current out-of-graph approval mechanism with LangGraph's own \texttt{interrupt()} and \texttt{Command(resume=...)} primitives, which would move approval state into the checkpointer and remove the single-worker deployment constraint entirely.
+    \item \textbf{Distributed Checkpointing with PGVector:} The PostgreSQL checkpointer is already implemented and selected automatically when \texttt{DATABASE\_URL} designates a Postgres instance. The remaining work is to consolidate the separate ChromaDB vector store into the same database using \textbf{PGVector}, so that graph state and semantic embeddings share one transactional backend rather than two independently failing services.
     \item \textbf{Multi-Speaker Podcasts:} Upgrading the Gemini Podcast Studio to generate two-speaker scripts, leveraging distinct native voices (e.g., Aoede and Charon) to simulate natural interview dynamics.
     \item \textbf{Custom Video Overlay Templates:} Integrating support for custom CSS video layout transitions, localized image overlays, and human-like avatar overlays in MoviePy video renders.
     \item \textbf{Local Fine-Tuned LLMs:} Adding configurations to support running local, fine-tuned open-source models (such as LLaMA-3 or Mistral) via Ollama, reducing API cost dependencies on proprietary third-party engines.

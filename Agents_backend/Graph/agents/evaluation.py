@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from Graph.state import State
-from Graph.agents.utils import llm_quality, _job, _emit
+from Graph.agents.utils import llm_judge, _JUDGE_MODEL, _job, _emit
 
 logger = logging.getLogger("blog_pipeline")
 
@@ -146,7 +146,10 @@ BLOG CONTENT UNDER EVALUATION:
 
     try:
         # Request structured output from the quality model
-        judge = llm_quality.with_structured_output(GEvalScorecard)
+        # llm_judge, not llm_quality — the judge is configured independently of
+        # the writing/QA models so an independent-judge arm does not also change
+        # the QA auditor and reviser. See LLM_JUDGE_MODEL in agents/utils.py.
+        judge = llm_judge.with_structured_output(GEvalScorecard)
         scorecard: GEvalScorecard = judge.invoke([
             SystemMessage(content=GEVAL_SYSTEM_PROMPT),
             HumanMessage(content=human_prompt)
@@ -155,8 +158,12 @@ BLOG CONTENT UNDER EVALUATION:
         # Compute the weighted overall score in code (not via the LLM).
         scorecard.overall_score = weighted_overall(scorecard)
 
-        # Serialize scorecard into dictionary format
+        # Serialize scorecard into dictionary format. The judge model is stored
+        # alongside the scores so any reported figure is attributable to the
+        # model that produced it — required to state whether a run used an
+        # independent judge or the same model that wrote the text.
         scores_dict = scorecard.model_dump()
+        scores_dict["judge_model"] = _JUDGE_MODEL
         logger.info(f"[{job_id}] G-Eval complete. Overall Score: {scorecard.overall_score}/5.0")
         
         # Calculate raw text metrics
@@ -282,6 +289,7 @@ def deepeval_evaluation_node(state: State) -> Dict[str, Any]:
                 "Reward smooth transitions between sections, a clear hierarchy, and absence "
                 "of repetition or disjointed fragments. Penalize abrupt jumps and contradictions."
             ),
+            model=_JUDGE_MODEL,
             evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
         ),
         "relevance": GEval(
@@ -291,6 +299,7 @@ def deepeval_evaluation_node(state: State) -> Dict[str, Any]:
                 "'input', integrates relevant keywords naturally, and thoroughly covers the "
                 "user's likely search intent. Penalize off-topic filler."
             ),
+            model=_JUDGE_MODEL,
             evaluation_params=[LLMTestCaseParams.INPUT, LLMTestCaseParams.ACTUAL_OUTPUT],
         ),
         "accuracy": GEval(
@@ -300,6 +309,7 @@ def deepeval_evaluation_node(state: State) -> Dict[str, Any]:
                 "are supported by 'retrieval_context'. Penalize hallucinations, fabricated facts, "
                 "and unsupported numeric claims. Reward precise mapping of claims to sources."
             ),
+            model=_JUDGE_MODEL,
             evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.RETRIEVAL_CONTEXT],
         ),
         "tone_alignment": GEval(
@@ -309,6 +319,7 @@ def deepeval_evaluation_node(state: State) -> Dict[str, Any]:
                 f"'{target_tone}'. Penalize generic AI-filler phrases (e.g., 'dive in', "
                 f"'testament to', 'in conclusion', 'in today's fast-paced world') and robotic phrasing."
             ),
+            model=_JUDGE_MODEL,
             evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
         ),
     }
@@ -329,6 +340,9 @@ def deepeval_evaluation_node(state: State) -> Dict[str, Any]:
     valid = [v["score"] for v in results.values() if isinstance(v, dict) and v.get("score") is not None]
     overall = round(sum(valid) / len(valid), 3) if valid else 0.0
     results["overall_score"] = overall
+    # Previously deepeval fell back to its own undocumented default model, which
+    # made these scores unattributable. The judge is now pinned and recorded.
+    results["judge_model"] = _JUDGE_MODEL
 
     logger.info(f"[{job_id}] deepeval G-Eval complete. Overall (0-1): {overall}")
     _emit(job_id, "deepeval_evaluator", "completed", "deepeval G-Eval finished.", {

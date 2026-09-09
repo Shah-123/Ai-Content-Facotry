@@ -144,7 +144,18 @@ Create a blog plan that:
     # This runs before fanout() so each Task already knows which evidence
     # indices belong to it by the time workers are dispatched.
     # If no evidence was gathered (closed_book mode), this is a safe no-op.
-    if evidence:
+    # `assign_evidence` is the ablation switch. Turning it off reproduces the
+    # pre-fix behaviour — no indices are assigned, so _get_assigned_evidence_dicts()
+    # falls back to handing every worker the full pool. This is the control arm
+    # for the evidence-distribution experiment; it is never the production path.
+    if not state.get("assign_evidence", True):
+        logger.warning(
+            "🧪 ABLATION: evidence distribution DISABLED — every worker will "
+            "receive the full evidence pool. This is a control arm, not a normal run."
+        )
+        _emit(_job(state), "orchestrator", "working",
+              "Ablation arm: evidence distribution disabled.")
+    elif evidence:
         plan = _assign_evidence_to_tasks(plan, evidence)
     else:
         logger.info("📎 No evidence to distribute (closed_book mode).")
