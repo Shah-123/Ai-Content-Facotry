@@ -35,6 +35,47 @@ def _safe_slug(title: str) -> str:
     s = re.sub(r"\s+", "_", s).strip("_")
     return s or "blog"
 
+def truncate_for_eval(text: str, limit: int, label: str, job_id: str = "") -> tuple:
+    """Clip `text` to `limit` characters and report whether anything was lost.
+
+    Evaluators cap their input to bound cost, but they did so silently: a
+    4,447-word article (39,025 characters) was audited on 77% of its text and
+    graded by G-Eval on 64% of it, with nothing in the logs, the reports or the
+    scores to say so. A score computed over two thirds of an article is not the
+    same measurement as one computed over all of it, and a reader of those
+    numbers had no way to know which they were looking at.
+
+    This does not raise the limits — that would just move the cost. It makes the
+    loss visible, so a truncated score can be reported as one.
+
+    Returns (clipped_text, info) where info is suitable for storing alongside
+    the scores:
+        {"truncated": bool, "chars_evaluated": int,
+         "chars_total": int, "coverage": float}
+    """
+    total = len(text or "")
+    clipped = (text or "")[:limit]
+    info = {
+        "truncated": total > limit,
+        "chars_evaluated": len(clipped),
+        "chars_total": total,
+        "coverage": round(len(clipped) / total, 4) if total else 1.0,
+    }
+    if info["truncated"]:
+        logger.warning(
+            f"⚠️ {label}: input truncated to {limit:,} of {total:,} characters "
+            f"({info['coverage']:.0%} of the article). The resulting score does "
+            f"NOT cover the whole text — report it as a partial measurement."
+        )
+        _emit(
+            job_id, "system", "working",
+            f"{label} evaluated {info['coverage']:.0%} of the article "
+            f"({limit:,} of {total:,} characters).",
+            info,
+        )
+    return clipped, info
+
+
 def get_llm(state: dict = None, temperature: float = 0.0) -> ChatOpenAI:
     """Return a ChatOpenAI instance for the model selected in state, if available.
 

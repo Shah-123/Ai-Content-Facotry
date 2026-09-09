@@ -151,6 +151,10 @@ class State(TypedDict, total=False):
     qa_verdict: str           # "READY" or "NEEDS_REVISION"
     qa_issues: List[dict]     # Structured list of flagged issues
     qa_score: float           # 0-10 overall score
+    # Whether the QA score covers the whole article or only the first
+    # _QA_AUDIT_CHAR_LIMIT characters of it. Must be declared here or LangGraph
+    # discards it silently, exactly as it did with generate_qa.
+    qa_coverage: dict
 
     # --- Revision Loop ---
     revision_count: int       # How many QA → revision loops have run (starts 0, max 2)

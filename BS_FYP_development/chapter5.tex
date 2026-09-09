@@ -574,4 +574,15 @@ explicitly rather than left for the reader to infer.
     \item \textbf{Scope.} All fixtures are English-language articles of
       1,200--4,500 words. No claim is made about other languages, lengths, or
       content formats.
+
+    \item \textbf{Partial evaluation of the longest article.} Both evaluators
+      cap their input to bound cost: the quality-assurance audit at 30,000
+      characters and the G-Eval judge at 25,000. The technical fixture produced
+      39,025 characters, so its audit covered 77\% of the text and its G-Eval
+      score 64\% of it. Its scores are therefore partial measurements, and its
+      coherence rating --- the lowest recorded, at 3 --- may be depressed by the
+      judge having seen an article that ended mid-argument. The shorter two
+      fixtures were evaluated in full. The system now logs this truncation and
+      records the coverage fraction alongside every score, so a partial
+      measurement can no longer be mistaken for a complete one.
 \end{itemize}

@@ -13,7 +13,7 @@ from Graph.structured_data import QAReport, QAIssue
 # in the graph, so by the time qa_agent_node runs, fixes are already applied.
 from Graph.Fixes import apply_all_fixes
 
-from .utils import logger, llm_quality, _job, _emit
+from .utils import logger, llm_quality, _job, _emit, truncate_for_eval
 
 QA_AGENT_SYSTEM = """You are an elite Quality Assurance (QA) Editor for a top-tier publishing platform.
 Your job is to read the provided blog post and conduct a rigorous final audit before publication.
@@ -179,10 +179,14 @@ def qa_agent_node(state: State) -> dict:
             "and set the verdict to NEEDS_REVISION.\n"
         )
 
+    audited_text, truncation = truncate_for_eval(
+        final_text, _QA_AUDIT_CHAR_LIMIT, "QA audit", _job(state)
+    )
+
     report = checker.invoke([
         SystemMessage(content=QA_AGENT_SYSTEM),
         HumanMessage(content=(
-            f"BLOG CONTENT TO AUDIT:\n{final_text[:_QA_AUDIT_CHAR_LIMIT]}\n\n"
+            f"BLOG CONTENT TO AUDIT:\n{audited_text}\n\n"
             f"EVIDENCE USED IN RESEARCH:\n{evidence_summary}"
             f"{revision_context}"
             f"{citation_warning}"
@@ -213,7 +217,15 @@ def qa_agent_node(state: State) -> dict:
     report_text = "QA AUDIT REPORT\n"
     report_text += "=" * 60 + "\n"
     report_text += f"Overall Score: {report.overall_score}/10\n"
-    report_text += f"Verdict: {report.verdict}\n\n"
+    report_text += f"Verdict: {report.verdict}\n"
+    if truncation["truncated"]:
+        report_text += (
+            f"\n⚠️ PARTIAL AUDIT: only the first {truncation['chars_evaluated']:,} of "
+            f"{truncation['chars_total']:,} characters were audited "
+            f"({truncation['coverage']:.0%} of the article). Issues in the "
+            f"remaining text would not have been detected.\n"
+        )
+    report_text += "\n"
 
     report_text += "Metrics:\n"
     report_text += f"- Depth: {report.depth_score}/10\n"
@@ -267,4 +279,7 @@ def qa_agent_node(state: State) -> dict:
         "qa_verdict": report.verdict,
         "qa_issues": issues_list,
         "qa_score": report.overall_score,
+        # Records whether the score covers the whole article, so a partial
+        # measurement is never reported as a complete one.
+        "qa_coverage": truncation,
     }

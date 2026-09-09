@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from Graph.state import State
-from Graph.agents.utils import llm_judge, _JUDGE_MODEL, _job, _emit
+from Graph.agents.utils import llm_judge, _JUDGE_MODEL, _job, _emit, truncate_for_eval
 
 logger = logging.getLogger("blog_pipeline")
 
@@ -46,6 +46,10 @@ class GEvalScorecard(BaseModel):
         description="Filled in by code, not the model. Leave as 0."
     )
 
+
+# Character cap on the text handed to a judge. Truncation is reported rather
+# than applied silently — see truncate_for_eval() in agents/utils.py.
+_GEVAL_CHAR_LIMIT = 25_000
 
 # Weighted-average weights for the overall G-Eval score.
 # 30% Coherence, 20% Relevance, 30% Accuracy, 20% Tone.
@@ -133,6 +137,10 @@ def geval_evaluation_node(state: State) -> Dict[str, Any]:
             snippet = getattr(item, "snippet", "")
         formatted_evidence += f"\n[Evidence Source {idx+1}]: {title}\nExcerpt: {snippet}\n"
 
+    graded_text, coverage = truncate_for_eval(
+        blog_content, _GEVAL_CHAR_LIMIT, "G-Eval", job_id
+    )
+
     human_prompt = f"""EVALUATION CONTEXT:
 Topic: {topic}
 Target Tone: {target_tone}
@@ -141,7 +149,7 @@ RESEARCH EVIDENCE PROVIDED TO THE WRITER:
 {formatted_evidence[:8000]}
 
 BLOG CONTENT UNDER EVALUATION:
-{blog_content[:25000]}
+{graded_text}
 """
 
     try:
@@ -164,6 +172,7 @@ BLOG CONTENT UNDER EVALUATION:
         # independent judge or the same model that wrote the text.
         scores_dict = scorecard.model_dump()
         scores_dict["judge_model"] = _JUDGE_MODEL
+        scores_dict["coverage"] = coverage
         logger.info(f"[{job_id}] G-Eval complete. Overall Score: {scorecard.overall_score}/5.0")
         
         # Calculate raw text metrics
@@ -264,6 +273,10 @@ def deepeval_evaluation_node(state: State) -> Dict[str, Any]:
         _emit(job_id, "deepeval_evaluator", "error", msg)
         return {}
 
+    graded_text, coverage = truncate_for_eval(
+        blog_content, _GEVAL_CHAR_LIMIT, "DeepEval G-Eval", job_id
+    )
+
     # Build retrieval_context from evidence (deepeval expects List[str])
     retrieval_context = []
     for item in evidence_items:
@@ -277,7 +290,7 @@ def deepeval_evaluation_node(state: State) -> Dict[str, Any]:
     # Truncate to keep token usage bounded (deepeval calls the judge LLM per metric)
     test_case = LLMTestCase(
         input=f"Write a {target_tone} blog post about: {topic}",
-        actual_output=blog_content[:25000],
+        actual_output=graded_text,
         retrieval_context=(retrieval_context or None),
     )
 
@@ -343,6 +356,7 @@ def deepeval_evaluation_node(state: State) -> Dict[str, Any]:
     # Previously deepeval fell back to its own undocumented default model, which
     # made these scores unattributable. The judge is now pinned and recorded.
     results["judge_model"] = _JUDGE_MODEL
+    results["coverage"] = coverage
 
     logger.info(f"[{job_id}] deepeval G-Eval complete. Overall (0-1): {overall}")
     _emit(job_id, "deepeval_evaluator", "completed", "deepeval G-Eval finished.", {

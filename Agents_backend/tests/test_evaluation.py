@@ -147,3 +147,77 @@ class TestTemperatureIsInertOnReasoningModels:
             )
         else:
             assert utils.llm_planner.temperature == 0.7
+
+
+class TestTruncationIsReported:
+    """Evaluators cap their input; they must not do so silently.
+
+    A 39,025-character article was audited on 77% of its text and graded by
+    G-Eval on 64% of it, with nothing in the logs, the report or the scores to
+    say so. A score over two thirds of an article is a different measurement
+    from one over all of it, and a reader of the results had no way to tell
+    which they were looking at.
+    """
+
+    def test_short_text_is_untouched_and_reports_full_coverage(self):
+        from Graph.agents.utils import truncate_for_eval
+
+        text = "a" * 100
+        out, info = truncate_for_eval(text, 25_000, "test")
+        assert out == text
+        assert info["truncated"] is False
+        assert info["coverage"] == 1.0
+        assert info["chars_evaluated"] == info["chars_total"] == 100
+
+    def test_long_text_is_clipped_and_flagged(self):
+        from Graph.agents.utils import truncate_for_eval
+
+        out, info = truncate_for_eval("a" * 39_025, 25_000, "test")
+        assert len(out) == 25_000
+        assert info["truncated"] is True
+        assert info["chars_total"] == 39_025
+        assert info["coverage"] == 0.6406  # the real open_book_current figure
+
+    def test_empty_text_does_not_divide_by_zero(self):
+        from Graph.agents.utils import truncate_for_eval
+
+        out, info = truncate_for_eval("", 25_000, "test")
+        assert out == ""
+        assert info["coverage"] == 1.0
+        assert info["truncated"] is False
+
+    def test_truncation_is_logged_as_a_warning(self, caplog):
+        import logging
+        from Graph.agents.utils import truncate_for_eval
+
+        with caplog.at_level(logging.WARNING, logger="blog_pipeline"):
+            truncate_for_eval("a" * 40_000, 25_000, "G-Eval")
+        assert any("truncated" in r.message.lower() for r in caplog.records)
+
+    def test_qa_coverage_is_declared_in_state(self):
+        """Undeclared keys are dropped silently — the generate_qa trap."""
+        from Graph.state import State
+
+        assert "qa_coverage" in State.__annotations__
+
+    def test_both_judges_record_coverage_with_their_scores(self):
+        import inspect
+        from Graph.agents import evaluation
+
+        src = inspect.getsource(evaluation)
+        assert 'scores_dict["coverage"] = coverage' in src
+        assert 'results["coverage"] = coverage' in src
+
+    def test_no_evaluator_slices_the_article_inline(self):
+        """A bare [:25000] bypasses the reporting helper."""
+        import inspect
+        import re
+        from Graph.agents import evaluation, quality_control
+
+        for module in (evaluation, quality_control):
+            code = "\n".join(
+                l for l in inspect.getsource(module).splitlines()
+                if not l.lstrip().startswith("#")
+            )
+            bad = re.findall(r"blog_content\[:\d+\]|final_text\[:_?[A-Z_]*\d*\]", code)
+            assert not bad, f"{module.__name__} truncates inline: {bad}"
