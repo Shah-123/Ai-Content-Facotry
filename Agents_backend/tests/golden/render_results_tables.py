@@ -167,6 +167,54 @@ def repetition_caveats(rows: list[dict]) -> str:
     return "; ".join(weak) or "all runs had a sufficient statistic count"
 
 
+def ablation_table() -> tuple[str, str]:
+    """Per-fixture and aggregate comparison of the two evidence-distribution arms.
+
+    Returns (per_fixture_rows, summary_line).
+
+    `max_section_spread` leads because it needs no denominator. The repetition
+    RATE is repeated/distinct, and an article containing one or two distinct
+    figures can only score 0.0 or 1.0 — the evergreen fixture scores 1.0 in
+    both arms purely because it has so few statistics, which says nothing about
+    the treatment. The spread is the count of sections the single most-reused
+    statistic reaches, and it separates the arms cleanly.
+    """
+    treat = {r["case_id"]: r for r in load("assigned")}
+    ctrl = {r["case_id"]: r for r in load("fullpool")}
+
+    rows, t_spreads, c_spreads, t_rep, c_rep = [], [], [], [], []
+    for case in _ORDER:
+        t, c = treat.get(case), ctrl.get(case)
+        if not t or not c:
+            continue
+        tr, cr = t["repetition"], c["repetition"]
+        rows.append(
+            f"        {_LABELS[case]} & {cr['max_section_spread']} & "
+            f"{tr['max_section_spread']} & {cr['repeated_statistics']} & "
+            f"{tr['repeated_statistics']} \\\\\n        \\hline"
+        )
+        t_spreads.append(tr["max_section_spread"])
+        c_spreads.append(cr["max_section_spread"])
+        t_rep.append(tr["repeated_statistics"])
+        c_rep.append(cr["repeated_statistics"])
+
+    if not rows:
+        return "% both arms required — run GOLDEN_ASSIGN_EVIDENCE=0 and =1", ""
+
+    n = len(rows)
+    rows.append(
+        f"        \\textbf{{Mean}} & \\textbf{{{sum(c_spreads)/n:.1f}}} & "
+        f"\\textbf{{{sum(t_spreads)/n:.1f}}} & \\textbf{{{sum(c_rep)/n:.1f}}} & "
+        f"\\textbf{{{sum(t_rep)/n:.1f}}} \\\\\n        \\hline"
+    )
+    summary = (
+        f"n={n} per arm; worst-case spread {sum(c_spreads)/n:.1f} -> "
+        f"{sum(t_spreads)/n:.1f}, repeated statistics {sum(c_rep)/n:.1f} -> "
+        f"{sum(t_rep)/n:.1f}"
+    )
+    return "\n".join(rows), summary
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", default=None, help="assigned | fullpool")
@@ -189,6 +237,12 @@ def main() -> int:
     print(rubric_table(rows))
     print("\n% ---- token usage ----")
     print(usage_summary(rows))
+
+    print("\n% ---- tab:ablation ----")
+    abl, abl_summary = ablation_table()
+    print(abl)
+    if abl_summary:
+        print(f"% {abl_summary}")
 
     print("\n% ---- notes for the threats-to-validity section ----")
     print(f"% truncation: {coverage_notes(rows)}")

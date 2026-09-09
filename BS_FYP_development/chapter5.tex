@@ -438,11 +438,11 @@ Table \ref{tab:golden_results} reports the outcome of the three golden runs.
         \textbf{Topic Fixture} & \textbf{Mode} & \textbf{Words} & \textbf{Sources} &
         \textbf{QA} & \textbf{Verdict} & \textbf{Revisions} & \textbf{G-Eval} \\
         \hline
-        Evergreen (photosynthesis) & hybrid & 2,825 & 0 & 8.0 & READY & 0 & 3.7 \\
+        Evergreen (photosynthesis) & hybrid & 2,933 & 9 & 8.0 & READY & 0 & 4.0 \\
         \hline
-        Professional (SEO 2026) & open\_book & 3,174 & 9 & 7.0 & READY & 0 & 4.0 \\
+        Professional (SEO 2026) & open\_book & 3,103 & 10 & 8.0 & READY & 1 & 4.0 \\
         \hline
-        Technical (multi-agent AI) & open\_book & 4,447 & 10 & 8.0 & NEEDS\_REVISION & 2 & 3.7 \\
+        Technical (multi-agent AI) & open\_book & 3,589 & 9 & 8.0 & READY & 0 & 4.0 \\
         \hline
     \end{tabular}
     }
@@ -451,21 +451,27 @@ Table \ref{tab:golden_results} reports the outcome of the three golden runs.
     \label{tab:golden_results}
 \end{table}
 
-The system produced substantial articles (2,825--4,447 words) in every case,
-with quality-assurance scores between 7.0 and 8.0 and weighted G-Eval scores
-between 3.7 and 4.0 out of 5.0.
+The system produced substantial articles (2,933--3,589 words) in every case,
+each grounded in 9--10 evidence items, scoring 8.0 out of 10 on the
+quality-assurance audit and 4.0 out of 5.0 on the weighted G-Eval rubric. All
+three cleared the audit; the professional fixture required one pass of the
+revision loop before doing so.
 
-One result is a negative finding and is reported as such. The evergreen fixture
-completed in \texttt{hybrid} mode having gathered \textbf{zero} evidence items,
-yet was still marked \texttt{READY} and recorded in its metadata as
-source-grounded. The article was not wrong, but the system's description of it
-was: a post written entirely from model knowledge was being reported as
-research-backed. This was traced to a missing guard in the research node, which
-returned an empty evidence list without revising the mode selected earlier by
-the router. The pipeline now downgrades the mode to \texttt{closed\_book}
-whenever research yields no usable evidence, so that the planning prompt,
-the stored metadata, and the evaluation harness all describe the article
-accurately. The behaviour is locked in by seven regression tests.
+A defect found in an earlier execution of this same harness is worth recording,
+because it is the reason one of the pipeline's guards exists. In that run the
+evergreen fixture completed in \texttt{hybrid} mode having gathered
+\textbf{zero} evidence items, yet was still marked \texttt{READY} and recorded
+in its metadata as source-grounded. The article was not wrong, but the system's
+description of it was: a post written entirely from model knowledge was being
+reported as research-backed. The cause was a missing guard in the research
+node, which returned an empty evidence list without revising the mode the
+router had selected earlier. The pipeline now downgrades the mode to
+\texttt{closed\_book} whenever research yields no usable evidence, so that the
+planning prompt, the stored metadata and the evaluation harness all describe
+the article accurately; the behaviour is fixed by seven regression tests. In
+the runs reported above the guard was not exercised, because research succeeded
+in every case --- the same fixture that previously retrieved nothing now
+retrieves nine sources, and its grounding score rose from 3 to 4 accordingly.
 
 \subsection{G-Eval Rubric Breakdown}
 
@@ -483,47 +489,189 @@ weighted arithmetic unreliably.
         \textbf{Dimension} & \textbf{Weight} & \textbf{Evergreen} &
         \textbf{Professional} & \textbf{Technical} \\
         \hline
-        Coherence (structure \& flow) & 30\% & 4 & 4 & 3 \\
+        Coherence (structure \& flow) & 30\% & 4 & 4 & 4 \\
         \hline
         Relevance (topic coverage) & 20\% & 4 & 4 & 4 \\
         \hline
-        Accuracy \& grounding & 30\% & 3 & 4 & 4 \\
+        Accuracy \& grounding & 30\% & 4 & 4 & 4 \\
         \hline
         Tone alignment & 20\% & 4 & 4 & 4 \\
         \hline
-        \textbf{Weighted overall} & --- & \textbf{3.7} & \textbf{4.0} & \textbf{3.7} \\
+        \textbf{Weighted overall} & --- & \textbf{4.0} & \textbf{4.0} & \textbf{4.0} \\
         \hline
     \end{tabular}
     \caption{G-Eval rubric scores by dimension (1--5 scale)}
     \label{tab:geval_breakdown}
 \end{table}
 
-Two patterns are visible even at this sample size. Accuracy scored lowest on the
-evergreen topic --- the run that gathered no evidence --- which is the expected
-consequence of an ungrounded article and an encouraging sign that the judge is
-sensitive to grounding rather than merely to fluency. Coherence scored lowest on
-the longest article, consistent with structural quality degrading as the number
-of independently written sections grows.
+Every dimension scored 4 on every fixture. That uniformity is itself worth
+interpreting, and not as a strong result: a judge that returns the same value
+for four distinct criteria across three different articles is exhibiting little
+discriminative power. Two readings are consistent with it --- that the articles
+genuinely are of comparable quality, or that the rubric's anchors are not
+separating cases well at this end of the scale --- and this evidence cannot
+distinguish between them. It does, however, sharpen a point already made in
+Section \ref{sec:threats}: a judge sharing a model family with the writer is a
+weak instrument, and the flat distribution is what a weak instrument looks like.
+
+An earlier execution of the same fixtures produced more varied scores (3.7,
+4.0, 3.7 overall, with accuracy dropping to 3 on the ungrounded article), which
+indicates that these figures move between runs. A single run per condition
+therefore characterises one sample of a stochastic process rather than a stable
+property of the system.
+
+\subsection{Ablation: Evidence Distribution Across Parallel Writers}
+\label{sec:ablation}
+
+The orchestrator partitions the evidence pool so that each parallel writer
+receives its own slice rather than the whole set. That mechanism exists because
+of an observed defect: with nine sections and five evidence items, every worker
+independently gravitated toward the same two or three most prominent
+statistics, and one article repeated the same figure seven times. This section
+measures whether the mitigation works.
+
+\subsubsection{Method}
+The pipeline exposes the partitioning as a switch. With
+\texttt{assign\_evidence} disabled the orchestrator skips assignment entirely
+and every worker falls back to the full evidence pool, reproducing the pre-fix
+behaviour exactly; a unit test asserts that the two arms genuinely differ, so a
+null result cannot be an artefact of both arms behaving identically. Each of the
+three topic fixtures was run once per arm, holding the writer model, the judge
+model and every other parameter fixed.
+
+Two dependent variables are recorded, both computed by deterministic text
+analysis with no model involved --- so unlike the quality scores, they are not
+exposed to judge bias:
+
+\begin{itemize}
+    \item \textbf{Worst-case section spread}: the number of distinct sections
+      reached by the single most-reused statistic. This is the primary measure,
+      because it requires no denominator and directly expresses the defect --- a
+      figure appearing in many sections is exactly what was observed.
+    \item \textbf{Repeated statistics}: how many distinct statistics appear in
+      more than one section.
+\end{itemize}
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        \textbf{Topic Fixture} & \multicolumn{2}{c|}{\textbf{Worst-case spread}} &
+        \multicolumn{2}{c|}{\textbf{Repeated statistics}} \\
+        \cline{2-5}
+         & Full pool & Partitioned & Full pool & Partitioned \\
+        \hline
+        Evergreen (photosynthesis) & 4 & 2 & 3 & 1 \\
+        \hline
+        Professional (SEO 2026) & 4 & 2 & 4 & 1 \\
+        \hline
+        Technical (multi-agent AI) & 2 & 2 & 2 & 5 \\
+        \hline
+        \textbf{Mean} & \textbf{3.3} & \textbf{2.0} & \textbf{3.0} & \textbf{2.3} \\
+        \hline
+    \end{tabular}
+    \caption{Evidence-distribution ablation, $n=1$ run per fixture per arm.
+             Lower is better in every column.}
+    \label{tab:ablation}
+\end{table}
+
+\subsubsection{Result}
+On the primary measure the mitigation behaves as designed. Under partitioning
+no statistic reached more than two sections in any fixture; without it, two of
+the three articles contained a figure that recurred across four. The treatment
+is never worse than the control on this measure, and is strictly better on two
+of three fixtures.
+
+The secondary measure is mixed, and the reason is instructive. On the technical
+fixture the partitioned run repeated five statistics against the control's two
+--- apparently a worse outcome. But that run also surfaced \textbf{17 distinct
+statistics against the control's 8}. A raw count of repetitions is not
+comparable between articles containing different numbers of facts: the
+partitioned article repeated 5 of 17 figures (29\%) while the control repeated 2
+of 8 (25\%), a near-identical proportion over more than twice the factual
+density. Read that way, partitioning did not increase repetition on this
+fixture; it roughly doubled the number of distinct facts the article drew on
+while holding the repetition proportion approximately constant.
+
+\subsubsection{Limitations of this experiment}
+The result supports the mechanism but does not establish an effect size. One run
+per condition cannot separate the treatment from run-to-run variance, and the
+figures in Table \ref{tab:golden_results} are known to move between runs. The
+evergreen fixture is close to degenerate for this purpose: the partitioned run
+contained only a single distinct statistic, so its repetition \emph{rate} is
+1.0 by construction and carries no information --- which is why the rate is
+excluded from Table \ref{tab:ablation} in favour of the spread. A stronger
+version of this experiment would repeat each arm several times per fixture and
+report a mean with a dispersion estimate; that is the single most valuable
+extension to this work.
+
+\subsection{Cost per Generation}
+
+Every model call is metered, and token counts with an estimated cost are written
+alongside each run. Table \ref{tab:cost} reports the three fixtures under the
+production configuration.
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|c|c|}
+        \hline
+        \textbf{Topic Fixture} & \textbf{LLM calls} & \textbf{Total tokens} &
+        \textbf{Estimated cost (USD)} \\
+        \hline
+        Evergreen (photosynthesis) & 16 & 107,737 & 0.1052 \\
+        \hline
+        Professional (SEO 2026) & 18 & 136,754 & 0.1345 \\
+        \hline
+        Technical (multi-agent AI) & 16 & 113,825 & 0.1114 \\
+        \hline
+        \textbf{Mean} & \textbf{16.7} & \textbf{119,439} & \textbf{0.1170} \\
+        \hline
+    \end{tabular}
+    \caption{Token usage and estimated cost per article, $n=3$.}
+    \label{tab:cost}
+\end{table}
+
+Three qualifications apply to these figures. They cover \textbf{chat completions
+only}: the embedding calls made during document ingestion are not metered,
+because the embeddings client silently forwards an unrecognised callback
+parameter into the API request, so instrumenting it that way would break
+ingestion. At \$0.02 per million tokens the omission is worth well under a cent
+against a run costing roughly twelve, but the figures are a lower bound rather
+than a total. They also cover the \textbf{article alone} --- the harness
+disables image, video, podcast and campaign generation, each of which would add
+materially. Finally, cost is derived from published list prices recorded in the
+source, so it is an estimate whose basis moves when vendors reprice.
 
 \subsection{Qualitative Result: the Quality Gate in Operation}
 
 Aggregate scores do not show whether the fact-checking layer performs useful
-work, so this section examines the one run that failed its audit.
+work. None of the three runs reported above failed its audit, so this section
+examines an earlier execution of the technical fixture that did. Its artefacts
+are retained alongside the current ones.
 
-The technical fixture produced an article containing the claim that a
-``SpaceX--xAI merger totaled \$1.25 trillion''. The quality-assurance
-agent flagged it as a factual error, correctly characterising it as an
-extraordinary financial claim requiring a primary source. In the same audit it
-identified four further issues: undated GitHub star counts presented as current
-figures, an internally inconsistent sourcing column in a comparison table,
-over-reliance on secondary industry summaries where primary academic sources
-existed, and repetitive signposting between sections.
+That run produced an article containing the claim that a ``SpaceX--xAI merger
+totaled \$1.25 trillion''. The quality-assurance agent flagged it as a factual
+error, correctly characterising it as an extraordinary financial claim
+requiring a primary source. In the same audit it identified four further
+issues: undated GitHub star counts presented as current figures, an internally
+inconsistent sourcing column in a comparison table, over-reliance on secondary
+industry summaries where primary academic sources existed, and repetitive
+signposting between sections.
 
 The run then exercised the bounded revision loop. Two revision attempts were
 made --- the configured maximum --- after which one critical issue remained
 unresolved. Rather than reporting the article as publication-ready, the pipeline
 retained the \texttt{NEEDS\_REVISION} verdict and prepended an explicit draft
 warning to both the article and its summary README.
+
+That the same fixture, under the same configuration, later produced three clean
+runs in succession is itself a result. The audit is not deterministic: whether a
+fabricated claim appears at all depends on what the writer generates on a given
+execution, so the quality gate cannot be characterised by a single run in either
+direction. Observing the gate fire correctly demonstrates that the mechanism
+works; it does not establish how often it needs to.
 
 This single case demonstrates three designed behaviours operating together: the
 audit detects fabricated content rather than merely scoring style; the revision
@@ -581,11 +729,21 @@ explicitly rather than left for the reader to infer.
     \item \textbf{Partial evaluation of the longest article.} Both evaluators
       cap their input to bound cost: the quality-assurance audit at 30,000
       characters and the G-Eval judge at 25,000. The technical fixture produced
-      39,025 characters, so its audit covered 77\% of the text and its G-Eval
-      score 64\% of it. Its scores are therefore partial measurements, and its
-      coherence rating --- the lowest recorded, at 3 --- may be depressed by the
-      judge having seen an article that ended mid-argument. The shorter two
-      fixtures were evaluated in full. The system now logs this truncation and
-      records the coverage fraction alongside every score, so a partial
-      measurement can no longer be mistaken for a complete one.
+      28,441 characters, so it was audited in full but judged on 88\% of its
+      text; the other two were evaluated in full. Its G-Eval score is therefore
+      a partial measurement. The system now logs this truncation and records the
+      coverage fraction alongside every score, so a partial measurement can no
+      longer be mistaken for a complete one.
+
+    \item \textbf{Run-to-run variance is substantial and now measured.} The same
+      three fixtures were executed twice under identical configuration. Between
+      those executions the technical fixture moved from
+      \texttt{NEEDS\_REVISION} with two revision passes and an unresolved
+      critical issue to \texttt{READY} with none, the evergreen fixture moved
+      from zero retrieved sources to nine, and the overall G-Eval scores moved
+      from 3.7--4.0 to a uniform 4.0. Every figure in this chapter is therefore
+      one sample of a stochastic process, not a fixed property of the system. No
+      difference reported here should be read as an effect without repeated
+      runs behind it, and the ablation in Section \ref{sec:ablation} carries the
+      same caveat.
 \end{itemize}
