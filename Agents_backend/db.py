@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS web_jobs (
     generate_campaign    INTEGER DEFAULT 0,
     geval_scores         TEXT,
     deepeval_scores      TEXT,
+    usage_json           TEXT,
     image_model          TEXT DEFAULT 'dall-e-3',
     image_size           TEXT DEFAULT '1024x1024',
     image_quality        TEXT DEFAULT 'standard',
@@ -128,6 +129,13 @@ def init_db():
                 if "deepeval_scores" not in columns:
                     try:
                         conn.execute(_format_sql("ALTER TABLE web_jobs ADD COLUMN deepeval_scores TEXT"))
+                        conn.commit()
+                    except Exception as e:
+                        print(f"   [Error] Migration failed: {e}")
+
+                if "usage_json" not in columns:
+                    try:
+                        conn.execute(_format_sql("ALTER TABLE web_jobs ADD COLUMN usage_json TEXT"))
                         conn.commit()
                     except Exception as e:
                         print(f"   [Error] Migration failed: {e}")
@@ -227,7 +235,7 @@ def update_job(job_id: str, **fields) -> Optional[dict]:
 
     # Serialize dict / list fields automatically
     for k, v in list(fields.items()):
-        if k in ("geval_scores", "deepeval_scores", "config_json") and v is not None and not isinstance(v, str):
+        if k in ("geval_scores", "deepeval_scores", "config_json", "usage_json") and v is not None and not isinstance(v, str):
             fields[k] = json.dumps(v)
 
     set_clause = ", ".join(f"{k} = ?" for k in fields)
@@ -300,6 +308,10 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
             d["plan"] = None
     else:
         d["plan"] = None
+
+    # Measured token usage and estimated cost for the run. Absent on jobs that
+    # completed before instrumentation existed, and on jobs that never finished.
+    d["usage"] = _read_json(d.get("usage_json")) or None
 
     # Parse geval_scores JSON if present
     if d.get("geval_scores"):

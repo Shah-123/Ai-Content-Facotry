@@ -201,3 +201,86 @@ class TestUsageAccounting:
 
         monkeypatch.setenv("LLM_PRICE_GPT_5_MINI", "1.00,4.00")
         assert usage._price_for("gpt-5-mini") == (1.00, 4.00)
+
+
+class TestUsageReachesTheDashboard:
+    """The dashboard must show measured figures, never invented ones.
+
+    useJobAnalytics.ts previously passed hardcoded `defaultCost`/`defaultTokens`
+    to every agent node and fell back to them whenever no event carried metrics
+    — which was always, because the backend never emitted a per-agent cost. The
+    UI advertised "real-time cost tracking" while displaying constants that
+    summed to roughly a third of the true figure ($0.02-0.04 against a measured
+    $0.117). These tests pin the data path that replaced it.
+    """
+
+    def test_usage_persists_on_the_job_row(self, tmp_path, monkeypatch):
+        import db
+
+        monkeypatch.setattr(db, "DB_PATH", tmp_path / "usage.db")
+        db.init_db()
+        job = db.create_job(topic="usage persistence")
+
+        assert db.get_job(job["id"])["usage"] is None, "unfinished jobs must report no usage"
+
+        measured = {
+            "total": {"calls": 16, "input_tokens": 63037, "output_tokens": 44700,
+                      "total_tokens": 107737, "cost_usd": 0.105159},
+            "by_model": {"gpt-5-mini": {"calls": 16, "input_tokens": 63037,
+                                        "output_tokens": 44700, "total_tokens": 107737,
+                                        "cost_usd": 0.105159}},
+            "priced": True,
+        }
+        db.set_job_completed(job["id"], usage_json=measured)
+
+        got = db.get_job(job["id"])["usage"]
+        assert got["total"]["cost_usd"] == 0.105159
+        assert got["total"]["total_tokens"] == 107737
+        assert "gpt-5-mini" in got["by_model"]
+
+    def test_absent_usage_is_none_not_zero(self, tmp_path, monkeypatch):
+        """Zero is a measurement; absence is not. They must not be conflated."""
+        import db
+
+        monkeypatch.setattr(db, "DB_PATH", tmp_path / "usage2.db")
+        db.init_db()
+        job = db.create_job(topic="no usage recorded")
+        db.set_job_completed(job["id"], word_count=100)
+        assert db.get_job(job["id"])["usage"] is None
+
+    def test_pipeline_persists_and_emits_the_measured_usage(self):
+        import inspect
+        from api import background
+
+        src = inspect.getsource(background._run_pipeline)
+        assert "usage_json           = run_usage," in src, (
+            "the measured usage must be stored on the job row"
+        )
+        assert '"usage": run_usage,' in src, (
+            "the completion event must carry the measured usage for live dashboards"
+        )
+
+    def test_frontend_does_not_fabricate_per_agent_costs(self):
+        """Guard the actual defect: hardcoded fallbacks in the analytics hook."""
+        import pathlib
+        import re
+
+        hook = (pathlib.Path(__file__).resolve().parents[2]
+                / "frontend" / "src" / "hooks" / "useJobAnalytics.ts")
+        if not hook.exists():
+            import pytest
+            pytest.skip("frontend not present")
+
+        src = hook.read_text(encoding="utf-8")
+        code = "\n".join(
+            l for l in src.splitlines()
+            if not l.lstrip().startswith(("*", "/*", "//"))
+        )
+
+        # getDynamicMetrics(events, 'x') is fine; a third argument is a fabricated default
+        offenders = re.findall(r"getDynamicMetrics\(events,\s*'[a-z_]+'\s*,[^)]", code)
+        assert not offenders, (
+            f"{len(offenders)} call(s) pass a hardcoded cost/token default; the "
+            f"dashboard must show measured values or a dash"
+        )
+        assert "defaultCost" not in code and "defaultTokens" not in code

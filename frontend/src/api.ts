@@ -95,6 +95,28 @@ export interface Job {
   final_content?: string;
   social_linkedin?: string;
   social_twitter?: string;
+  /** Measured token usage and estimated cost for the run, recorded by
+   *  Agents_backend/usage.py. Absent on jobs that never finished and on jobs
+   *  that completed before instrumentation existed — treat absence as
+   *  "not measured", never as zero. Covers chat completions only; embedding
+   *  calls are excluded. Cost is an estimate from published list prices. */
+  usage?: {
+    total: {
+      calls: number;
+      input_tokens: number;
+      output_tokens: number;
+      total_tokens: number;
+      cost_usd: number;
+    };
+    by_model: Record<string, {
+      calls: number;
+      input_tokens: number;
+      output_tokens: number;
+      total_tokens: number;
+      cost_usd: number;
+    }>;
+    priced: boolean;
+  };
 }
 
 export interface AgentEvent {

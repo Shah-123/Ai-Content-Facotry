@@ -434,22 +434,26 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                 {/* Metrics Highlights Header */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Est. Tokens</span>
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Measured Tokens</span>
                     <div className="mt-2 flex items-baseline gap-2">
                       <span className="text-2xl font-black text-amber-400">
-                        ~{analytics.totalTokens.toLocaleString()}
+                        {analytics.totalTokens === null ? '—' : analytics.totalTokens.toLocaleString()}
                       </span>
-                      <span className="text-xs text-slate-500 font-medium">tokens</span>
+                      <span className="text-xs text-slate-500 font-medium">
+                        {analytics.totalTokens === null ? 'not recorded' : 'tokens'}
+                      </span>
                     </div>
                   </div>
 
                   <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Estimated Cost</span>
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Measured Cost</span>
                     <div className="mt-2 flex items-baseline gap-2">
                       <span className="text-2xl font-black text-emerald-400">
-                        ~${analytics.totalCost.toFixed(3)}
+                        {analytics.totalCost === null ? '—' : `$${analytics.totalCost.toFixed(4)}`}
                       </span>
-                      <span className="text-xs text-slate-500 font-medium">USD</span>
+                      <span className="text-xs text-slate-500 font-medium">
+                        {analytics.totalCost === null ? 'not recorded' : `USD · ${analytics.totalCalls} calls`}
+                      </span>
                     </div>
                   </div>
 
@@ -478,7 +482,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                         <Layers className="w-5 h-5 text-accent-400" />
                         Multi-Agent Execution Matrix
                       </h3>
-                      <p className="text-xs text-slate-400 mt-1">Real-time model mapping, role descriptions, dynamic cost tracking, and execution status across graph nodes.</p>
+                      <p className="text-xs text-slate-400 mt-1">Model mapping, role descriptions and execution status per graph node. Cost is metered per RUN, not per agent — see the measured total above; a dash means the figure was not recorded.</p>
                     </div>
                     <span className="px-3 py-1 rounded-full text-xs font-semibold bg-accent-500/10 text-accent-400 border border-accent-500/20">
                       LangGraph Directed Acyclic Graph (DAG)
@@ -508,8 +512,9 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                               </td>
                               <td className={`py-3 px-4 font-mono ${isSkipped ? 'text-slate-500' : node.textColor}`}>{node.model}</td>
                               <td className="py-3 px-4 text-slate-400">{node.role}</td>
-                              <td className={`py-3 px-4 font-mono ${node.cost > 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
-                                ${node.cost.toFixed(3)}
+                              <td className={`py-3 px-4 font-mono ${node.cost ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}
+                                  title={node.cost === null ? 'Per-agent cost is not measured; see the run total above' : undefined}>
+                                {node.cost === null ? '—' : `$${node.cost.toFixed(4)}`}
                               </td>
                               <td className="py-3 px-4">
                                 {isRunning ? (

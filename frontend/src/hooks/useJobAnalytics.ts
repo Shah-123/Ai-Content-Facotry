@@ -10,8 +10,9 @@ export type AnalyticsNode = {
   textColor: string;
   model: string;
   role: string;
-  cost: number;
-  tokens: number;
+  /** null = not measured for this agent; render as a dash, never as 0. */
+  cost: number | null;
+  tokens: number | null;
   status: string;
   active: boolean;
 };
@@ -37,19 +38,19 @@ export function useJobAnalytics(
     const hasResearch = currentJob.plan?.needs_research !== false;
     const hasContent = Boolean(currentJob.final_content);
 
-    const topicGuardMetrics = getDynamicMetrics(events, 'topic_guard', 0.001, 150);
-    const routerMetrics = getDynamicMetrics(events, 'router', 0.001, 200);
-    const researcherMetrics = getDynamicMetrics(events, 'researcher', hasResearch ? 0.005 : 0, 0);
-    const docIngestMetrics = getDynamicMetrics(events, 'document_ingest', hasRag ? 0.002 : 0, hasRag ? 1500 : 0);
-    const orchestratorMetrics = getDynamicMetrics(events, 'orchestrator', 0.004, 1200);
-    const workersMetrics = getDynamicMetrics(events, 'workers', hasContent ? Number((0.005 * numSections).toFixed(3)) : 0, hasContent ? Math.round((wordCount || 600) * 1.5) : 0);
-    const reducerMetrics = getDynamicMetrics(events, 'reducer', hasContent ? 0.002 : 0, hasContent ? Math.round((wordCount || 600) * 0.3) : 0);
-    const imageGenMetrics = getDynamicMetrics(events, 'image_gen', hasImages ? Number((0.020 * imageCount).toFixed(3)) : 0, 0);
-    const qaMetrics = getDynamicMetrics(events, 'qa', hasContent ? 0.006 : 0, hasContent ? Math.round((wordCount || 600) * 0.8) : 0);
-    const seoMetrics = getDynamicMetrics(events, 'seo', hasContent ? 0.003 : 0, hasContent ? Math.round((wordCount || 600) * 0.4) : 0);
-    const podcastMetrics = getDynamicMetrics(events, 'podcast', hasPodcast ? 0.012 : 0, hasPodcast ? 2500 : 0);
-    const videoMetrics = getDynamicMetrics(events, 'video', hasVideo ? 0.018 : 0, 0);
-    const gevalMetrics = getDynamicMetrics(events, 'geval', hasGEval ? 0.015 : 0, hasGEval ? 3000 : 0);
+    const topicGuardMetrics = getDynamicMetrics(events, 'topic_guard');
+    const routerMetrics = getDynamicMetrics(events, 'router');
+    const researcherMetrics = getDynamicMetrics(events, 'researcher');
+    const docIngestMetrics = getDynamicMetrics(events, 'document_ingest');
+    const orchestratorMetrics = getDynamicMetrics(events, 'orchestrator');
+    const workersMetrics = getDynamicMetrics(events, 'workers');
+    const reducerMetrics = getDynamicMetrics(events, 'reducer');
+    const imageGenMetrics = getDynamicMetrics(events, 'image_gen');
+    const qaMetrics = getDynamicMetrics(events, 'qa');
+    const seoMetrics = getDynamicMetrics(events, 'seo');
+    const podcastMetrics = getDynamicMetrics(events, 'podcast');
+    const videoMetrics = getDynamicMetrics(events, 'video');
+    const gevalMetrics = getDynamicMetrics(events, 'geval');
 
     const nodes: AnalyticsNode[] = [
       {
@@ -112,10 +113,19 @@ export function useJobAnalytics(
     ];
 
     const activeNodes = nodes.filter(node => node.active);
+
+    // Run totals come from the backend's own accounting (usage.py), which
+    // meters every model call. Summing the per-node column instead would
+    // under-report badly, because per-agent attribution is not measured.
+    // `measured` distinguishes "we know it cost this" from "we have no data",
+    // so the UI can say so rather than displaying a plausible-looking zero.
+    const runUsage = currentJob.usage?.total;
     return {
       nodes,
-      totalCost: nodes.reduce((total, node) => total + node.cost, 0),
-      totalTokens: nodes.reduce((total, node) => total + node.tokens, 0),
+      totalCost: runUsage?.cost_usd ?? null,
+      totalTokens: runUsage?.total_tokens ?? null,
+      totalCalls: runUsage?.calls ?? null,
+      measured: Boolean(runUsage),
       activeAgentCount: activeNodes.length,
       numSections,
     };
@@ -142,19 +152,36 @@ function buildRadarPoints(scores: Job['geval_scores']) {
   }).join(' ');
 }
 
-function getDynamicMetrics(events: AgentEvent[], nodeId: string, defaultCost: number, defaultTokens: number) {
+/** Per-agent cost/tokens, ONLY if the backend actually reported them.
+ *
+ *  This previously took `defaultCost` and `defaultTokens` arguments and fell
+ *  back to them whenever no event carried metrics — which was always, because
+ *  the backend has never emitted a per-agent cost. The dashboard was therefore
+ *  labelled "real-time cost tracking" while displaying hardcoded constants
+ *  that summed to roughly a third of the true figure.
+ *
+ *  Per-agent attribution is not measured: token usage is accumulated per RUN
+ *  (see Agents_backend/usage.py), because LangGraph dispatches the section
+ *  writers to worker threads and a global counter cannot attribute concurrent
+ *  calls to individual nodes. `null` means "not measured" and must render as
+ *  a dash, never as a number. The measured run total is shown separately.
+ */
+function getDynamicMetrics(events: AgentEvent[], nodeId: string): { cost: number | null; tokens: number | null } {
   const event = events.find(candidate =>
     candidate.agent_name === nodeId &&
     (candidate.metrics?.cost !== undefined || candidate.metrics?.total_cost !== undefined || candidate.metrics?.tokens !== undefined)
   );
-  if (!event?.metrics) return { cost: defaultCost, tokens: defaultTokens };
+  if (!event?.metrics) return { cost: null, tokens: null };
 
+  const cost = event.metrics.cost ?? event.metrics.total_cost;
+  const tokens = event.metrics.tokens ?? event.metrics.total_tokens;
   return {
-    cost: Number(event.metrics.cost ?? event.metrics.total_cost ?? defaultCost),
-    tokens: Number(event.metrics.tokens ?? event.metrics.total_tokens ?? defaultTokens),
+    cost: cost === undefined ? null : Number(cost),
+    tokens: tokens === undefined ? null : Number(tokens),
   };
 }
 
 function emptyAnalytics() {
-  return { nodes: [] as AnalyticsNode[], totalCost: 0, totalTokens: 0, activeAgentCount: 0, numSections: 3 };
+  return { nodes: [] as AnalyticsNode[], totalCost: null as number | null, totalTokens: null as number | null,
+           totalCalls: null as number | null, measured: false, activeAgentCount: 0, numSections: 3 };
 }
