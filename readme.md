@@ -94,6 +94,13 @@ graph TD
     classDef ondemand stroke-dasharray: 5 5
 ```
 
+The diagram above is hand-drawn for readability. To render the graph directly
+from the compiled workflow — useful as ground truth when the two might drift:
+
+```bash
+cd Agents_backend && python -c "from main import build_graph; print(build_graph().get_graph().draw_mermaid())"
+```
+
 Two details the diagram makes explicit because they are easy to get wrong:
 
 * **G-Eval runs before the media generators, not after.** Evaluation scores the

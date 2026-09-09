@@ -473,9 +473,12 @@ def build_graph(memory=None):
     reducer.add_node("generate_and_place_images", generate_and_place_images)
     reducer.add_edge(START, "merge_content")
 
+    # Explicit destinations so the subgraph is statically resolvable (see the
+    # note on completion_validator's conditional edge below).
     reducer.add_conditional_edges(
         "merge_content",
-        lambda s: "decide_images" if s.get("generate_images", True) else END
+        lambda s: "decide_images" if s.get("generate_images", True) else END,
+        ["decide_images", END],
     )
     reducer.add_edge("decide_images",             "generate_and_place_images")
     reducer.add_edge("generate_and_place_images", END)
@@ -540,10 +543,18 @@ def build_graph(memory=None):
     workflow.add_edge("worker",               "reducer")
     workflow.add_edge("reducer",              "completion_validator")
     
-    # Conditional edge from completion_validator
+    # Conditional edge from completion_validator.
+    # The destination list is REQUIRED, not decorative. Without it LangGraph
+    # cannot resolve this branch's targets statically, so `get_graph()` renders
+    # `completion_validator -> __end__` and every node after it — QA, revision,
+    # the SEO optimizer, evaluation and all three media generators — vanishes
+    # from the drawn graph. The pipeline still executed correctly; it was the
+    # static view of it that was wrong, which is exactly what a rendered
+    # architecture diagram would have shown.
     workflow.add_conditional_edges(
         "completion_validator",
-        lambda s: "qa_agent" if s.get("generate_qa", False) else "keyword_optimizer"
+        lambda s: "qa_agent" if s.get("generate_qa", False) else "keyword_optimizer",
+        ["qa_agent", "keyword_optimizer"],
     )
 
     # ✅ Automated Revision Loop:
