@@ -79,6 +79,19 @@ _TOPIC_CASES = _GOLDEN["topics"]
 #     GOLDEN_MODEL=gpt-4o-mini RUN_GOLDEN_TESTS=1 pytest tests/golden -v -s
 GOLDEN_MODEL = os.getenv("GOLDEN_MODEL", "gpt-5-mini")
 
+# Ablation switch for the evidence-distribution experiment.
+#   GOLDEN_ASSIGN_EVIDENCE=1 (default) -> workers receive disjoint evidence slices
+#   GOLDEN_ASSIGN_EVIDENCE=0           -> workers receive the full pool (pre-fix)
+# Artefacts are written to an arm-suffixed directory so both arms can be
+# collected without overwriting each other.
+ASSIGN_EVIDENCE = os.getenv("GOLDEN_ASSIGN_EVIDENCE", "1") != "0"
+ARM = "assigned" if ASSIGN_EVIDENCE else "fullpool"
+
+
+def _run_dir(case_id: str) -> Path:
+    """Artefact directory for one case under the current ablation arm."""
+    return _GOLDEN_DIR / "_runs" / f"{case_id}__{ARM}"
+
 
 def _build_initial_state(case: dict) -> dict:
     """Construct the initial graph state for a single golden topic.
@@ -104,11 +117,14 @@ def _build_initial_state(case: dict) -> dict:
         generate_video=False,
         generate_podcast=False,
         export_formats=[],
+        # Ablation arm. A per-case override wins over the environment default,
+        # so a fixture can pin itself to one arm if it ever needs to.
+        assign_evidence=case.get("assign_evidence", ASSIGN_EVIDENCE),
     )
     return build_initial_state(
-        job_id=f"golden_{case['id']}",
+        job_id=f"golden_{case['id']}_{ARM}",
         topic=case["topic"],
-        blog_folder=str(_GOLDEN_DIR / "_runs" / case["id"]),
+        blog_folder=str(_run_dir(case["id"])),
         generation_config=config,
     )
 
@@ -120,9 +136,15 @@ def _run_pipeline(case: dict) -> dict[str, Any]:
     from main import build_graph
     import uuid as _uuid
 
-    Path(case_state := _GOLDEN_DIR / "_runs" / case["id"]).mkdir(
-        parents=True, exist_ok=True
-    )
+    import usage
+
+    _run_dir(case["id"]).mkdir(parents=True, exist_ok=True)
+
+    # Token accounting baseline. Taken here rather than via a contextvar because
+    # LangGraph dispatches the section writers to worker threads, which
+    # contextvar-based accounting does not follow — and those writers are the
+    # bulk of a run's spend.
+    usage_before = usage.snapshot()
 
     app = build_graph()
     thread = {"configurable": {"thread_id": f"golden_{_uuid.uuid4().hex[:12]}"}}
@@ -137,7 +159,11 @@ def _run_pipeline(case: dict) -> dict[str, Any]:
     for _ in app.stream(None, thread, stream_mode="values", recursion_limit=150):
         pass
 
-    return app.get_state(thread).values
+    values = dict(app.get_state(thread).values)
+    # Attached under a private key so it reaches _save_run_artifacts without
+    # being declared in the graph State (LangGraph would drop it anyway).
+    values["_usage"] = usage.delta(usage_before)
+    return values
 
 
 def _save_run_artifacts(case: dict, final_state: dict[str, Any]) -> Path:
@@ -150,18 +176,35 @@ def _save_run_artifacts(case: dict, final_state: dict[str, Any]) -> Path:
 
     Writes to tests/golden/_runs/<case_id>/ (gitignored).
     """
-    run_dir = _GOLDEN_DIR / "_runs" / case["id"]
+    run_dir = _run_dir(case["id"])
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Deterministic repetition / source-spread measurement. These are the
+    # dependent variables for the evidence-distribution ablation; no model is
+    # involved in computing them, so the numbers are not subject to judge bias.
+    from tests.golden.metrics import article_metrics
+    final_md = final_state.get("final", "")
 
     geval = final_state.get("geval_scores") or {}
     summary = {
         "case_id": case["id"],
         "topic": case["topic"],
         "run_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        # Which ablation arm produced this run.
+        "arm": ARM,
+        "assign_evidence": case.get("assign_evidence", ASSIGN_EVIDENCE),
         # Recorded so the report can state exactly which model produced these
         # numbers, and so writer-model arms stay distinguishable.
         "writer_model": case.get("model", GOLDEN_MODEL),
-        "judge_model": os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini"),
+        # The judge is LLM_JUDGE_MODEL, which falls back to LLM_QUALITY_MODEL.
+        # Recording the resolved value (not the raw env var) is what makes a run
+        # attributable — and makes a same-model writer/judge pair visible.
+        "judge_model": os.getenv(
+            "LLM_JUDGE_MODEL", os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini")
+        ),
+        "independent_judge": os.getenv(
+            "LLM_JUDGE_MODEL", os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini")
+        ) != case.get("model", GOLDEN_MODEL),
         "tone": case.get("tone", "professional"),
         "router_mode": final_state.get("mode"),
         "word_count": len(final_state.get("final", "").split()),
@@ -178,6 +221,10 @@ def _save_run_artifacts(case: dict, final_state: dict[str, Any]) -> Path:
             for dim in ("coherence", "relevance", "accuracy", "tone_alignment")
         },
         "geval_overall": geval.get("overall_score"),
+        # Ablation dependent variables (deterministic, no LLM involved).
+        **article_metrics(final_md),
+        # Token counts and estimated cost for this run (see usage.py).
+        "usage": final_state.get("_usage", {}),
     }
 
     (run_dir / "summary.json").write_text(
@@ -274,8 +321,13 @@ def test_golden_topic(case: dict) -> None:
     run_dir = _save_run_artifacts(case, final_state)
 
     # Diagnostic dump — printed when -s is used, stays silent otherwise
+    rep = (final_state.get("final") and
+           __import__("tests.golden.metrics", fromlist=["x"]).repeated_statistics(
+               final_state["final"])) or {}
     print(
-        f"\n[{case['id']}] "
+        f"\n[{case['id']}] arm={ARM} "
+        f"repeat_rate={rep.get('repetition_rate')} "
+        f"max_spread={rep.get('max_section_spread')} "
         f"model={case.get('model', GOLDEN_MODEL)} "
         f"qa={final_state.get('qa_score')} "
         f"eval={final_state.get('blog_evaluator_score')} "

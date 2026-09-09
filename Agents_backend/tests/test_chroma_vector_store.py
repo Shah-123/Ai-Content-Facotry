@@ -23,7 +23,9 @@ def test_chroma_vector_store_init(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "chroma_db"))
     vstore = ChromaVectorStore(collection_name="test_collection")
     assert vstore.collection_name == "test_collection"
-    assert vstore.persist_dir == str(tmp_path / "chroma_db")
+    # persist_dir is a Path, not a str: comparing Paths avoids the separator
+    # mismatch that a string comparison hits on Windows (C:/x vs C:\x).
+    assert vstore.persist_dir == tmp_path / "chroma_db"
 
 
 def test_upsert_and_query_chunks(tmp_path: Path, monkeypatch):
@@ -121,3 +123,58 @@ def test_singleton_instance():
     v1 = get_vector_store()
     v2 = get_vector_store()
     assert v1 is v2
+
+
+# ---------------------------------------------------------------------------
+# Persist directory must not depend on the working directory
+# ---------------------------------------------------------------------------
+
+
+class TestPersistDirIsAnchoredToTheProject:
+    """`CHROMA_PERSIST_DIR` used to default to a CWD-relative "./data/chroma_db".
+
+    That meant uvicorn started from the repo root and pytest run from
+    Agents_backend/ addressed two different databases. A document indexed by one
+    was invisible to the other, so retrieval silently fell through to the
+    local-embeddings fallback. This repository still contains both directories,
+    each holding an initialised but empty collection — the fingerprint of the
+    split. These tests pin the resolution rules so it cannot recur.
+    """
+
+    def test_default_is_independent_of_the_working_directory(self, tmp_path, monkeypatch):
+        import os
+        from vector_store import ChromaVectorStore, _BACKEND_DIR
+
+        monkeypatch.delenv("CHROMA_PERSIST_DIR", raising=False)
+        seen = set()
+        for cwd in (tmp_path, _BACKEND_DIR, _BACKEND_DIR.parent):
+            monkeypatch.chdir(cwd)
+            seen.add(str(ChromaVectorStore().persist_dir))
+
+        assert len(seen) == 1, f"index location varies with cwd: {seen}"
+        assert str(_BACKEND_DIR) in seen.pop()
+
+    def test_relative_env_value_anchors_to_the_backend_not_the_cwd(
+        self, tmp_path, monkeypatch
+    ):
+        from vector_store import ChromaVectorStore, _BACKEND_DIR
+
+        monkeypatch.setenv("CHROMA_PERSIST_DIR", "data/custom_index")
+        monkeypatch.chdir(tmp_path)
+        resolved = ChromaVectorStore().persist_dir
+
+        assert resolved == (_BACKEND_DIR / "data" / "custom_index").resolve()
+        assert str(tmp_path) not in str(resolved)
+
+    def test_absolute_env_value_is_honoured_verbatim(self, tmp_path, monkeypatch):
+        from vector_store import ChromaVectorStore
+
+        target = tmp_path / "explicit_index"
+        monkeypatch.setenv("CHROMA_PERSIST_DIR", str(target))
+        assert ChromaVectorStore().persist_dir == target
+
+    def test_empty_env_value_falls_back_to_the_default(self, monkeypatch):
+        from vector_store import ChromaVectorStore, _DEFAULT_PERSIST_DIR
+
+        monkeypatch.setenv("CHROMA_PERSIST_DIR", "   ")
+        assert ChromaVectorStore().persist_dir == _DEFAULT_PERSIST_DIR

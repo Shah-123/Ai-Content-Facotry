@@ -22,6 +22,10 @@ class GenerationConfig(BaseModel):
     image_quality: str = "standard"
     image_style: str = "vivid"
     export_formats: list[str] = Field(default_factory=lambda: ["html"])
+    # Experiment control only. False makes every worker receive the full
+    # evidence pool instead of its assigned slice — the control arm for the
+    # evidence-distribution ablation. Leave True for normal generation.
+    assign_evidence: bool = True
 
 
 class CreateJobRequest(GenerationConfig):

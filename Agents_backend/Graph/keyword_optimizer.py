@@ -130,10 +130,12 @@ def _inject_missing_keywords(blog_text: str, low_keywords: List[str]) -> str:
         return blog_text
 
     try:
-        from langchain_openai import ChatOpenAI
         from langchain_core.messages import SystemMessage, HumanMessage
 
-        llm = ChatOpenAI(model="gpt-5-mini", temperature=0.3)
+        # get_llm() applies the configured model and the request timeout;
+        # a bare ChatOpenAI here honoured neither.
+        from Graph.agents.utils import get_llm
+        llm = get_llm(temperature=0.3)
 
         keywords_list = "\n".join(f"  - {kw}" for kw in low_keywords)
 

@@ -80,6 +80,7 @@ def build_initial_state(job_id: str, topic: str, blog_folder: str,
         "generate_video":    generation_config.generate_video,
         "generate_podcast":  generation_config.generate_podcast,
         "export_formats":    generation_config.export_formats,
+        "assign_evidence":   generation_config.assign_evidence,
         "_job_id":           job_id,
         # — Document upload —
         "upload_id":         generation_config.upload_id or "",
@@ -115,6 +116,10 @@ def _run_pipeline(
     seamless recovery and resumption after crashes/restarts.
     """
     conn = None
+    # Token accounting baseline for this run. Snapshot/delta rather than a
+    # contextvar because LangGraph dispatches section writers to worker threads.
+    import usage as _usage
+    usage_before = _usage.snapshot()
     try:
         generation_config = GenerationConfig.model_validate(config)
         # Late import so api.py can load without OPENAI_API_KEY set
@@ -268,6 +273,27 @@ def _run_pipeline(
         final_state = graph.get_state(thread_cfg).values
         saved       = save_blog_content(folders, final_state)
         generate_readme(folders, saved, final_state)
+
+        # ── Token usage and estimated cost ────────────────────────────────
+        try:
+            run_usage = _usage.delta(usage_before)
+            reports_dir = Path(folders["reports"])
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            (reports_dir / "token_usage.txt").write_text(
+                _usage.format_report(run_usage), encoding="utf-8"
+            )
+            _update_metadata_json(
+                Path(folders["metadata"]) / "metadata.json",
+                {"usage": run_usage},
+                _get_job_lock(job_id),
+            )
+            logger.info(
+                f"Job {job_id} used {run_usage['total']['total_tokens']:,} tokens "
+                f"across {run_usage['total']['calls']} calls "
+                f"(est. ${run_usage['total']['cost_usd']:.4f})"
+            )
+        except Exception as usage_err:  # noqa: BLE001 - never fail a run over accounting
+            logger.warning(f"Token usage reporting failed for job {job_id}: {usage_err}")
 
         # Read the blog content for serving via API
         final_content = final_state.get("final", "")

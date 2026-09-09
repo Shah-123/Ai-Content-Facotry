@@ -9,7 +9,13 @@
 [![DeepEval](https://img.shields.io/badge/DeepEval-G--Eval_Metrics-red.svg)](https://github.com/confident-ai/deepeval)
 [![License](https://img.shields.io/badge/License-Apache_2.0-lightgrey.svg)](LICENSE)
 
-A production-ready, stateful, multi-agent AI system designed for automated research, content synthesis, multi-modal asset generation, and academic-grade evaluation. Built on top of **LangGraph**, **FastAPI**, and **React**, this project serves as a **Final Year Project (FYP)** demonstrating state-of-the-art agent coordination, parallel processing, Human-in-the-Loop (HITL) workflows, Advanced RAG, and automated LLM-as-judge quality assessment.
+A stateful, multi-agent AI system for automated research, content synthesis, multi-modal asset generation, and academic-grade evaluation. Built on **LangGraph**, **FastAPI**, and **React**, this project serves as a **Final Year Project (FYP)** demonstrating agent coordination, parallel processing, Human-in-the-Loop (HITL) workflows, Advanced RAG, and automated LLM-as-judge quality assessment.
+
+> **Scope.** This is a research and demonstration system, not a production
+> deployment. It runs as a single API worker with a shared-secret access gate
+> and no per-user accounts. The **Known Limitations** section at the end of this
+> document states these boundaries precisely; read it before deploying anywhere
+> reachable by other people.
 
 ---
 
@@ -30,65 +36,160 @@ A production-ready, stateful, multi-agent AI system designed for automated resea
 
 ## 📐 System Architecture
 
-The workflow is managed as a stateful, interruptible directed acyclic graph (DAG):
+The workflow is a stateful, interruptible **cyclic** directed graph — cyclic
+because the Quality Control → Revision feedback loop deliberately routes back on
+itself, bounded at two attempts. The diagram below mirrors the edges declared in
+[`build_graph()`](Agents_backend/main.py):
 
 ```mermaid
 graph TD
-    A[Topic Input / Document Ingestion] --> B(Router Node)
-    B -->|Needs Research| C(Research Agent)
-    B -->|No Research / Ingest Active| D(Orchestrator Agent)
+    START([START]) --> B(Router)
+
+    B -->|upload_id set| ING(Document Ingest / RAG)
+    B -->|needs research| C(Research Agent)
+    B -->|closed book| D(Orchestrator)
+    ING -->|closed_book| D
+    ING -->|hybrid / auto_topic| C
     C --> D
-    
-    D -->|HITL Interrupt: Review Plan| E[PlanEditor UI / LLM Revision Loop]
-    E -->|Plan Approved & Evidence Assigned| F[Parallel Worker Dispatch]
-    
-    subgraph Parallel Writing Phase
-        F -->|Task 0| G0(Worker Agent 0)
-        F -->|Task 1| G1(Worker Agent 1)
-        F -->|Task N| GN(Worker Agent N)
+
+    D -.->|"interrupt_after — state persisted"| E[/"HITL — Plan Editor UI"/]
+    E -.->|"approved, edited, or LLM-revised"| F{{Send fan-out}}
+
+    subgraph PAR [Parallel Writing]
+        F --> G0(Worker 0)
+        F --> G1(Worker 1)
+        F --> GN(Worker N)
     end
-    
-    G0 --> H(Reducer Node)
+
+    G0 --> H
     G1 --> H
     GN --> H
-    
-    H -->|Merge Sections| I(Quality Control Auditor)
-    I -->|Needs Revision| J(Revision Agent)
+
+    subgraph RED [Reducer subgraph]
+        H(Merge Sections) -->|generate_images| H2("Plan and Place Images")
+    end
+
+    H --> CV(Completion Validator)
+    H2 --> CV
+
+    CV -->|generate_qa| I(Quality Control Auditor)
+    CV -->|QA disabled| K
+    I -->|"critical issues, under limit"| J(Revision Agent)
     J --> I
-    I -->|Approved| K(Keyword SEO Optimizer)
-    
-    K --> L{Asset Toggles}
-    L -->|Campaign Enabled| M(Campaign Generator)
-    L -->|Video Enabled| N(Video Synthesis Node)
-    L -->|Podcast Enabled| O(Gemini Podcast Studio)
-    
-    M --> P[G-Eval & DeepEval Evaluation]
-    N --> P
-    O --> P
-    
-    P --> Q[Final Output Directory]
+    I -->|"READY or revision limit reached"| K(Keyword SEO Optimizer)
+
+    K --> P(G-Eval Scorecard)
+
+    P --> L{Asset toggles}
+    L -->|campaign| M(Campaign Generator)
+    L -->|video| N(Video Synthesis)
+    L -->|podcast| O(Gemini Podcast Studio)
+    L -->|none enabled| Z
+
+    M --> Z([END])
+    N --> Z
+    O --> Z
+
+    DE(DeepEval G-Eval):::ondemand -.->|"POST /run-deepeval"| Z
+    classDef ondemand stroke-dasharray: 5 5
 ```
+
+The diagram above is hand-drawn for readability. To render the graph directly
+from the compiled workflow — useful as ground truth when the two might drift:
+
+```bash
+cd Agents_backend && python -c "from main import build_graph; print(build_graph().get_graph().draw_mermaid())"
+```
+
+Two details the diagram makes explicit because they are easy to get wrong:
+
+* **G-Eval runs before the media generators, not after.** Evaluation scores the
+  article, so it is sequenced immediately after the SEO optimizer; the campaign,
+  video and podcast nodes then fan out in parallel from it.
+* **DeepEval is not a graph node.** It runs on demand from its own endpoint
+  (dashed above), because adding four chain-of-thought judge calls to every
+  generation is not a cost worth paying by default.
 
 ---
 
 ## 🤖 The Agent Roster
 
-| Agent Node | Core LLM Model | Code Implementation | Primary Responsibility & Logic |
+Not every node is an LLM call. Several stages are deterministic Python because
+the task does not require judgement — the "Model" column says exactly which is
+which, and `None` is a deliberate design choice rather than a missing feature.
+
+> **Temperature is inert on the default model.** Several nodes request a
+> specific sampling temperature (the planner asks for 0.7 to vary outlines, the
+> writers for 0.3). Reasoning-family models such as `gpt-5-mini` accept only
+> their default temperature, and `langchain-openai` drops the parameter silently
+> rather than raising — so on the default configuration these values have no
+> effect. They do apply when a non-reasoning model such as `gpt-4o-mini` is
+> chosen via the model selector. Guarded by
+> `tests/test_evaluation.py::TestTemperatureIsInertOnReasoningModels`.
+
+| Graph Node | Model | Code Implementation | Primary Responsibility & Logic |
 | :--- | :--- | :--- | :--- |
-| **Topic Guard** | `gpt-5-mini` | [topic_guard.py](topic_guard.py) | Sanitizes topic inputs, flags unsafe topics, and recommends corrections before running the graph. |
-| **Router** | `gpt-5-mini` | [routing.py](routing.py) | Analyzes the prompt and decides whether to fetch online research via Tavily or use a closed-book generation approach. |
-| **Researcher** | `gpt-5-mini` + Tavily | [research.py](research.py) | Generates query strings, scrapes web search results, and parses findings into structured evidence. |
-| **Ingest / RAG** | `text-embedding-3-small` | [document_ingest.py](document_ingest.py) | Performs semantic chunking and embedding generation on user documents. Dynamically retrieves relevant chunks for grounding. |
-| **Orchestrator** | `gpt-5-mini` | [orchestrator.py](orchestrator.py) | Creates the global blog structure and assigns evidence records to matching sections. |
-| **Worker (xN)** | `gpt-5-mini` | [workers.py](workers.py) | Writes assigned sections in parallel. |
-| **Reducer** | `gpt-5-mini` | [workers.py](workers.py) | Combines sections and identifies paragraph locations for image placements. |
-| **Quality Control** | `gpt-5-mini` | [quality_control.py](quality_control.py) | Compares the blog draft against evidence, flagging inaccuracies or logical gaps. |
-| **Revision** | `gpt-5-mini` | [revision.py](frevision.py) | Revises drafts to address issues raised by the Quality Control agent. |
-| **SEO Optimizer** | `gpt-5-mini` | [keyword_optimizer.py](keyword_optimizer.py) | Integrates target keywords naturally into headers and body text. |
-| **Campaign Gen** | `gpt-5-mini` | [campaign.py](campaign.py) | Creates promotional materials like emails, landing pages, LinkedIn posts, and Twitter threads. |
-| **Podcast Studio** | `Gemini 2.5 Flash` | [podcast_studio.py](podcast_studio.py) | Generates a 2-3 minute audio podcast discussing the post using Gemini's native audio modality. |
-| **Video Gen** | `gpt-5-mini` + MoviePy | [video.py](video.py) | Creates an MP4 video complete with stock footage, text-to-speech audio, and synchronized captions. |
-| **Academic Judge** | `gpt-5-mini` + `deepeval` | [evaluation.py](evaluation.py) | Evaluates quality across academic rubrics using in-house prompts and DeepEval G-Eval. |
+| **Topic Guard** | `gpt-5-mini` | [topic_guard.py](Agents_backend/Graph/agents/topic_guard.py) | Two tiers: a free deterministic screen rejects malformed input (empty, too short/long, no letters, gibberish); the LLM then judges whether a well-formed topic is semantically unsafe. Runs before a job is created, so rejected topics cost no pipeline tokens. |
+| **Router** | `gpt-5-mini` | [routing.py](Agents_backend/Graph/agents/routing.py) | Chooses `closed_book` / `hybrid` / `open_book`, drafts search queries, and sets the recency window Tavily filters on. |
+| **Researcher** | `gpt-5-mini` + Tavily | [research.py](Agents_backend/Graph/agents/research.py) | Runs queries in parallel, scrapes results (Jina Reader with a BeautifulSoup fallback), filters near-duplicates by Jaccard overlap, and extracts structured evidence. Downgrades the mode to `closed_book` if nothing usable is found, so an ungrounded post is never reported as grounded. |
+| **Ingest / RAG** | `text-embedding-3-small` + `gpt-5-mini` | [document_ingest.py](Agents_backend/Graph/agents/document_ingest.py) | Semantic chunking via sentence-embedding distance, ChromaDB indexing, and topic-scoped retrieval with a three-tier fallback (Chroma → local vectors → persisted evidence). Evidence is extracted only from retrieved chunks. |
+| **Orchestrator** | `gpt-5-mini` | [orchestrator.py](Agents_backend/Graph/agents/orchestrator.py) | Plans the outline, then **partitions evidence across sections** so parallel workers cite different sources instead of converging on the same few statistics. A higher temperature is requested to vary outlines between runs, but reasoning-family models such as `gpt-5-mini` ignore the parameter — see the note below the table. |
+| **Worker (×N)** | `gpt-5-mini` | [workers.py](Agents_backend/Graph/agents/workers.py) | Writes its assigned section in parallel via LangGraph `Send()`, receiving only its own evidence slice plus sibling section titles for transition context. |
+| **Reducer** | **None** (deterministic) | [workers.py](Agents_backend/Graph/agents/workers.py) | Orders sections by task ID, joins them, and builds the references table from the evidence pool — all plain Python. The single LLM call in this module generates SEO metadata, not the merge itself. |
+| **Completion Validator** | **None** (deterministic) | [completion_validator.py](Agents_backend/Graph/completion_validator.py) | Regex checks for missing sections and low word count, applies shared auto-repairs, and scores completeness. No model involved. |
+| **Quality Control** | `gpt-5-mini` + deterministic check | [quality_control.py](Agents_backend/Graph/agents/quality_control.py) | Audits the draft against evidence for hallucinations and structure. A **non-LLM citation verifier** parses every hyperlink and checks it against the research evidence by URL and domain; any unmatched link forces `NEEDS_REVISION` and caps the score at 6.0 regardless of the model's opinion. |
+| **Revision** | `gpt-5-mini` | [revision.py](Agents_backend/Graph/agents/revision.py) | Surgically rewrites only the sections carrying critical issues, falling back to a full-article edit. Bounded at 2 attempts; output shorter than 60% of the original is rejected. |
+| **SEO Optimizer** | `gpt-5-mini` + deterministic analysis | [keyword_optimizer.py](Agents_backend/Graph/keyword_optimizer.py) | Keyword density and placement are computed in Python; the model is used only to weave under-represented keywords back into the weakest passages. |
+| **Image Planner** | `gpt-5-mini` → DALL·E / Gemini / Flux | [multimedia.py](Agents_backend/Graph/agents/multimedia.py) | Plans placements and prompts, then generates through a three-provider fallback chain (OpenAI → Google Gemini → Pollinations). |
+| **Campaign Gen** | `gpt-5-mini` | [campaign.py](Agents_backend/Graph/agents/campaign.py) | Summarises the **full** article into a structured brief, then writes a LinkedIn post and an X/Twitter post in parallel. *Currently these two channels only* — the state carries fields for email, landing page, Facebook and YouTube, but they are not generated. |
+| **Podcast Studio** | `gemini-2.5-flash` | [podcast_studio.py](Agents_backend/Graph/podcast_studio.py) | Generates a single-speaker audio podcast using Gemini's native audio output. |
+| **Video Gen** | `gpt-5-mini` + Gemini TTS + Whisper | [video.py](Agents_backend/Graph/agents/video.py) | Scripts the voiceover, synthesises speech via Gemini TTS (with backoff), derives word-level timings with Whisper for karaoke captions, pulls portrait B-roll from Pexels, and composites a 9:16 MP4 with MoviePy. |
+| **Academic Judge** | `LLM_JUDGE_MODEL` (defaults to `gpt-5-mini`) | [evaluation.py](Agents_backend/Graph/agents/evaluation.py) | In-house G-Eval scorecard (1–5) runs inside the graph; the weighted overall is computed in Python, not by the model. The official `deepeval` G-Eval runs **on demand** via its own endpoint, not as a graph node. |
+
+---
+
+## 🧪 Evidence-Distribution Experiment
+
+The orchestrator partitions the evidence pool across sections so that parallel
+workers cite different sources. That exists because of an observed defect: with
+9 sections and 5 evidence items, every worker independently gravitated to the
+same two or three prominent statistics, and one post repeated the same figure
+seven times.
+
+The system ships with the ablation needed to measure whether the fix works.
+Setting `assign_evidence=False` skips partitioning, so every worker receives the
+full pool — reproducing the pre-fix behaviour exactly.
+
+```bash
+cd Agents_backend
+
+# Treatment arm — evidence partitioned across workers
+RUN_GOLDEN_TESTS=1 GOLDEN_ASSIGN_EVIDENCE=1 pytest tests/golden -v -s
+
+# Control arm — every worker receives the full pool
+RUN_GOLDEN_TESTS=1 GOLDEN_ASSIGN_EVIDENCE=0 pytest tests/golden -v -s
+
+# Aggregate both arms into a comparison + LaTeX table body
+python -m tests.golden.report_ablation
+```
+
+Artefacts are written to `tests/golden/_runs/<case_id>__{assigned,fullpool}/`,
+so the arms never overwrite each other. Two **deterministic** metrics are
+recorded per run — no model scores them, so the numbers are not exposed to
+judge bias:
+
+| Metric | Meaning | Better |
+| :--- | :--- | :--- |
+| `repetition.repetition_rate` | Share of distinct statistics that surface in more than one section | Lower |
+| `repetition.max_section_spread` | Section count for the single most-repeated statistic | Lower |
+| `sources.concentration` | Share of cited sources appearing in more than one section | Lower |
+
+The measurement code is [`tests/golden/metrics.py`](Agents_backend/tests/golden/metrics.py),
+which carries its own self-check (`python -m tests.golden.metrics`).
+
+> **On sample size.** One run per topic per arm measures a single sample of a
+> stochastic generator, not an effect. Repeat each arm several times per topic
+> before reporting a difference, and state `n` alongside any figure.
 
 ---
 
@@ -114,44 +215,42 @@ Both reports are written to the `reports/` folder of each generated blog for aca
 
 ### 💻 Backend Components
 * **Orchestration & Workflow:**
-  - [api.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/api.py) — FastAPI web application serving API routes, background tasks, and WebSocket streaming.
-  - [main.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/main.py) — Core CLI execution entry point and LangGraph workflow builder.
-  - [db.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/db.py) — SQLite database interface for jobs, metrics, and files.
-  - [event_bus.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/event_bus.py) — Message broker managing WebSocket connections and stream logs.
-  - [validators.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/validators.py) — Input safety validators and initial text checkers.
+  - [api.py](Agents_backend/api/main.py) — FastAPI web application serving API routes, background tasks, and WebSocket streaming.
+  - [main.py](Agents_backend/main.py) — Core CLI execution entry point and LangGraph workflow builder.
+  - [db.py](Agents_backend/db.py) — SQLite database interface for jobs, metrics, and files.
+  - [event_bus.py](Agents_backend/event_bus.py) — Message broker managing WebSocket connections and stream logs.
 * **LangGraph Configuration:**
-  - [state.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/state.py) — Defines the Graph memory structures using [State TypedDict](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/state.py#L85), [Plan](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/state.py#L51), and [Task](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/state.py#L29) definitions.
-  - [nodes.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/nodes.py) — Maps graph nodes to corresponding agent functions.
-  - [templates.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/templates.py) — System instructions, roles, and formatting guidelines.
-  - [podcast_studio.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/podcast_studio.py) — Script to interface with the `google-genai` SDK and synthesize audio.
-  - [export_manager.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/export_manager.py) — Handles file conversions to HTML and Markdown format.
+  - [state.py](Agents_backend/Graph/state.py) — Defines the Graph memory structures using [State TypedDict](Agents_backend/Graph/state.py#L85), [Plan](Agents_backend/Graph/state.py#L51), and [Task](Agents_backend/Graph/state.py#L29) definitions.
+  - [nodes.py](Agents_backend/Graph/nodes.py) — Maps graph nodes to corresponding agent functions.
+  - [templates.py](Agents_backend/Graph/templates.py) — System instructions, roles, and formatting guidelines.
+  - [podcast_studio.py](Agents_backend/Graph/podcast_studio.py) — Script to interface with the `google-genai` SDK and synthesize audio.
 * **Specialized Agent Implementation:**
-  - [topic_guard.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/topic_guard.py) — Evaluates input topic safety.
-  - [routing.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/routing.py) — Directs work to Tavily Search or closed-book agents.
-  - [research.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/research.py) — Handles Tavily search processes.
-  - [document_ingest.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/document_ingest.py) — Manages PDF/Word file parsing, semantic chunking, and retrieval queries.
-  - [orchestrator.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/orchestrator.py) — Creates draft outline structures.
-  - [workers.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/workers.py) — Implements parallel workers and merger nodes.
-  - [quality_control.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/quality_control.py) — Performs fact-checking and consistency audits.
-  - [revision.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/revision.py) — Refines text based on quality reports.
-  - [evaluation.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/evaluation.py) — Contains in-house and DeepEval G-Eval nodes.
-  - [campaign.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/campaign.py) — Creates social media marketing materials.
-  - [video.py](file:///d:/Multi_Agent_Blog_generator_FYP/Agents_backend/Graph/agents/video.py) — Builds script-to-video pipelines.
+  - [topic_guard.py](Agents_backend/Graph/agents/topic_guard.py) — Evaluates input topic safety.
+  - [routing.py](Agents_backend/Graph/agents/routing.py) — Directs work to Tavily Search or closed-book agents.
+  - [research.py](Agents_backend/Graph/agents/research.py) — Handles Tavily search processes.
+  - [document_ingest.py](Agents_backend/Graph/agents/document_ingest.py) — Manages PDF/Word file parsing, semantic chunking, and retrieval queries.
+  - [orchestrator.py](Agents_backend/Graph/agents/orchestrator.py) — Creates draft outline structures.
+  - [workers.py](Agents_backend/Graph/agents/workers.py) — Implements parallel workers and merger nodes.
+  - [quality_control.py](Agents_backend/Graph/agents/quality_control.py) — Performs fact-checking and consistency audits.
+  - [revision.py](Agents_backend/Graph/agents/revision.py) — Refines text based on quality reports.
+  - [evaluation.py](Agents_backend/Graph/agents/evaluation.py) — Contains in-house and DeepEval G-Eval nodes.
+  - [campaign.py](Agents_backend/Graph/agents/campaign.py) — Creates social media marketing materials.
+  - [video.py](Agents_backend/Graph/agents/video.py) — Builds script-to-video pipelines.
 
 ### 🎨 Frontend Components
 * **Source Files (`frontend/src/`):**
-  - [main.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/main.tsx) — Main entry point for Vite React.
-  - [App.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/App.tsx) — Main application layout, sidebar, and tab routes.
-  - [ContentView.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/ContentView.tsx) — Displays rich-text rendering of articles, evaluation scorecards, and SEO details.
+  - [main.tsx](frontend/src/main.tsx) — Main entry point for Vite React.
+  - [App.tsx](frontend/src/App.tsx) — Main application layout, sidebar, and tab routes.
+  - [ContentView.tsx](frontend/src/ContentView.tsx) — Displays rich-text rendering of articles, evaluation scorecards, and SEO details.
   - [components/PodcastPlayer.tsx](frontend/src/components/PodcastPlayer.tsx) — Player for synthesized podcast audio. Video playback lives in `ContentView`'s media tab. (Replaces the former `MediaView.tsx`.)
-  - [api.ts](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/api.ts) — Handles HTTP request routing and WebSocket connections.
-  - [index.css](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/index.css) — Custom styling variables and theme configurations.
+  - [api.ts](frontend/src/api.ts) — Handles HTTP request routing and WebSocket connections.
+  - [index.css](frontend/src/index.css) — Custom styling variables and theme configurations.
 * **Reusable UI Components (`frontend/src/components/`):**
-  - [ChatView.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/components/ChatView.tsx) — Live monitor displaying event streams and console logs.
-  - [PlanEditor.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/components/PlanEditor.tsx) — Interface for modifying H2 sections, bullets, and word counts.
-  - [Sidebar.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/components/Sidebar.tsx) — Navigation menu displaying generated articles.
-  - [TopNav.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/components/TopNav.tsx) — Controls the header bar and theme toggles.
-  - [UploadChip.tsx](file:///d:/Multi_Agent_Blog_generator_FYP/frontend/src/components/UploadChip.tsx) — Component for document upload and status updates.
+  - [ChatView.tsx](frontend/src/components/ChatView.tsx) — Live monitor displaying event streams and console logs.
+  - [PlanEditor.tsx](frontend/src/components/PlanEditor.tsx) — Interface for modifying H2 sections, bullets, and word counts.
+  - [Sidebar.tsx](frontend/src/components/Sidebar.tsx) — Navigation menu displaying generated articles.
+  - [TopNav.tsx](frontend/src/components/TopNav.tsx) — Controls the header bar and theme toggles.
+  - [UploadChip.tsx](frontend/src/components/UploadChip.tsx) — Component for document upload and status updates.
 
 ---
 
@@ -173,14 +272,25 @@ git clone <repository_url>
 cd Multi_Agent_Blog_generator_FYP
 
 # 1. Install Backend Dependencies
-pip install -r requirements.txt
-# Ensure you are using the latest google-genai library
-pip install google-genai
+#    Reproducible install — the exact versions this project was developed,
+#    tested and demonstrated against (173 pinned packages). Use this one.
+pip install -r requirements.lock.txt
 
 # 2. Install Frontend Dependencies
 cd frontend
 npm install
 ```
+
+> **`requirements.txt` vs `requirements.lock.txt`**
+> `requirements.txt` lists the ~38 direct dependencies as bounded version
+> *ranges* (`>=x,<next-major`) and is what CI installs, so the build acts as an
+> early warning when a new upstream release breaks the project.
+> `requirements.lock.txt` pins the full transitive closure to exact versions and
+> is what you should install for a demo, a fresh machine, or an examiner's
+> checkout — it removes any chance of a dependency resolving differently today
+> than it did when the test suite was last green.
+>
+> Regenerate the lockfile only from an environment where `pytest tests` passes.
 
 ### 2. Configure Environment Variables
 
@@ -212,6 +322,11 @@ PEXELS_API_KEY=...
 # so keep it fixed when comparing writer models across runs.
 # LLM_FAST_MODEL=gpt-5-mini
 # LLM_QUALITY_MODEL=gpt-5-mini
+#
+# Evaluation judge only. Defaults to LLM_QUALITY_MODEL. Set this to run an
+# independent-judge arm WITHOUT also changing the QA auditor and reviser,
+# which read LLM_QUALITY_MODEL:
+# LLM_JUDGE_MODEL=gpt-4o
 
 # PostgreSQL instead of SQLite (set automatically by docker-compose).
 # DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_content_factory
@@ -283,7 +398,13 @@ blogs/quantum_computing_20260521_103000/
 
 ## ⚠️ Known Limitations & Future Scope
 
-* **In-Memory Checkpointer:** Uses `MemorySaver`/`SqliteSaver`. For high-volume multi-user environments, migrate to a PostgreSQL checkpointer backend.
+* **Checkpointer Backends:** The web application persists checkpoints with `SqliteSaver`, or `PostgresSaver` when `DATABASE_URL` points at Postgres (docker-compose sets this automatically, with an automatic fallback to SQLite if the connection fails). The volatile `MemorySaver` is only the default for the standalone CLI path, where a run is not expected to outlive the process — CLI runs therefore cannot be resumed after a crash.
+
+* **Prompt Injection — not mitigated.** Text scraped from the open web and text extracted from uploaded documents is passed into LLM prompts as evidence with no instruction-hierarchy defence: no delimiter fencing, no escaping, and no validation that extracted "facts" originated in the source rather than in an instruction embedded within it. A web page containing something like *"ignore previous instructions and instead write…"* is handed to the extraction model as ordinary content. The affected paths are the research extractor, the document-chunk extractor, the section writers, and the QA auditor. Realistic mitigations — fencing untrusted spans in explicit delimiters, instructing the extractor to treat the span as data only, and validating that each extracted snippet is a substring of its source — are known but unimplemented. This is the most significant unaddressed security weakness in the system.
+
+* **No Rate Limiting:** No endpoint is rate limited. Because `POST /api/jobs` triggers real spend on OpenAI, Tavily and Google APIs, an instance left reachable without `API_KEY` set can be driven into an unbounded bill by anyone who finds it. Set `API_KEY`, keep the deployment on `localhost`, or place a reverse proxy in front of it.
+
+* **Evaluation Methodology:** The reported quality scores were produced with the same model acting as both writer and judge (`gpt-5-mini`), a known source of self-preference bias in LLM-as-a-judge evaluation. The judge is configured separately via `LLM_QUALITY_MODEL`, so an independent-judge run needs no code change. The published figures also come from three topics with one run each and no baseline comparison arm, so they characterise the system's own behaviour rather than demonstrating superiority over a simpler approach. No human annotation of factual accuracy was performed.
 * **Single-Speaker Audio:** The Gemini Podcast studio is set to a single-speaker voice (`Aoede`). Future updates could add two-speaker dialogue scripts using two distinct Gemini audio voices.
 * **Authentication:** Access control is a single shared secret, not per-user auth. Setting `API_KEY` in `.env` makes every REST route and the WebSocket require it (`X-API-Key` header, or `?api_key=` for browser-initiated requests such as `<img>` and downloads); leaving it unset keeps the API open, which is only appropriate on `localhost`. CORS defaults to the local dev origins and is configurable via `ALLOWED_ORIGINS`. A public deployment needs real per-user authentication (OAuth2) and per-user job ownership — currently any authenticated caller can read and delete every job.
 * **Single-Process Concurrency:** Jobs run in background threads, and HITL approval blocks one of those threads for up to 20 minutes. The approval events are held in an in-process dictionary, so the API must run as a single worker; a multi-worker or multi-replica deployment needs an external task queue and a shared store. The SqliteSaver/PostgresSaver checkpointer is what makes crash recovery possible without one.

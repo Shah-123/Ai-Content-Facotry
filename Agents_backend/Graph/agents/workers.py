@@ -268,14 +268,25 @@ def worker_node(payload: dict) -> dict:
     return {"sections": [_make_section(task.id, section_md)]}
 
 
-def _generate_seo_metadata(body: str, plan, state: dict) -> tuple:
+def _generate_seo_metadata(body: str, plan, state: dict) -> dict:
     """
-    Generates SEO metadata block (meta title, description, FAQ, reading time)
-    using the SEO_METADATA_SYSTEM prompt.
+    Generates SEO metadata (meta title, description, keywords, FAQ, reading
+    time) using the SEO_METADATA_SYSTEM prompt.
 
-    Returns (seo_dict, seo_markdown_block).
-    seo_dict is the raw JSON for state storage.
-    seo_markdown_block is the formatted Markdown to append to the blog.
+    Returns the metadata dict only, with `reading_time_minutes` always set.
+
+    This function used ALSO to return a rendered Markdown block that
+    merge_content appended to the article body. That was wrong twice over:
+
+      * Publishing — readers received the post's own meta-title and
+        meta-description printed underneath the article, which is publisher
+        metadata, not content.
+      * Evaluation — the QA auditor, the in-house G-Eval judge, DeepEval and
+        the keyword optimizer all score `state["final"]`, so every quality
+        score was partly grading a metadata footer instead of the article.
+
+    The metadata is now persisted separately by save_blog_content(), which
+    writes reports/seo_metadata.txt and records it in metadata.json.
     """
     import json
     import math
@@ -330,44 +341,19 @@ def _generate_seo_metadata(body: str, plan, state: dict) -> tuple:
             seo_dict = None
 
     if not seo_dict:
-        # Minimal fallback with just reading time
-        seo_block = (
-            f"\n\n---\n\n"
-            f"**⏱️ Estimated Reading Time:** {reading_time} minute{'s' if reading_time != 1 else ''}\n"
-        )
-        return None, seo_block
+        # Extraction failed. Reading time needs no model, so return that much
+        # rather than nothing.
+        return {"reading_time_minutes": reading_time}
 
     # Ensure reading_time is set
     if not seo_dict.get("reading_time_minutes"):
         seo_dict["reading_time_minutes"] = reading_time
 
-    # Build the SEO Markdown block
-    lines = ["\n\n---\n"]
-
-    # Reading time
-    rt = seo_dict.get("reading_time_minutes", reading_time)
-    lines.append(f"**⏱️ Estimated Reading Time:** {rt} minute{'s' if rt != 1 else ''}\n")
-
-    # Meta info block
-    meta_title = seo_dict.get("meta_title", "")
-    meta_desc = seo_dict.get("meta_description", "")
-    if meta_title or meta_desc:
-        lines.append("\n#### 🎯 SEO Metadata\n")
-        if meta_title:
-            lines.append(f"**Meta Title:** {meta_title}\n")
-        if meta_desc:
-            lines.append(f"**Meta Description:** {meta_desc}\n")
-
-    # Keywords
-    primary_kw = seo_dict.get("primary_keywords", [])
-    secondary_kw = seo_dict.get("secondary_keywords", [])
-    if primary_kw or secondary_kw:
-        all_kw = primary_kw + secondary_kw
-        lines.append(f"**Keywords:** {', '.join(all_kw)}\n")
-
-    seo_block = "\n".join(lines)
-    logger.info(f"✅ SEO metadata generated (Reading: {rt}min)")
-    return seo_dict, seo_block
+    logger.info(
+        f"✅ SEO metadata generated "
+        f"(reading time: {seo_dict['reading_time_minutes']} min)"
+    )
+    return seo_dict
 
 
 def merge_content(state: State) -> dict:
@@ -476,18 +462,25 @@ def merge_content(state: State) -> dict:
                 "\n".join(rows)
             )
 
-    # ── SEO Metadata & FAQ Block ──────────────────────────────────────────────
-    seo_block = ""
+    # ── SEO Metadata ─────────────────────────────────────────────────────────
+    # Kept in state and written to disk by save_blog_content(); deliberately NOT
+    # appended to the article. `final` must be the article and only the article,
+    # because every evaluator downstream scores it.
     seo_metadata = None
     try:
-        seo_metadata, seo_block = _generate_seo_metadata(body, plan, state)
+        seo_metadata = _generate_seo_metadata(body, plan, state)
     except Exception as e:
         logger.warning(f"⚠️ SEO metadata generation failed (non-fatal): {e}")
 
-    merged_md  = f"# {plan.blog_title}\n\n{body}{seo_block}{references_md}\n"
+    # Title + body + references. The references table stays: it is part of the
+    # article a reader should see, unlike the meta-title/description block.
+    merged_md  = f"# {plan.blog_title}\n\n{body}{references_md}\n"
     word_count = len(merged_md.split())
 
-    logger.info(f"✅ Merged {len(ordered_content)} sections (References: {bool(references_md)}, SEO: {bool(seo_block)})")
+    logger.info(
+        f"✅ Merged {len(ordered_content)} sections "
+        f"(References: {bool(references_md)}, SEO metadata: {bool(seo_metadata)})"
+    )
     _emit(_job(state), "merger", "completed",
           f"Merged {len(ordered_content)} sections ({word_count} words)",
           {"sections": len(ordered_content), "words": word_count})

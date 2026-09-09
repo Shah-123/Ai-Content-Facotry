@@ -888,7 +888,6 @@ def video_generator_node(state: State) -> dict:
     Reads:  state["final"], state["topic"], state["blog_folder"]
     Writes: state["video_path"]
     """
-    from langchain_openai import ChatOpenAI
 
     _emit(_job(state), "video", "started", "Starting Shorts video generation...")
     logger.info("🎬 GENERATING SHORTS VIDEO (9:16) ---")
@@ -924,7 +923,10 @@ def video_generator_node(state: State) -> dict:
     brief = _build_voiceover_brief(blog_content, topic)
 
     _emit(_job(state), "video", "working", "Writing voiceover script...")
-    text_llm = ChatOpenAI(model="gpt-5-mini", temperature=0.7)
+    # get_llm() applies the configured model and the request timeout;
+    # a bare ChatOpenAI here honoured neither.
+    from .utils import get_llm
+    text_llm = get_llm(temperature=0.7)
     response = text_llm.invoke([
         SystemMessage(content=VOICEOVER_SYSTEM_PROMPT),
         HumanMessage(content=f"TOPIC: {topic}\n\nBLOG BRIEF:\n{brief}"),
