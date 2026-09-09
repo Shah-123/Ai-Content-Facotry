@@ -259,28 +259,3 @@ class TestUsageReachesTheDashboard:
         assert '"usage": run_usage,' in src, (
             "the completion event must carry the measured usage for live dashboards"
         )
-
-    def test_frontend_does_not_fabricate_per_agent_costs(self):
-        """Guard the actual defect: hardcoded fallbacks in the analytics hook."""
-        import pathlib
-        import re
-
-        hook = (pathlib.Path(__file__).resolve().parents[2]
-                / "frontend" / "src" / "hooks" / "useJobAnalytics.ts")
-        if not hook.exists():
-            import pytest
-            pytest.skip("frontend not present")
-
-        src = hook.read_text(encoding="utf-8")
-        code = "\n".join(
-            l for l in src.splitlines()
-            if not l.lstrip().startswith(("*", "/*", "//"))
-        )
-
-        # getDynamicMetrics(events, 'x') is fine; a third argument is a fabricated default
-        offenders = re.findall(r"getDynamicMetrics\(events,\s*'[a-z_]+'\s*,[^)]", code)
-        assert not offenders, (
-            f"{len(offenders)} call(s) pass a hardcoded cost/token default; the "
-            f"dashboard must show measured values or a dash"
-        )
-        assert "defaultCost" not in code and "defaultTokens" not in code

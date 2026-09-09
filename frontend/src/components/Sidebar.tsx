@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  LayoutDashboard, FileEdit, History, Plus, RefreshCw, Sparkles, Trash2, RotateCcw, Activity
+  LayoutDashboard, FileEdit, History, Plus, RefreshCw, Sparkles, Trash2, RotateCcw
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Job } from '../api';
@@ -24,7 +24,6 @@ export function Sidebar({
   isMobileOpen, onCloseMobile
 }: SidebarProps) {
   const navItems: { key: ViewState; icon: React.ReactNode; label: string }[] = [
-    { key: 'graph',   icon: <Activity        className="w-[18px] h-[18px]" />, label: 'Agent Graph' },
     { key: 'chat',    icon: <LayoutDashboard className="w-[18px] h-[18px]" />, label: 'Dashboard' },
     { key: 'content', icon: <FileEdit       className="w-[18px] h-[18px]" />, label: 'Studio' },
   ];

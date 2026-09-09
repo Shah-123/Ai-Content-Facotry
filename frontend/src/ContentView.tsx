@@ -4,7 +4,7 @@ import {
   CheckCircle2, Clock, Podcast, Film, Share2, Download,
   FileText, Settings, Image as ImageIcon,
   Play, Volume2, Copy, RefreshCw, LayoutTemplate, Bot, Trash2,
-  GraduationCap, Sparkles, Edit3, Zap, FileCode, Check, Printer, BarChart3, Layers, ExternalLink
+  GraduationCap, Sparkles, Edit3, Zap, FileCode, Check, Printer, Layers, ExternalLink
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -16,10 +16,10 @@ import { DeepEvalSection } from './components/DeepEvalSection';
 import { RubricDetailCard } from './components/RubricDetailCard';
 import { PodcastPlayer } from './components/PodcastPlayer';
 import { useJobActions } from './hooks/useJobActions';
-import { useJobAnalytics } from './hooks/useJobAnalytics';
+import { useGEvalRadar } from './hooks/useGEvalRadar';
 
 type ViewState = 'chat' | 'content';
-type TabState = 'blog' | 'geval' | 'analytics' | 'video' | 'podcast' | 'images' | 'social';
+type TabState = 'blog' | 'geval' | 'video' | 'podcast' | 'images' | 'social';
 
 const generatedFigureHtmlToMarkdown = (content: string) => content.replace(
   /<figure\b[^>]*>[\s\S]*?<\/figure>/gi,
@@ -80,7 +80,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
     }
   }, [currentJob?.id]);
 
-  const { analytics, radarPoints } = useJobAnalytics(currentJob, events, isTaskRunning);
+  const radarPoints = useGEvalRadar(currentJob);
 
   if (!currentJob) {
     return (
@@ -133,7 +133,6 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
         <div className="flex gap-2 text-sm font-medium overflow-x-auto pb-2 border-b border-white/4">
           <TabButton<TabState> id="blog" icon={<FileText className="w-4 h-4" />} label="Blog" activeTab={activeTab} setActiveTab={setActiveTab} />
           <TabButton<TabState> id="geval" icon={<Bot className="w-4 h-4" />} label="G-Eval Audit" activeTab={activeTab} setActiveTab={setActiveTab} />
-          <TabButton<TabState> id="analytics" icon={<BarChart3 className="w-4 h-4" />} label="Agent Analytics" activeTab={activeTab} setActiveTab={setActiveTab} />
           <TabButton<TabState> id="video" icon={<Film className="w-4 h-4" />} label="Video" activeTab={activeTab} setActiveTab={setActiveTab} />
           <TabButton<TabState> id="podcast" icon={<Podcast className="w-4 h-4" />} label="Podcast" activeTab={activeTab} setActiveTab={setActiveTab} />
           <TabButton<TabState> id="social" icon={<Share2 className="w-4 h-4" />} label="Social Media" activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -429,117 +428,6 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
             )}
 
             {/* AGENT ANALYTICS TAB */}
-            {activeTab === 'analytics' && (
-              <div className="space-y-8 fade-in">
-                {/* Metrics Highlights Header */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Measured Tokens</span>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-amber-400">
-                        {analytics.totalTokens === null ? '—' : analytics.totalTokens.toLocaleString()}
-                      </span>
-                      <span className="text-xs text-slate-500 font-medium">
-                        {analytics.totalTokens === null ? 'not recorded' : 'tokens'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Measured Cost</span>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-emerald-400">
-                        {analytics.totalCost === null ? '—' : `$${analytics.totalCost.toFixed(4)}`}
-                      </span>
-                      <span className="text-xs text-slate-500 font-medium">
-                        {analytics.totalCost === null ? 'not recorded' : `USD · ${analytics.totalCalls} calls`}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Graph Agents</span>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-accent-400">{analytics.activeAgentCount}</span>
-                      <span className="text-xs text-slate-500 font-medium">/ {analytics.nodes.length} nodes active</span>
-                    </div>
-                  </div>
-
-                  <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Parallel Threads</span>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-purple-400">{analytics.numSections}</span>
-                      <span className="text-xs text-slate-500 font-medium">fan-out workers</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Multi-Agent Architecture Table */}
-                <div className="glass-panel p-6 rounded-2xl border border-white/6 shadow-xl">
-                  <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/6">
-                    <div>
-                      <h3 className="text-lg font-bold text-base-50 flex items-center gap-2">
-                        <Layers className="w-5 h-5 text-accent-400" />
-                        Multi-Agent Execution Matrix
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-1">Model mapping, role descriptions and execution status per graph node. Cost is metered per RUN, not per agent — see the measured total above; a dash means the figure was not recorded.</p>
-                    </div>
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-accent-500/10 text-accent-400 border border-accent-500/20">
-                      LangGraph Directed Acyclic Graph (DAG)
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-white/10 text-slate-400 uppercase tracking-wider">
-                          <th className="py-3 px-4">Agent Node</th>
-                          <th className="py-3 px-4">Model / Provider</th>
-                          <th className="py-3 px-4">Role & Logic</th>
-                          <th className="py-3 px-4">Est. Cost</th>
-                          <th className="py-3 px-4">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/4 text-slate-300">
-                        {analytics.nodes.map((node) => {
-                          const isSkipped = node.status === 'Skipped';
-                          const isRunning = node.status === 'Running';
-                          return (
-                            <tr key={node.id} className={`hover:bg-white/2 transition-colors ${isSkipped ? 'opacity-50' : ''}`}>
-                              <td className="py-3 px-4 font-semibold text-base-50 flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${isSkipped ? 'bg-slate-600' : node.color}`}></span>
-                                <span className={isSkipped ? 'text-slate-400 line-through decoration-slate-600' : 'text-base-50'}>{node.name}</span>
-                              </td>
-                              <td className={`py-3 px-4 font-mono ${isSkipped ? 'text-slate-500' : node.textColor}`}>{node.model}</td>
-                              <td className="py-3 px-4 text-slate-400">{node.role}</td>
-                              <td className={`py-3 px-4 font-mono ${node.cost ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}
-                                  title={node.cost === null ? 'Per-agent cost is not measured; see the run total above' : undefined}>
-                                {node.cost === null ? '—' : `$${node.cost.toFixed(4)}`}
-                              </td>
-                              <td className="py-3 px-4">
-                                {isRunning ? (
-                                  <span className="text-amber-400 font-semibold animate-pulse flex items-center gap-1">
-                                    <RefreshCw className="w-3 h-3 animate-spin" /> Running...
-                                  </span>
-                                ) : isSkipped ? (
-                                  <span className="text-slate-500 font-medium italic">Skipped</span>
-                                ) : node.status.startsWith('Passed') || node.status === 'Approved' ? (
-                                  <span className="text-emerald-400 font-semibold">{node.status}</span>
-                                ) : (
-                                  <span className="text-slate-400 font-medium">{node.status}</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* VIDEO TAB */}
             {activeTab === 'video' && (
               <div>
                 {currentJob.video_file ? (

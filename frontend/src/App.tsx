@@ -9,7 +9,6 @@ import { Cpu, X } from 'lucide-react';
 import { motion } from 'motion/react';
 
 const ContentView = lazy(() => import('./ContentView').then(({ ContentView }) => ({ default: ContentView })));
-const AgentGraphCanvas = lazy(() => import('./components/AgentGraphCanvas'));
 
 export default function App() {
   const [view, setView]               = useState<ViewState>('chat');
@@ -250,16 +249,6 @@ export default function App() {
       />
       <div className="flex-1 md:ml-[260px] flex flex-col h-dvh relative">
         <TopNav view={view} onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)} />
-        {view === 'graph' && (
-          <div className="flex-1 p-3 md:p-4 overflow-hidden flex flex-col min-h-0">
-            <Suspense fallback={<ViewLoadingLabel label="Loading agent graph…" />}>
-              <AgentGraphCanvas
-                events={events}
-                currentJob={currentJob}
-              />
-            </Suspense>
-          </div>
-        )}
         {view === 'chat' && (
           <ChatView
             navTo={navTo}
