@@ -377,9 +377,20 @@ def split_into_sentences(text: str) -> List[str]:
 
 
 def get_embeddings_model():
-    """Dynamically initializes the OpenAI Embeddings model to avoid startup errors if key is missing."""
+    """Dynamically initializes the OpenAI Embeddings model to avoid startup errors if key is missing.
+
+    Bounded by the same timeout as the chat clients. Semantic chunking embeds
+    every sentence of an upload in one batched call, so this is the largest
+    single request the system makes — exactly the one that must not inherit the
+    SDK's 600-second default and stall an upload indefinitely.
+    """
     from langchain_openai import OpenAIEmbeddings
-    return OpenAIEmbeddings(model="text-embedding-3-small")
+    from .utils import _REQUEST_TIMEOUT, _MAX_RETRIES
+    return OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        timeout=_REQUEST_TIMEOUT,
+        max_retries=_MAX_RETRIES,
+    )
 
 
 def semantic_chunking(

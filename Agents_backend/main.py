@@ -26,7 +26,6 @@ load_dotenv()
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_openai import ChatOpenAI
 
 # Internal Imports
 from Graph.state import State, Plan
@@ -91,8 +90,11 @@ def create_blog_structure(topic: str) -> dict:
 def refine_plan_with_llm(current_plan: Plan, feedback: str) -> Plan:
     """Refines the plan based on human feedback."""
     print(f"\n   🤖 Refining plan based on: '{feedback}'...")
-    llm    = ChatOpenAI(model="gpt-5-mini", temperature=0)
-    editor = llm.with_structured_output(Plan)
+    # get_llm() rather than a bare ChatOpenAI: it applies the configured model
+    # and the request timeout. A hardcoded client here ignored both, so plan
+    # refinement could hang for the SDK's 600s default while the user waited.
+    from Graph.agents.utils import get_llm
+    editor = get_llm(temperature=0).with_structured_output(Plan)
 
     return editor.invoke([
         SystemMessage(content="You are a helpful editor. Update the Plan based STRICTLY on user feedback."),

@@ -47,7 +47,8 @@ def get_llm(state: dict = None, temperature: float = 0.0) -> ChatOpenAI:
                 f"Ignoring unsupported model '{requested}' — get_llm only builds "
                 f"OpenAI clients. Falling back to '{model_name}'."
             )
-    return ChatOpenAI(model=model_name, temperature=temperature)
+    return ChatOpenAI(model=model_name, temperature=temperature,
+                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
 
 _FAST_MODEL = os.getenv("LLM_FAST_MODEL", "gpt-5-mini")
 _QUALITY_MODEL = os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini")
@@ -71,6 +72,22 @@ _QUALITY_MODEL = os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini")
 _JUDGE_MODEL = os.getenv("LLM_JUDGE_MODEL", _QUALITY_MODEL)
 
 # ---------------------------------------------------------------------------
+# REQUEST TIMEOUT
+# ---------------------------------------------------------------------------
+# Unset, langchain-openai inherits the OpenAI SDK's default 600-second read
+# timeout and retries twice — so one wedged request could occupy a worker
+# thread for THIRTY MINUTES with no log line and no way to tell it apart from
+# a slow model. Pipeline runs execute in FastAPI's bounded thread pool, and
+# jobs awaiting human approval already hold threads for up to 20 minutes, so a
+# hung call compounds directly into API-wide starvation.
+#
+# 180s comfortably covers the slowest observed call (the QA audit reads 30k
+# characters); with 2 retries the worst case is ~9 minutes instead of ~30.
+# Raise LLM_REQUEST_TIMEOUT if a larger model legitimately needs longer.
+_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "180"))
+_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
+
+# ---------------------------------------------------------------------------
 # A NOTE ON temperature
 # ---------------------------------------------------------------------------
 # The temperature arguments below are NOT honoured by the default model.
@@ -89,12 +106,16 @@ _JUDGE_MODEL = os.getenv("LLM_JUDGE_MODEL", _QUALITY_MODEL)
 # out to matter, vary the prompt, not this number.
 # tests/test_evaluation.py::TestTemperatureIsInertOnReasoningModels guards this
 # so the finding is not silently rediscovered.
-llm_fast = ChatOpenAI(model=_FAST_MODEL, temperature=0)
-llm_quality = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.1)
-llm_judge = ChatOpenAI(model=_JUDGE_MODEL, temperature=0)
+llm_fast = ChatOpenAI(model=_FAST_MODEL, temperature=0,
+                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
+llm_quality = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.1,
+                         timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
+llm_judge = ChatOpenAI(model=_JUDGE_MODEL, temperature=0,
+                       timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
 # Planner LLM uses higher temperature so blog outlines vary across runs
 # instead of converging on the same headings for the same topic.
-llm_planner = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.7)
+llm_planner = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.7,
+                         timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
 
 # Backward compat alias
 llm = llm_fast
