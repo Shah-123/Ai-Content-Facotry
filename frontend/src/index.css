@@ -1,6 +1,28 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* Bind Tailwind's `dark:` variant to the app's own theme switch.
+   Without this it defaults to `prefers-color-scheme`, so every `dark:`
+   utility (the G-Eval radar grid and score cards in ContentView, the
+   composer backdrop in ChatView) followed the OS instead of the toggle —
+   flipping the app to light on a dark-OS machine left near-white strokes
+   and labels sitting on light surfaces. `useTheme` writes
+   data-theme="light" and removes the attribute for dark. */
+/* `:is` not `:where` — :where contributes zero specificity, so a
+   `dark:text-*` tied with its own un-varianted base utility lost on
+   source order (dark:text-slate-300/80 rendered as text-slate-600). */
+@custom-variant dark (&:is(:root:not([data-theme="light"]) *));
+
+/* Dark is the default: `useTheme` removes data-theme entirely for it. */
+:root { color-scheme: dark; }
+
+/* "Enough room to show the full hero." The dashboard pins the composer to the
+   bottom and scrolls only the feed above it, so on a 1366x768 laptop or
+   projector the three hero feature cards were sliced through the middle. Height
+   is the real constraint, not width, so gate them on both: below this, the
+   compact chip row (which is a real <button>, unlike the cards) stands in. */
+@custom-variant roomy (@media (min-width: 768px) and (min-height: 800px));
+
 /* ===================================================================
    Aesthetic: Dark editorial + warm amber accent. 
    Inspired by late-night creative studios, not generic SaaS dashboards.
@@ -29,7 +51,7 @@
   --color-accent-200: #fde68a;
   --color-accent-600: #d97706;
   --color-accent-700: #b45309;
-  --color-accent-glow: rgba(245, 158, 11, 0.15);
+  --color-accent-glow: rgba(var(--accent-rgb), 0.15);
 
   /* --- Signal: Emerald for success, rose for error --- */
   --color-signal-success: #34d399;
@@ -77,6 +99,12 @@
   --color-tertiary-fixed-dim: #34d399;
 }
 
+/* The accent as a bare RGB triplet. Every amber glow, tint and ambient wash
+   below was hard-coded rgba(245,158,11,…), which stayed amber after the light
+   theme flipped the accent to blue — that was the yellow cast over the light
+   background. Flipped once here, applied everywhere via rgba(var(--accent-rgb), …). */
+:root { --accent-rgb: 245, 158, 11; }
+
 /* ===================================================================
    LIGHT THEME OVERRIDES
    Activated by setting `data-theme="light"` on <html>.
@@ -85,6 +113,12 @@
    =================================================================== */
 
 :root[data-theme="light"] {
+  /* Drives the browser's own chrome - scrollbars, form controls, autofill,
+     the canvas behind the page - off the app's toggle. The <meta> in
+     index.html only declares which schemes are supported; the browser picks
+     between them by OS preference, which is the wrong signal once the user
+     has chosen a theme in-app. */
+  color-scheme: light;
   --color-base-950: #f5f5f7;
   --color-base-900: #ececef;
   --color-base-850: #e3e3e8;
@@ -122,6 +156,7 @@
   --color-accent-600: #1d4ed8;
   --color-accent-700: #1e40af;
   --color-accent-glow: rgba(37, 99, 235, 0.15);
+  --accent-rgb: 37, 99, 235;
 
   /* Light theme signal error tokens (high-contrast red on light bg) */
   --color-signal-error: #dc2626;
@@ -190,8 +225,10 @@ input[type="range"] {
 :root[data-theme="light"] .border-white\/6  { border-color: rgba(0, 0, 0, 0.09); }
 :root[data-theme="light"] .border-white\/8  { border-color: rgba(0, 0, 0, 0.11); }
 :root[data-theme="light"] .border-white\/10 { border-color: rgba(0, 0, 0, 0.14); }
+:root[data-theme="light"] .border-white\/12 { border-color: rgba(0, 0, 0, 0.16); }
 :root[data-theme="light"] .border-white\/20 { border-color: rgba(0, 0, 0, 0.20); }
 
+:root[data-theme="light"] .bg-white\/2  { background-color: rgba(0, 0, 0, 0.02); }
 :root[data-theme="light"] .bg-white\/3  { background-color: rgba(0, 0, 0, 0.03); }
 :root[data-theme="light"] .bg-white\/4  { background-color: rgba(0, 0, 0, 0.04); }
 :root[data-theme="light"] .bg-white\/5  { background-color: rgba(0, 0, 0, 0.05); }
@@ -206,21 +243,16 @@ input[type="range"] {
 
 :root[data-theme="light"] .hover\:border-white\/6:hover  { border-color: rgba(0, 0, 0, 0.12); }
 :root[data-theme="light"] .hover\:border-white\/10:hover { border-color: rgba(0, 0, 0, 0.16); }
+:root[data-theme="light"] .hover\:border-white\/12:hover { border-color: rgba(0, 0, 0, 0.18); }
 :root[data-theme="light"] .focus\:border-white\/10:focus { border-color: rgba(0, 0, 0, 0.16); }
 
 :root[data-theme="light"] .divide-white\/4 > * + * { border-color: rgba(0, 0, 0, 0.06); }
 :root[data-theme="light"] .divide-white\/6 > * + * { border-color: rgba(0, 0, 0, 0.09); }
 
-/* Selection colour reads better with a darker text colour on light bg. */
-:root[data-theme="light"] ::selection {
-  background: rgba(245, 158, 11, 0.25);
-  color: #15151e;
-}
-
 /* Ambient gradient is too subtle on light bg — boost the amber tint a notch. */
 :root[data-theme="light"] .ambient-bg {
   background-image:
-    radial-gradient(ellipse 80% 60% at 10% 0%, rgba(245, 158, 11, 0.10) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 60% at 10% 0%, rgba(var(--accent-rgb), 0.10) 0%, transparent 50%),
     radial-gradient(ellipse 60% 80% at 90% 100%, rgba(96, 165, 250, 0.08) 0%, transparent 50%);
 }
 
@@ -231,8 +263,8 @@ input[type="range"] {
 
 /* Top-nav uses bg-base-950/60 which becomes a translucent light grey — keep
    it readable by tinting toward white. */
-:root[data-theme="light"] nav.bg-base-950\/60 {
-  background-color: rgba(255, 255, 255, 0.7);
+:root[data-theme="light"] nav.bg-base-950\/80 {
+  background-color: rgba(255, 255, 255, 0.75);
 }
 
 /* -------------------------------------------------------------------
@@ -297,6 +329,25 @@ input[type="range"] {
   box-shadow:
     0 1px 2px rgba(29, 78, 216, 0.18),
     0 6px 20px rgba(59, 130, 246, 0.22);
+}
+
+/* Hero headline. Unlike the other gradient-text utilities this one had no
+   light override, so its stops resolved to accent-200/300 (#93c5fd, #60a5fa)
+   — near-invisible on the #f5f5f7 ground. Re-declaring `background` resets
+   background-size and background-clip, so both are restated. */
+:root[data-theme="light"] .text-shimmer {
+  background: linear-gradient(
+    90deg,
+    #1d4ed8 0%,
+    #2563eb 25%,
+    #3b82f6 50%,
+    #2563eb 75%,
+    #1d4ed8 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* The amber gradient text utility (used for some headings) too. */
@@ -369,8 +420,8 @@ input[type="range"] {
   }
 
   ::selection {
-    background: rgba(251, 191, 36, 0.3);
-    color: #fde68a;
+    background: rgba(var(--accent-rgb), 0.28);
+    color: var(--color-base-50);
   }
 }
 
@@ -402,7 +453,7 @@ input[type="range"] {
     height: 80vh;
     top: -20vh;
     left: -20vw;
-    background: radial-gradient(circle at center, rgba(245, 158, 11, 0.045) 0%, transparent 70%);
+    background: radial-gradient(circle at center, rgba(var(--accent-rgb), 0.045) 0%, transparent 70%);
     pointer-events: none;
     z-index: 0;
     animation: aurora-float-1 25s ease-in-out infinite alternate;
@@ -448,11 +499,11 @@ input[type="range"] {
     transition: border-color 0.3s ease, box-shadow 0.3s ease;
   }
   .glass-panel:focus-within {
-    border-color: rgba(245, 158, 11, 0.25);
+    border-color: rgba(var(--accent-rgb), 0.25);
     box-shadow: 
       0 1px 2px rgba(0, 0, 0, 0.4),
       0 12px 40px rgba(0, 0, 0, 0.3),
-      0 0 15px rgba(245, 158, 11, 0.06),
+      0 0 15px rgba(var(--accent-rgb), 0.06),
       inset 0 1px 0 rgba(255, 255, 255, 0.02);
   }
 
@@ -469,10 +520,10 @@ input[type="range"] {
     color: #0a0a0c;
     font-weight: 600;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.25);
   }
   .btn-primary:hover {
-    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.4);
     transform: translateY(-1px);
   }
   .btn-primary:active {
@@ -485,10 +536,10 @@ input[type="range"] {
     color: #0a0a0c;
     font-weight: 600;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.25);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.25);
   }
   .kinetic-pill:hover {
-    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.4);
     transform: translateY(-1px);
   }
   .kinetic-pill:active {
@@ -506,7 +557,7 @@ input[type="range"] {
     box-shadow: 
       0 8px 32px rgba(0, 0, 0, 0.3),
       0 0 0 1px rgba(255, 255, 255, 0.04),
-      0 0 40px rgba(245, 158, 11, 0.05);
+      0 0 40px rgba(var(--accent-rgb), 0.05);
   }
 
   /* --- High contrast card (for blog reader) --- */
@@ -600,9 +651,9 @@ input[type="range"] {
     /* Inactive waveform bars: faint white tint on dark bg */
     --podcast-bar-inactive:  rgba(255, 255, 255, 0.13);
     /* Play button glow helpers — derived from accent */
-    --podcast-play-ring:        rgba(245, 158, 11, 0.22);
-    --podcast-play-glow:        rgba(245, 158, 11, 0.38);
-    --podcast-play-glow-strong: rgba(245, 158, 11, 0.60);
+    --podcast-play-ring:        rgba(var(--accent-rgb), 0.22);
+    --podcast-play-glow:        rgba(var(--accent-rgb), 0.38);
+    --podcast-play-glow-strong: rgba(var(--accent-rgb), 0.60);
 
     background: linear-gradient(
       160deg,
@@ -630,7 +681,7 @@ input[type="range"] {
   }
   .prose a {
     color: var(--color-accent-500);
-    text-decoration-color: rgba(245, 158, 11, 0.3);
+    text-decoration-color: rgba(var(--accent-rgb), 0.3);
   }
   .prose a:hover {
     color: var(--color-accent-400);
@@ -665,7 +716,7 @@ input[type="range"] {
     background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
     color: #0a0a0c;
     box-shadow:
-      0 2px 12px rgba(245, 158, 11, 0.30),
+      0 2px 12px rgba(var(--accent-rgb), 0.30),
       inset 0 1px 0 rgba(255, 255, 255, 0.18);
   }
 
@@ -673,7 +724,7 @@ input[type="range"] {
     background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
     color: #0a0a0c;
     box-shadow:
-      0 6px 24px rgba(245, 158, 11, 0.18),
+      0 6px 24px rgba(var(--accent-rgb), 0.18),
       0 0 0 1px rgba(255, 255, 255, 0.08) inset;
   }
 
@@ -745,7 +796,7 @@ input[type="range"] {
     border-top-color: var(--color-accent-500);
     border-right-color: var(--color-accent-500);
     animation: orbitalSpin 1.6s linear infinite;
-    filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.4));
+    filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.4));
   }
   .orbital-ring-2 {
     inset: 6px;
@@ -831,7 +882,7 @@ input[type="range"] {
   .step-node-active {
     background: var(--color-accent-500);
     color: #0a0a0c;
-    box-shadow: 0 0 16px rgba(245, 158, 11, 0.5);
+    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.5);
     animation: stepPulse 2s ease-in-out infinite;
   }
   .step-node-pending {
@@ -845,8 +896,8 @@ input[type="range"] {
     box-shadow: 0 0 12px rgba(251, 113, 133, 0.5);
   }
   @keyframes stepPulse {
-    0%, 100% { box-shadow: 0 0 16px rgba(245, 158, 11, 0.5); }
-    50% { box-shadow: 0 0 24px rgba(245, 158, 11, 0.8), 0 0 40px rgba(245, 158, 11, 0.2); }
+    0%, 100% { box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.5); }
+    50% { box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.8), 0 0 40px rgba(var(--accent-rgb), 0.2); }
   }
   .step-connector {
     flex: 1;

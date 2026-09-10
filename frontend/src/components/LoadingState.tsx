@@ -1,4 +1,3 @@
-import React from 'react';
 import { motion } from 'motion/react';
 import { Bot, CheckCircle2, RefreshCw } from 'lucide-react';
 import { AgentEvent } from '../api';

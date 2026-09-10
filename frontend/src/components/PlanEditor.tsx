@@ -22,8 +22,10 @@ interface PlanEditorProps {
 
 export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEditorProps) {
   const [editedTitle, setEditedTitle]       = useState(plan.blog_title || '');
-  const [editedTone, setEditedTone]         = useState(plan.tone       || 'professional');
-  const [editedAudience, setEditedAudience] = useState(plan.audience   || 'general');
+  // Passed straight back to the server unchanged — the outline editor exposes
+  // no control for either, so these are plain reads, not editable state.
+  const editedTone     = plan.tone     || 'professional';
+  const editedAudience = plan.audience || 'general';
   const [tasks, setTasks] = useState<EditableTask[]>(() =>
     (plan.tasks || []).map((t: any, i: number) => ({
       id: i,

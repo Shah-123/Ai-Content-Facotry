@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle2, Clock, Podcast, Film, Share2, Download,
   FileText, Settings, Image as ImageIcon,
-  Play, Volume2, Copy, RefreshCw, LayoutTemplate, Bot, Trash2,
-  GraduationCap, Sparkles, Edit3, Zap, FileCode, Check, Printer, Layers, ExternalLink
+  Copy, RefreshCw, Bot, Trash2,
+  Sparkles, Edit3, Zap, FileCode, Check, Printer, ExternalLink
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -61,11 +61,14 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
   const [editedContent, setEditedContent] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
 
+  // Seed the editor from the server copy whenever the job (or its content)
+  // changes. Deliberately NOT keyed on isEditing: re-running on every
+  // Edit -> Preview toggle silently overwrote whatever the user had typed.
+  // `editedContent` is the single source of truth for the article from here on,
+  // so preview, copy, and the Markdown export all show the edited text.
   useEffect(() => {
-    if (currentJob?.final_content && !isEditing) {
-      setEditedContent(currentJob.final_content);
-    }
-  }, [currentJob?.final_content, isEditing]);
+    setEditedContent(currentJob?.final_content ?? '');
+  }, [currentJob?.id, currentJob?.final_content]);
 
   const { triggering, getCurrentRunEvents, getLastTaskError, handleTrigger, isTaskRunning } = useJobActions({
     currentJob,
@@ -157,15 +160,43 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                 {/* Action Bar & Token Badge */}
                 {currentJob.final_content && (
                   <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-base-900/80 dark:bg-base-900/90 border border-base-750/80 backdrop-blur-xl shadow-lg">
-                    {/* Token Cost Badge */}
+                    {/* Measured token usage and cost, recorded per run by
+                        Agents_backend/usage.py and read off the job row. Never
+                        estimated client-side: the previous badge multiplied the
+                        word count by a magic constant and was 2x out on cost.
+                        Absent usage means "not measured", so it renders as such
+                        rather than as a zero or a guess. */}
                     <div className="flex items-center gap-3 text-xs font-semibold">
-                      <span className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-accent-500/10 text-accent-400 border border-accent-500/20 shadow-sm font-mono">
-                        <Zap className="w-3.5 h-3.5" />
-                        ~{Math.round((currentJob.final_content.split(/\s+/).length || 500) * 28 / 100) * 100} Tokens
-                      </span>
-                      <span className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 shadow-sm font-mono">
-                        💰 ~${((currentJob.final_content.split(/\s+/).length || 500) * 0.00008).toFixed(3)} USD
-                      </span>
+                      {currentJob.usage ? (
+                        <>
+                          <span
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-accent-500/10 text-accent-400 border border-accent-500/20 shadow-sm font-mono"
+                            title={`${currentJob.usage.total.calls} model calls · ${currentJob.usage.total.input_tokens.toLocaleString()} in / ${currentJob.usage.total.output_tokens.toLocaleString()} out`}
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                            {currentJob.usage.total.total_tokens.toLocaleString()} Tokens
+                          </span>
+                          <span
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 shadow-sm font-mono"
+                            title={currentJob.usage.priced
+                              ? 'Estimated from published list prices for the models actually called'
+                              : 'Partial: at least one model called has no published price, so the real cost is higher'}
+                          >
+                            {/* A trailing + when usage.priced is false — that flag
+                                means a called model had no known price, so this
+                                is a floor, not the total. */}
+                            💰 ${currentJob.usage.total.cost_usd.toFixed(4)}{currentJob.usage.priced ? '' : '+'} USD
+                          </span>
+                        </>
+                      ) : (
+                        <span
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 text-base-400 border border-white/8 shadow-sm font-mono"
+                          title="This job finished before usage metering existed, or never completed."
+                        >
+                          <Zap className="w-3.5 h-3.5" />
+                          Usage not recorded
+                        </span>
+                      )}
                     </div>
 
                     {/* Action Controls */}
@@ -184,7 +215,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
 
                       <button
                         onClick={() => {
-                          navigator.clipboard.writeText(isEditing ? editedContent : (currentJob.final_content || editedContent));
+                          navigator.clipboard.writeText(editedContent);
                           setCopied(true);
                           setTimeout(() => setCopied(false), 2000);
                         }}
@@ -233,7 +264,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                       {/* Markdown Download */}
                       <button
                         onClick={() => {
-                          const rawText = isEditing ? editedContent : (currentJob.final_content || editedContent || '');
+                          const rawText = editedContent;
                           const resolvedText = resolveContentImageUrls(rawText, currentJob.id);
                           const filename = `${(currentJob.topic || 'blog').replace(/[^a-z0-9]/gi, '_')}.md`;
                           const blob = new Blob([resolvedText], { type: 'text/markdown;charset=utf-8' });
@@ -262,8 +293,8 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                     isEditing ? (
                       <div className="flex flex-col gap-3">
                         <div className="flex items-center justify-between text-xs text-slate-500 border-b pb-2">
-                          <span className="font-semibold text-slate-700">WYSIWYG Markdown Editor</span>
-                          <span>Live synchronization enabled</span>
+                          <span className="font-semibold text-slate-700">Markdown Editor</span>
+                          <span>Edits apply to preview, copy, and export — not saved to the server</span>
                         </div>
                         <textarea
                           value={editedContent}
@@ -274,7 +305,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                     ) : (
                       <div className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-a:text-accent-600 hover:prose-a:text-accent-500">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {resolveContentImageUrls(isEditing ? editedContent : (currentJob.final_content || editedContent), currentJob?.id)}
+                          {resolveContentImageUrls(editedContent, currentJob?.id)}
                         </ReactMarkdown>
                       </div>
                     )
@@ -427,7 +458,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
               </div>
             )}
 
-            {/* AGENT ANALYTICS TAB */}
+            {/* VIDEO TAB */}
             {activeTab === 'video' && (
               <div>
                 {currentJob.video_file ? (

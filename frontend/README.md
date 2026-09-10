@@ -9,7 +9,8 @@ This is the React 19, TypeScript, and Vite dashboard for AI Content Factory. It 
 - `src/components/PlanEditor.tsx` — human review and revision of the generated outline.
 - `src/ContentView.tsx` — article, evaluation, asset, campaign, and export studio.
 - `src/hooks/useJobActions.ts` — task execution, WebSocket, and polling behaviour.
-- `src/hooks/useJobAnalytics.ts` — derived execution and evaluation analytics.
+- `src/hooks/useGEvalRadar.ts` — radar-chart geometry for the G-Eval rubric scores.
+- `src/events.ts` — agent-event list semantics (de-dupes the server's replay).
 - `src/api.ts` — backend HTTP and WebSocket client.
 
 ## Run locally

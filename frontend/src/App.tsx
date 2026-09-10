@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { APIClient, WebSocketClient, Job, AgentEvent, CreateJobParams } from './api';
+import { appendUniqueEvent } from './events';
 import { ViewState } from './types';
 import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
@@ -7,6 +8,9 @@ import { ChatView } from './components/ChatView';
 import { Toasts, toast } from './components/Toast';
 import { Cpu, X } from 'lucide-react';
 import { motion } from 'motion/react';
+
+/** Backend statuses that mean the job record changed and should be re-fetched. */
+const WS_REFRESH_STATUSES = ['completed', 'error', 'plan_ready', 'plan_revised', 'plan_approved'];
 
 const ContentView = lazy(() => import('./ContentView').then(({ ContentView }) => ({ default: ContentView })));
 
@@ -30,6 +34,13 @@ export default function App() {
   const [imageStyle, setImageStyle]   = useState<string>('vivid');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  // Desktop sidebar collapse, remembered across sessions.
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem('sidebar-collapsed') === '1'
+  );
+  useEffect(() => {
+    localStorage.setItem('sidebar-collapsed', isSidebarCollapsed ? '1' : '0');
+  }, [isSidebarCollapsed]);
 
   const navTo = (v: ViewState) => setView(v);
 
@@ -54,6 +65,26 @@ export default function App() {
       // the user actually triggered.
       console.error('Failed to fetch jobs:', e);
     }
+  };
+
+  // One WebSocket wiring for every caller. The de-dupe is load-bearing: the
+  // backend replays a job's whole event history on each connect (see
+  // api/routes/websocket.py) and WebSocketClient retries an unclean drop up to
+  // five times, so without it one network hiccup mid-run renders every agent
+  // event twice. This used to be four near-identical copies and two of them had
+  // drifted without the guard.
+  const connectWS = (jobId: string) => {
+    const ws = wsClientRef.current;
+    ws.disconnect();
+    ws.connect(jobId, (event) => {
+      setEvents(prev => appendUniqueEvent(prev, event));
+      // Refresh whenever the backend signals a state transition, so the job
+      // record (plan, final content, usage) and the sidebar badge stay current.
+      if (WS_REFRESH_STATUSES.includes(event.status)) {
+        APIClient.getJob(jobId).then(setCurrentJob).catch(console.error);
+        fetchJobsList();
+      }
+    });
   };
 
   // Poll jobs every 15s and clean up the websocket on unmount.
@@ -83,23 +114,7 @@ export default function App() {
       setCurrentJob(job);
       setEvents(historicalEvents || []);
 
-      const ws = wsClientRef.current;
-      ws.disconnect();
-      ws.connect(jobId, (event) => {
-        setEvents(prev => {
-          const isDupe = prev.some(
-            e => e.agent_name === event.agent_name
-              && e.message === event.message
-              && Math.abs(e.timestamp - event.timestamp) < 0.01
-          );
-          if (isDupe) return prev;
-          return [...prev, event];
-        });
-        // Refresh currentJob whenever the backend signals a state transition.
-        if (['completed', 'error', 'plan_ready', 'plan_revised', 'plan_approved'].includes(event.status)) {
-          APIClient.getJob(jobId).then(setCurrentJob).catch(console.error);
-        }
-      });
+      connectWS(jobId);
     } catch (e) {
       toast.fromError(e, 'Could not open that job. Check the backend is running.');
     }
@@ -110,23 +125,7 @@ export default function App() {
   // events list so only the new task's events are displayed.
   const reconnectWS = (jobId: string) => {
     setEvents([]);
-    const ws = wsClientRef.current;
-    ws.disconnect();
-    ws.connect(jobId, (event) => {
-      setEvents(prev => {
-        // De-dupe replayed events by (agent + message + ~timestamp).
-        const isDupe = prev.some(
-          e => e.agent_name === event.agent_name
-            && e.message === event.message
-            && Math.abs(e.timestamp - event.timestamp) < 0.01
-        );
-        if (isDupe) return prev;
-        return [...prev, event];
-      });
-      if (event.agent_name === 'system' && (event.status === 'completed' || event.status === 'error')) {
-        APIClient.getJob(jobId).then(setCurrentJob).catch(console.error);
-      }
-    });
+    connectWS(jobId);
   };
 
   const refreshCurrentJob = async (jobId: string) => {
@@ -140,6 +139,19 @@ export default function App() {
 
   const handleCreateJob = async (params: CreateJobParams) => {
     setTopicError(null);
+    setEvents([]);
+    // Flip the screen to the pipeline view NOW. POST /api/jobs blocks on the
+    // Topic Guard LLM call (seconds) before it returns a job, so waiting for
+    // the response leaves the user staring at a dead hero screen after Enter.
+    // Rolled back in catch() if the topic is rejected.
+    setCurrentJob({
+      id: '',
+      topic: params.topic,
+      tone: params.tone ?? tone,
+      sections: params.sections ?? sections,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    });
     try {
       const payload = {
         selected_model: selectedModel,
@@ -151,17 +163,10 @@ export default function App() {
       };
       const newJob = await APIClient.createJob(payload);
       setCurrentJob(newJob);
-      setEvents([]);
       fetchJobsList();
-      const ws = wsClientRef.current;
-      ws.disconnect();
-      ws.connect(newJob.id, (event) => {
-        setEvents(prev => [...prev, event]);
-        if (['completed','error','plan_ready','plan_revised','plan_approved'].includes(event.status)) {
-          APIClient.getJob(newJob.id).then(setCurrentJob).catch(console.error);
-        }
-      });
+      connectWS(newJob.id);
     } catch (e: any) {
+      setCurrentJob(null);   // roll back the optimistic job
       if (e?.code === 'topic_rejected') {
         setTopicError({
           reason: e.reason || 'Topic was rejected.',
@@ -196,15 +201,7 @@ export default function App() {
       await APIClient.resumeJob(jobId);
       refreshCurrentJob(jobId);
       fetchJobsList();  // Update sidebar status badge (Fail → Active)
-      const ws = wsClientRef.current;
-      ws.disconnect();
-      ws.connect(jobId, (event) => {
-        setEvents(prev => [...prev, event]);
-        if (['completed','error','plan_ready','plan_revised','plan_approved'].includes(event.status)) {
-          APIClient.getJob(jobId).then(setCurrentJob).catch(console.error);
-          fetchJobsList();  // Keep sidebar in sync
-        }
-      });
+      connectWS(jobId);
     } catch (e) {
       toast.fromError(e, 'Could not resume this job.');
     }
@@ -246,8 +243,11 @@ export default function App() {
         onResumeJob={handleResumeJob}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
+        onRefreshJobs={fetchJobsList}
       />
-      <div className="flex-1 md:ml-[260px] flex flex-col h-dvh relative">
+      <div className={`flex-1 flex flex-col h-dvh relative transition-[margin] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isSidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'}`}>
         <TopNav view={view} onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)} />
         {view === 'chat' && (
           <ChatView

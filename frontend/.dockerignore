@@ -1,0 +1,13 @@
+# Without this, `COPY . .` pulls the host's node_modules (wrong platform — the
+# image is Alpine) and any local .env into the image layer. The .gitignore does
+# not apply here: the build context is the filesystem, not git.
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.git/

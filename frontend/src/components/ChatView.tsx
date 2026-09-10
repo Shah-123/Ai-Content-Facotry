@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
-  ListOrdered, PlusCircle, Send, Network,
-  CheckCircle2, RefreshCw, ShieldAlert, X, Hash,
+  ListOrdered, Send, Network,
+  CheckCircle2, RefreshCw, ShieldAlert, X,
   FileText, Film, Podcast, Search, Bot,
-  RotateCcw, AlertTriangle, Cpu, Sparkles, Paperclip, ChevronDown, CornerDownLeft, SlidersHorizontal
+  RotateCcw, AlertTriangle, Cpu, Sparkles, Paperclip, ChevronDown, SlidersHorizontal
 } from 'lucide-react';
 import { APIClient, Job, AgentEvent, CreateJobParams, UploadResult, SourceMode } from '../api';
 import { ViewState } from '../types';
@@ -72,6 +72,10 @@ function getAgentConfig(agentName: string) {
 
 
 const ACCEPTED_UPLOAD_TYPES = '.pdf,.docx,.txt,.md';
+
+/** mm:ss for the live run clock. */
+const formatElapsed = (secs: number) =>
+  `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
 
 interface ChatViewProps {
   navTo: (v: ViewState) => void;
@@ -203,6 +207,25 @@ export function ChatView({
 
   const isAwaitingApproval = currentJob?.status === 'awaiting_approval';
   const showHero = !currentJob && events.length === 0;
+  const isLive = !!currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed';
+
+  // Keep the newest agent event in view — the feed scrolls on desktop, so
+  // without this the live process runs off the bottom of the panel.
+  const feedEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    feedEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [events.length, currentJob?.status]);
+
+  // Run clock — a long pipeline with no moving number reads as frozen.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!isLive || !currentJob) { setElapsed(0); return; }
+    const startedAt = new Date(currentJob.created_at).getTime();
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isLive, currentJob?.id, currentJob?.created_at]);
 
   return (
     <main className="flex-1 flex flex-col p-4 md:p-8 relative overflow-y-auto md:overflow-hidden">
@@ -278,10 +301,16 @@ export function ChatView({
             </motion.p>
 
             {/* Feature cards */}
-            <div className="hidden md:grid md:grid-cols-3 gap-4 w-full max-w-3xl relative z-10">
+            <div className="hidden roomy:grid md:grid-cols-3 gap-4 w-full max-w-3xl relative z-10">
               {HERO_FEATURES.map((feat, i) => (
-                <motion.div
+                // A real <button>, not a clickable div: Tab, Enter and Space and
+                // the focus ring all come free, and it is announced as a button.
+                // The heading and paragraph became spans because <button> only
+                // admits phrasing content; the styling is utility classes, so
+                // nothing changes visually.
+                <motion.button
                   key={feat.title}
+                  type="button"
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4 + i * 0.1, duration: 0.4 }}
@@ -290,24 +319,25 @@ export function ChatView({
                     setTone(feat.sampleTone);
                     setSections(feat.sampleSections);
                   }}
-                  className={`glass-panel rounded-2xl p-5 border border-white/6 hover-lift cursor-pointer hover:border-accent-500/30 bg-gradient-to-br ${feat.gradient} flex flex-col justify-between group`}
+                  className={`glass-panel rounded-2xl p-5 text-left border border-white/6 hover-lift cursor-pointer hover:border-accent-500/30 focus-visible:outline-none focus-visible:border-accent-500/60 focus-visible:ring-2 focus-visible:ring-accent-500/40 bg-gradient-to-br ${feat.gradient} flex flex-col justify-between group`}
                 >
-                  <div>
-                    <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/8 flex items-center justify-center mb-3 group-hover:scale-105 group-hover:border-accent-500/20 transition-all duration-300">
+                  <span className="block">
+                    <span className="w-10 h-10 rounded-xl bg-white/5 border border-white/8 flex items-center justify-center mb-3 group-hover:scale-105 group-hover:border-accent-500/20 transition-all duration-300">
                       <feat.icon className="w-5 h-5 text-accent-400" />
-                    </div>
-                    <h4 className="font-bold text-base-100 text-sm mb-1">{feat.title}</h4>
-                    <p className="text-[12px] text-base-400 leading-relaxed mb-4">{feat.desc}</p>
-                  </div>
+                    </span>
+                    <span className="block font-bold text-base-100 text-sm mb-1">{feat.title}</span>
+                    <span className="block text-[12px] text-base-400 leading-relaxed mb-4">{feat.desc}</span>
+                  </span>
                   <span className="text-[10px] text-accent-400 font-semibold underline underline-offset-2 opacity-70 group-hover:opacity-100 group-hover:text-accent-300 transition-all duration-200">
                     Use Template
                   </span>
-                </motion.div>
+                </motion.button>
               ))}
             </div>
 
-            {/* Keep templates available on mobile without pushing the prompt below the fold. */}
-            <div className="flex md:hidden flex-wrap justify-center gap-2 w-full relative z-10">
+            {/* Stands in for the feature cards on mobile and on short desktop screens,
+                so the prompt never gets pushed below the fold. */}
+            <div className="flex roomy:hidden flex-wrap justify-center gap-2 w-full relative z-10">
               {HERO_FEATURES.map((feat) => {
                 const Icon = feat.icon;
                 return (
@@ -330,49 +360,59 @@ export function ChatView({
           </motion.div>
         )}
 
-        {/* -------- Job Controls Banner (Resume Checkpoint & Actions) -------- */}
+        {/* -------- Job Controls Banner + Pipeline Rail (pinned) --------
+             Sticky so the at-a-glance status stays on screen while the agent
+             log scrolls underneath it. */}
         {currentJob && (
-          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl glass-panel border border-white/8 backdrop-blur-md mb-2 w-full">
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${
-                currentJob.status === 'completed' ? 'bg-emerald-400' :
-                currentJob.status === 'failed' ? 'bg-signal-error' :
-                currentJob.status === 'awaiting_approval' ? 'bg-amber-400 animate-ping' :
-                'bg-accent-400 animate-pulse'
-              }`} />
-              <span className="text-xs font-bold text-base-100 uppercase tracking-wider">
-                Job #{currentJob.id.slice(0, 8)} — {currentJob.status.replace('_', ' ')}
-              </span>
+          <div className="sticky top-0 z-20 -mt-2 pt-2 pb-1 bg-base-950/85 backdrop-blur-xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl glass-panel border border-white/8 backdrop-blur-md w-full">
+              <div className="flex items-center gap-2">
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  currentJob.status === 'completed' ? 'bg-emerald-400' :
+                  currentJob.status === 'failed' ? 'bg-signal-error' :
+                  currentJob.status === 'awaiting_approval' ? 'bg-amber-400 animate-ping' :
+                  'bg-accent-400 animate-pulse'
+                }`} />
+                <span className="text-xs font-bold text-base-100 uppercase tracking-wider">
+                  {currentJob.id
+                    ? `Job #${currentJob.id.slice(0, 8)} — ${currentJob.status.replace('_', ' ')}`
+                    : 'Starting pipeline'}
+                </span>
+                {isLive && (
+                  <span className="text-[11px] font-mono text-base-400 tabular-nums px-2 py-0.5 rounded-md bg-white/5 border border-white/8">
+                    {formatElapsed(elapsed)}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {(currentJob.status === 'failed' || currentJob.status === 'running') && handleResumeJob && (
+                  <button
+                    onClick={() => handleResumeJob(currentJob.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent-500/20 text-accent-400 hover:bg-accent-500/30 border border-accent-500/30 transition-all cursor-pointer shadow-sm"
+                    title="Resume pipeline execution from the last saved SQLite checkpoint"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Resume Checkpoint
+                  </button>
+                )}
+
+                {currentJob.status === 'completed' && (
+                  <button
+                    onClick={() => navTo('content')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 transition-all cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    View Studio Draft
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {(currentJob.status === 'failed' || currentJob.status === 'running') && handleResumeJob && (
-                <button
-                  onClick={() => handleResumeJob(currentJob.id)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent-500/20 text-accent-400 hover:bg-accent-500/30 border border-accent-500/30 transition-all cursor-pointer shadow-sm"
-                  title="Resume pipeline execution from the last saved SQLite checkpoint"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Resume Checkpoint
-                </button>
-              )}
-
-              {currentJob.status === 'completed' && (
-                <button
-                  onClick={() => navTo('content')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 transition-all cursor-pointer"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  View Studio Draft
-                </button>
-              )}
-            </div>
+            {currentJob.status !== 'completed' && currentJob.status !== 'failed' && (
+              <ProgressTracker events={events} jobStatus={currentJob.status} />
+            )}
           </div>
-        )}
-
-        {/* -------- Progress Tracker (when a job is running) -------- */}
-        {currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed' && events.length > 0 && (
-          <ProgressTracker events={events} jobStatus={currentJob.status} />
         )}
 
         {currentJob && (
@@ -385,12 +425,47 @@ export function ChatView({
           </div>
         )}
 
+        {isLive && events.length === 0 && (
+          <motion.div
+            className="self-start max-w-3xl flex gap-3.5 w-full"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-accent-500/10 border-accent-500/20">
+              <Sparkles className="w-4 h-4 text-accent-400 animate-pulse" />
+            </div>
+            <div className="glass-panel p-4.5 rounded-2xl rounded-tl-sm flex-1 border border-white/5 shadow-sm">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider bg-accent-500/10 border border-accent-500/20 text-accent-400">
+                  topic guard
+                </span>
+                <span className="text-[10px] text-base-500 font-mono">{formatElapsed(elapsed)}</span>
+              </div>
+              <p className="text-base-200 text-sm flex items-center gap-2.5 leading-relaxed mt-2.5">
+                <RefreshCw className="w-3.5 h-3.5 text-accent-400 animate-spin shrink-0" />
+                <span className="flex-1">Screening your topic and warming up the agent graph…</span>
+              </p>
+              <div className="mt-3.5 space-y-2">
+                <div className="skeleton-shimmer h-2.5 w-[85%]" />
+                <div className="skeleton-shimmer h-2.5 w-[62%]" />
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {events.map((event, i) => {
           const config = getAgentConfig(event.agent_name);
           const AgentIcon = config.icon;
           return (
             <motion.div
-              key={i}
+              // Identity, not position. Resuming a job or triggering a
+              // secondary task clears the feed and refills it with different
+              // events; under index keys React reused those nodes, so the entry
+              // animation never replayed and text swapped in place. This tuple
+              // is the same one appendUniqueEvent de-dupes on, so it is unique
+              // within the list by construction.
+              key={`${event.agent_name}|${event.timestamp}|${event.message}`}
               className="self-start max-w-3xl flex gap-3.5 w-full"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -510,7 +585,7 @@ export function ChatView({
                     className={`resume-btn flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
                       isResuming
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-wait'
-                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-base-950 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-[0.98]'
+                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-amber-950 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-[0.98]'
                     }`}
                     whileHover={!isResuming ? { scale: 1.03 } : undefined}
                     whileTap={!isResuming ? { scale: 0.97 } : undefined}
@@ -542,6 +617,7 @@ export function ChatView({
         )}
 
 
+        <div ref={feedEndRef} />
       </div>
 
       {(!currentJob || currentJob.status === 'completed' || currentJob.status === 'failed') && (
@@ -737,7 +813,7 @@ export function ChatView({
                      || (!topicInput.trim()
                          && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic)))
                       ? 'bg-base-800 text-base-500 border border-base-700 cursor-not-allowed shadow-none'
-                      : 'bg-gradient-to-r from-accent-500 via-amber-500 to-accent-600 hover:from-accent-400 hover:to-accent-500 text-base-950 shadow-accent-500/25 active:scale-95'
+                      : 'bg-gradient-to-r from-accent-400 to-accent-600 hover:from-accent-300 hover:to-accent-500 text-base-950 shadow-accent-500/25 active:scale-95'
                   }`}
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}

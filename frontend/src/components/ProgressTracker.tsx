@@ -27,7 +27,9 @@ const STAGE_MAP: Record<string, number> = {
   campaign_generator: 4,
   video_generator: 4,
   podcast_generator: 4,
-  system: 4,
+  // 'system' is deliberately unmapped: it fires "Pipeline started" at t=0,
+  // which would light the final stage before any work has happened. The
+  // jobStatus === 'completed' branch below handles the end of the run.
 };
 
 const STAGES = [
@@ -38,7 +40,7 @@ const STAGES = [
   { label: 'Polish', icon: Sparkles },
 ] as const;
 
-function getStageStates(events: AgentEvent[], jobStatus?: string) {
+export function getStageStates(events: AgentEvent[], jobStatus?: string) {
   // Determine which stages have started, completed, or errored
   const stageHighest = new Array(STAGES.length).fill(-1); // -1=pending, 0=started, 1=completed, 2=error
   let activeStage = -1;
@@ -60,6 +62,12 @@ function getStageStates(events: AgentEvent[], jobStatus?: string) {
     }
   }
 
+  // A live job with no mapped events yet (the pre-flight topic guard window)
+  // still gets stage 0 lit, so the rail reads as "started" instead of dead.
+  if (activeStage === -1 && jobStatus && jobStatus !== 'completed' && jobStatus !== 'failed') {
+    activeStage = 0;
+  }
+
   // If job completed, mark everything as complete
   if (jobStatus === 'completed') {
     for (let i = 0; i < stageHighest.length; i++) {
@@ -79,8 +87,9 @@ function getStageStates(events: AgentEvent[], jobStatus?: string) {
 export function ProgressTracker({ events, jobStatus }: ProgressTrackerProps) {
   const states = useMemo(() => getStageStates(events, jobStatus), [events, jobStatus]);
 
-  // Don't show if no events at all
-  if (events.length === 0 && jobStatus !== 'completed') return null;
+  // Render as soon as a job exists — waiting for the first event kept the rail
+  // hidden through the whole topic-guard + WS-connect window.
+  if (events.length === 0 && !jobStatus) return null;
 
   return (
     <motion.div
