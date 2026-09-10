@@ -246,6 +246,16 @@ export default function App() {
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
         onRefreshJobs={fetchJobsList}
+        selectedModel={selectedModel}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        tone={tone}
+        setTone={setTone}
+        sections={sections}
+        setSections={setSections}
+        numImages={numImages}
+        setNumImages={setNumImages}
+        keywordsInput={keywordsInput}
+        setKeywordsInput={setKeywordsInput}
       />
       <div className={`flex-1 flex flex-col h-dvh relative transition-[margin] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isSidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'}`}>
         <TopNav view={view} onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)} />
@@ -266,11 +276,9 @@ export default function App() {
             sections={sections}
             setSections={setSections}
             numImages={numImages}
-            setNumImages={setNumImages}
             keywordsInput={keywordsInput}
             setKeywordsInput={setKeywordsInput}
             selectedModel={selectedModel}
-            openSettings={() => setIsSettingsOpen(true)}
           />
         )}
         {view === 'content' && (

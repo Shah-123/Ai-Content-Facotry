@@ -4,7 +4,7 @@ import {
   ListOrdered, Send, Network,
   CheckCircle2, RefreshCw, ShieldAlert, X,
   FileText, Film, Podcast, Search, Bot,
-  RotateCcw, AlertTriangle, Cpu, Sparkles, Paperclip, ChevronDown, SlidersHorizontal
+  RotateCcw, AlertTriangle, Sparkles, Paperclip
 } from 'lucide-react';
 import { APIClient, Job, AgentEvent, CreateJobParams, UploadResult, SourceMode } from '../api';
 import { ViewState } from '../types';
@@ -93,11 +93,9 @@ interface ChatViewProps {
   sections: number;
   setSections: (s: number) => void;
   numImages?: number;
-  setNumImages?: (n: number) => void;
   keywordsInput: string;
   setKeywordsInput: (k: string) => void;
   selectedModel: string;
-  openSettings?: () => void;
 }
 
 /* ---------- Hero Feature Cards ---------- */
@@ -134,12 +132,10 @@ const HERO_FEATURES = [
 export function ChatView({
   navTo, currentJob, events, topicError, clearTopicError,
   handleCreateJob, handleApprovePlan, handleRevisePlan, handleUpdatePlan, handleResumeJob,
-  tone, setTone, sections, setSections, numImages = 0, setNumImages, keywordsInput, setKeywordsInput, selectedModel,
-  openSettings
+  tone, setTone, sections, setSections, numImages = 0, keywordsInput, setKeywordsInput, selectedModel
 }: ChatViewProps) {
   const [topicInput, setTopicInput] = useState('');
   const [isResuming, setIsResuming] = useState(false);
-  const [isGenerationSettingsOpen, setIsGenerationSettingsOpen] = useState(false);
 
   // Document upload state
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'ready' | 'error'>('idle');
@@ -148,6 +144,18 @@ export function ChatView({
   const [uploadError, setUploadError] = useState<string>('');
   const [sourceMode, setSourceMode] = useState<SourceMode>('hybrid');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const topicRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // The box opens at one line and grows to fit, so an empty composer does not
+  // reserve three lines of blank space. Keyed on topicInput rather than on the
+  // change handler because the hero template buttons set the topic too, and a
+  // fixed-height box would have hidden the tail of those longer samples.
+  useEffect(() => {
+    const el = topicRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }, [topicInput]);
 
 
 
@@ -653,7 +661,7 @@ export function ChatView({
           )}
 
 
-          <div className="w-full max-w-4xl mx-auto rounded-3xl p-3.5 bg-base-900/90 dark:bg-base-950/90 backdrop-blur-2xl border border-base-750/80 hover:border-accent-500/40 focus-within:border-accent-500/60 focus-within:shadow-[0_8px_35px_rgba(245,158,11,0.14)] shadow-2xl transition-all duration-300 flex flex-col gap-2.5">
+          <div className="w-full max-w-4xl mx-auto rounded-3xl p-3 bg-base-900/90 dark:bg-base-950/90 backdrop-blur-2xl border border-base-750/80 hover:border-accent-500/40 focus-within:border-accent-500/60 focus-within:shadow-[0_8px_35px_rgba(245,158,11,0.14)] shadow-2xl transition-all duration-300 flex flex-col gap-2">
 
             {uploadStatus !== 'idle' && (
               <UploadChip
@@ -678,7 +686,7 @@ export function ChatView({
             {/* Prompt Textarea */}
             <div className="w-full px-1">
               <textarea
-                className="w-full bg-transparent border-none text-base-100 placeholder-base-400/70 text-base font-medium min-h-[52px] max-h-[180px] resize-none focus:outline-none focus:ring-0 leading-relaxed font-sans"
+                className="w-full bg-transparent border-none text-base-100 placeholder-base-400/70 text-base font-medium min-h-[30px] max-h-[180px] resize-none overflow-y-auto focus:outline-none focus:ring-0 leading-relaxed font-sans"
                 placeholder={
                   uploadStatus === 'ready' && sourceMode === 'auto_topic'
                     ? (uploadResult?.derived_topic
@@ -686,90 +694,24 @@ export function ChatView({
                         : 'Auto-topic mode — enter or override the title...')
                     : 'Enter a topic to generate a publication-ready blog...'
                 }
+                ref={topicRef}
+                rows={1}
                 value={topicInput}
                 onChange={e => setTopicInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitJob(); } }}
               />
             </div>
 
-            <div className="border-t border-base-800/80 pt-2.5 px-1">
-              <button
-                type="button"
-                onClick={() => setIsGenerationSettingsOpen(open => !open)}
-                aria-expanded={isGenerationSettingsOpen}
-                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold text-base-400 transition-colors hover:bg-white/5 hover:text-accent-400"
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                Generation settings
-                <span className="text-[10px] font-normal text-base-500">{tone} · {sections} sections · {numImages} images</span>
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isGenerationSettingsOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isGenerationSettingsOpen && (
-                <div className="mt-2 grid gap-3 rounded-xl border border-white/6 bg-base-950/35 p-3 sm:grid-cols-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
-                    Tone
-                    <select
-                      value={tone}
-                      onChange={(e) => setTone(e.target.value)}
-                      className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-2 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
-                    >
-                      <option value="professional">Professional</option>
-                      <option value="conversational">Conversational</option>
-                      <option value="technical">Technical</option>
-                      <option value="educational">Educational</option>
-                      <option value="persuasive">Persuasive</option>
-                      <option value="inspirational">Inspirational</option>
-                    </select>
-                  </label>
-
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
-                    Target keywords
-                    <input
-                      value={keywordsInput}
-                      onChange={(e) => setKeywordsInput(e.target.value)}
-                      placeholder="e.g. AI agents, content strategy"
-                      className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-2 text-xs font-medium normal-case tracking-normal text-base-200 placeholder:text-base-600 focus:border-accent-500/50 focus:outline-none"
-                    />
-                  </label>
-
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
-                    <span className="flex justify-between"><span>Body sections</span><span className="text-accent-400">{sections}</span></span>
-                    <input
-                      type="range"
-                      min={2}
-                      max={6}
-                      value={sections}
-                      onChange={(e) => setSections(Number(e.target.value))}
-                      className="mt-3 w-full cursor-pointer accent-accent-500"
-                    />
-                  </label>
-
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
-                    <span className="flex justify-between"><span>AI images</span><span className="text-accent-400">{numImages}</span></span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={5}
-                      value={numImages}
-                      onChange={(e) => setNumImages?.(Number(e.target.value))}
-                      className="mt-3 w-full cursor-pointer accent-accent-500"
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
-
             {/* Control Toolbar */}
-            <div className="flex items-center justify-between pt-2.5 px-1">
-              {/* Left Side Tools: Attach Doc + Model Selector */}
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 border-t border-base-800/80 pt-2 px-1">
+              {/* Left Side Tools: Attach Doc */}
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploadStatus === 'uploading'}
                   title="Attach a document (PDF, DOCX, TXT, MD)"
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
+                  className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
                     uploadStatus === 'ready'
                       ? 'text-accent-400 bg-accent-500/15 border border-accent-500/30'
                       : 'text-base-300 hover:text-accent-400 bg-base-800/80 hover:bg-base-750 border border-base-700/60 hover:border-accent-500/30'
@@ -778,26 +720,11 @@ export function ChatView({
                   <Paperclip className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Attach Doc</span>
                 </button>
-
-                {openSettings && (
-                  <button
-                    type="button"
-                    onClick={openSettings}
-                    title="Change Foundation LLM"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent-500/10 hover:bg-accent-500/20 border border-accent-500/25 hover:border-accent-500/50 text-accent-400 text-xs font-mono font-bold transition-all shadow-sm group"
-                  >
-                    <Cpu className="w-3.5 h-3.5 text-accent-400 group-hover:rotate-12 transition-transform" />
-                    <span>{selectedModel}</span>
-                    <ChevronDown className="w-3 h-3 text-accent-400/70" />
-                  </button>
-                )}
               </div>
 
               {/* Right Side Tools: Shortcut Hint + Send Button */}
-              <div className="flex items-center gap-3">
+              <div className="ml-auto flex shrink-0 items-center gap-3">
                 <span className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-base-400">
-                  <span>Multi-agent synthesis</span>
-                  <span className="opacity-40">•</span>
                   <span>Press <kbd className="px-1.5 py-0.5 rounded-md bg-base-800 border border-base-700 text-[10px] text-base-300 font-sans shadow-inner">Enter ↵</kbd></span>
                 </span>
 

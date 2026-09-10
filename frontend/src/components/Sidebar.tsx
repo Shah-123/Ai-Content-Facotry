@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   LayoutDashboard, FileEdit, Plus, RefreshCw, Sparkles, Trash2, RotateCcw,
-  PanelLeftClose, PanelLeftOpen
+  PanelLeftClose, PanelLeftOpen, Cpu, ChevronDown
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Job } from '../api';
@@ -22,11 +22,35 @@ interface SidebarProps {
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   onRefreshJobs: () => void;
+  /** Foundation LLM for the session, and the opener for its settings dialog. */
+  selectedModel?: string;
+  onOpenSettings?: () => void;
+  /** Per-run generation parameters, edited here rather than in the composer. */
+  tone: string;
+  setTone: (t: string) => void;
+  sections: number;
+  setSections: (n: number) => void;
+  numImages: number;
+  setNumImages: (n: number) => void;
+  keywordsInput: string;
+  setKeywordsInput: (k: string) => void;
+}
+
+/** Parse a number field, holding the previous value for input the field cannot
+    represent (empty, "-", "abc"). `min`/`max` attributes only gate form
+    submission, so the range is enforced here instead: `sections` and
+    `numImages` are sent to POST /api/jobs. */
+export function clampInt(raw: string, lo: number, hi: number, fallback: number): number {
+  const n = Number(raw);
+  if (raw.trim() === '' || !Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, Math.round(n)));
 }
 
 export function Sidebar({
   view, navTo, jobs, currentJob, loadJob, startNewJob, onDeleteJob, onResumeJob,
-  isMobileOpen, onCloseMobile, isCollapsed = false, onToggleCollapse, onRefreshJobs
+  isMobileOpen, onCloseMobile, isCollapsed = false, onToggleCollapse, onRefreshJobs,
+  selectedModel, onOpenSettings,
+  tone, setTone, sections, setSections, numImages, setNumImages, keywordsInput, setKeywordsInput
 }: SidebarProps) {
   // Collapse is a desktop affordance; on mobile the drawer is either open
   // (full width) or off-screen, so ignore it there.
@@ -108,9 +132,97 @@ export function Sidebar({
         ))}
       </nav>
 
+      {/* Which model powers the session is a workspace setting, not something
+          that describes the request being typed — so it sits with Navigation
+          rather than in the composer next to Attach Doc. */}
+      {onOpenSettings && (
+        <div className={`pb-1 ${rail ? 'px-3' : 'px-4'}`}>
+          {!rail && <div className="text-[10px] font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Engine</div>}
+          <button
+            onClick={onOpenSettings}
+            title={rail ? `Foundation LLM: ${selectedModel}` : 'Change foundation LLM'}
+            aria-label="Change foundation LLM"
+            className={`group flex w-full items-center rounded-xl border border-accent-500/25 bg-accent-500/10 py-2 text-accent-400 transition-all hover:border-accent-500/50 hover:bg-accent-500/20 ${rail ? 'justify-center px-0' : 'gap-2 px-3.5'}`}
+          >
+            <Cpu className="h-[18px] w-[18px] shrink-0 transition-transform group-hover:rotate-12" />
+            {!rail && (
+              <>
+                <span className="min-w-0 flex-1 truncate text-left font-mono text-xs font-bold">{selectedModel}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-accent-400/70" />
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* The run's parameters. They sit here rather than in the composer so the
+          input area stays one line plus Generate, and because their lifetime is
+          the session, not the message being typed — the same reason Engine is
+          here. The rail hides them: a bare field with no label is not usable. */}
+      <div className={`px-4 pt-2 pb-1 ${rail ? 'hidden' : ''}`}>
+        <div className="text-[10px] font-bold text-base-500 mb-2 uppercase tracking-widest px-2 whitespace-nowrap">Generation</div>
+        <div className="flex flex-col gap-3 px-2">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+            Tone
+            <select
+              value={tone}
+              onChange={(e) => setTone(e.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+            >
+              <option value="professional">Professional</option>
+              <option value="conversational">Conversational</option>
+              <option value="technical">Technical</option>
+              <option value="educational">Educational</option>
+              <option value="persuasive">Persuasive</option>
+              <option value="inspirational">Inspirational</option>
+            </select>
+          </label>
+
+          <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+            Target keywords
+            <input
+              value={keywordsInput}
+              onChange={(e) => setKeywordsInput(e.target.value)}
+              placeholder="e.g. AI agents"
+              className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium normal-case tracking-normal text-base-200 placeholder:text-base-600 focus:border-accent-500/50 focus:outline-none"
+            />
+          </label>
+
+          {/* Side by side: both are single digits, so a full-width field each
+              wasted a row of sidebar height that a short screen needs. */}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+              Sections
+              <input
+                type="number"
+                min={2}
+                max={6}
+                step={1}
+                value={sections}
+                onChange={(e) => setSections(clampInt(e.target.value, 2, 6, sections))}
+                className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+              />
+            </label>
+
+            <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+              AI images
+              <input
+                type="number"
+                min={0}
+                max={5}
+                step={1}
+                value={numImages}
+                onChange={(e) => setNumImages(clampInt(e.target.value, 0, 5, numImages))}
+                className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
       {/* Recent Jobs History — the list needs labels to be useful, so the
           rail hides it rather than showing a column of unreadable stubs. */}
-      <div className={`px-4 pb-5 pt-3 ${rail ? 'hidden' : ''}`}>
+      <div className={`px-4 pb-4 pt-2 ${rail ? 'hidden' : ''}`}>
         <div className="flex justify-between items-center mb-2.5 px-2">
           <span className="text-[10px] font-bold text-base-500 uppercase tracking-widest whitespace-nowrap">Recent Jobs</span>
           <button
