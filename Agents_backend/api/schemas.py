@@ -17,7 +17,7 @@ class GenerationConfig(BaseModel):
     upload_id: str | None = None
     source_mode: str = "hybrid"
     selected_model: str = "gpt-5-mini"
-    image_model: str = "dall-e-3"
+    image_model: str = "gpt-image-1-mini"
     image_size: str = "1024x1024"
     image_quality: str = "standard"
     image_style: str = "vivid"

@@ -48,6 +48,10 @@ def decide_images(state: State) -> dict:
     return {"image_specs": specs}
 
 
+_GPT_IMAGE_SIZES = {"1792x1024": "1536x1024", "1024x1792": "1024x1536"}
+_GPT_IMAGE_QUALITY = {"standard": "medium", "hd": "high"}
+
+
 def _generate_image_openai_dalle(prompt: str, model: str | None = "dall-e-3", size: str | None = "1024x1024", quality: str | None = "standard", style: str | None = "vivid") -> Optional[bytes]:
     """Generates image using OpenAI DALL-E model with configured parameters."""
     api_key = os.getenv("OPENAI_API_KEY")
@@ -69,8 +73,13 @@ def _generate_image_openai_dalle(prompt: str, model: str | None = "dall-e-3", si
             "n": 1,
             "size": size
         }
-        if model == "dall-e-3":
+        if model.startswith("gpt-image-1"):
+            # gpt-image-1* uses its own size/quality vocabulary and has no `style`
+            kwargs["size"] = _GPT_IMAGE_SIZES.get(size, size)
+            kwargs["quality"] = _GPT_IMAGE_QUALITY.get(quality, quality)
+        elif model == "dall-e-3":
             kwargs["quality"] = quality
+            kwargs["style"] = style
 
         try:
             response = client.images.generate(**kwargs)

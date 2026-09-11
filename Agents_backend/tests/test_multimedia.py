@@ -40,6 +40,7 @@ def test_generate_image_openai_dalle_default_model():
             assert len(calls) == 1
             assert calls[0]["model"] == "dall-e-3"
             assert calls[0]["quality"] == "standard"
+            assert calls[0]["style"] == "vivid"
 
 def test_generate_image_openai_dalle_custom_model():
     """Verify that custom model and size parameters are passed directly."""
@@ -72,3 +73,31 @@ def test_generate_image_openai_dalle_custom_model():
             assert calls[0]["model"] == "dall-e-2"
             assert "quality" not in calls[0]
 
+
+
+def test_generate_image_gpt_image_maps_size_and_quality():
+    """gpt-image-1* rejects dall-e sizes/qualities, so they must be translated."""
+    with patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key"}):
+        mock_client = MagicMock()
+        calls = []
+
+        def mock_generate(**kwargs):
+            calls.append(kwargs)
+            mock_response = MagicMock()
+            img_obj = MagicMock()
+            img_obj.b64_json = "ZmFrZQ=="  # b64 of "fake"
+            mock_response.data = [img_obj]
+            return mock_response
+
+        mock_client.images.generate = mock_generate
+
+        with patch("openai.OpenAI", return_value=mock_client):
+            result = _generate_image_openai_dalle(
+                "test prompt", model="gpt-image-1-mini", size="1792x1024", quality="hd"
+            )
+
+            assert result == b"fake"
+            assert calls[0]["model"] == "gpt-image-1-mini"
+            assert calls[0]["size"] == "1536x1024"
+            assert calls[0]["quality"] == "high"
+            assert "style" not in calls[0]

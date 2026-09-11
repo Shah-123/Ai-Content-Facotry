@@ -32,7 +32,7 @@ export default function App() {
   const [numImages, setNumImages]     = useState<number>(2);
   const [keywordsInput, setKeywordsInput] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<string>('gpt-5-mini');
-  const [imageModel, setImageModel]   = useState<string>('dall-e-3');
+  const [imageModel, setImageModel]   = useState<string>('gpt-image-1-mini');
   const [imageSize, setImageSize]     = useState<string>('1024x1024');
   const [imageQuality, setImageQuality] = useState<string>('standard');
   const [imageStyle, setImageStyle]   = useState<string>('vivid');
@@ -378,6 +378,7 @@ export default function App() {
                     onChange={(e) => setImageModel(e.target.value)}
                     className="w-full bg-base-900 border border-white/8 rounded-xl px-3 py-2 text-sm text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors"
                   >
+                    <option value="gpt-image-1-mini">GPT Image 1 Mini (Fast &amp; Affordable)</option>
                     <option value="dall-e-3">DALL-E 3 (Premium Quality - HD / Vivid)</option>
                     <option value="dall-e-2">DALL-E 2 (Standard Quality)</option>
                   </select>
@@ -401,7 +402,7 @@ export default function App() {
                     <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1 block">Quality</label>
                     <select
                       value={imageQuality}
-                      disabled={imageModel !== 'dall-e-3'}
+                      disabled={imageModel === 'dall-e-2'}
                       onChange={(e) => setImageQuality(e.target.value)}
                       className="w-full bg-base-900 border border-white/8 rounded-xl px-2 py-1.5 text-xs text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors disabled:opacity-40"
                     >
