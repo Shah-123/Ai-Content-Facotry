@@ -5,7 +5,7 @@
  * `window` at load time, so it can only run inside the bundler. This one is
  * pure, which is what lets events.test.ts exercise it under plain `tsx`.
  */
-import type { AgentEvent } from './api';
+import type { AgentEvent, Job } from './api';
 
 /**
  * Append an event unless the same one is already in the list.
@@ -29,4 +29,19 @@ export function appendUniqueEvent(prev: AgentEvent[], event: AgentEvent): AgentE
       && Math.abs(e.timestamp - event.timestamp) < 0.01
   );
   return isDupe ? prev : [...prev, event];
+}
+
+/**
+ * Which finished jobs are new since the last poll — the bell's notification feed.
+ *
+ * `seen` is mutated in place and doubles as the "have we polled yet?" flag: the
+ * first call only seeds it, because jobs that were already complete when the app
+ * opened are history, not news. Every later call reports genuinely fresh ones.
+ */
+export function collectFreshCompletions(seen: Set<string> | null, jobs: Job[]): { seen: Set<string>; fresh: Job[] } {
+  const done = jobs.filter(j => j.status === 'completed');
+  if (!seen) return { seen: new Set(done.map(j => j.id)), fresh: [] };
+  const fresh = done.filter(j => !seen.has(j.id));
+  fresh.forEach(j => seen.add(j.id));
+  return { seen, fresh };
 }

@@ -7,7 +7,6 @@ import {
   RotateCcw, AlertTriangle, Sparkles, Paperclip
 } from 'lucide-react';
 import { APIClient, Job, AgentEvent, CreateJobParams, UploadResult, SourceMode } from '../api';
-import { ViewState } from '../types';
 import { PlanEditor } from './PlanEditor';
 import { UploadChip } from './UploadChip';
 import { ProgressTracker } from './ProgressTracker';
@@ -78,7 +77,6 @@ const formatElapsed = (secs: number) =>
   `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
 
 interface ChatViewProps {
-  navTo: (v: ViewState) => void;
   currentJob: Job | null;
   events: AgentEvent[];
   topicError?: { reason: string; category?: string; suggested_topic?: string } | null;
@@ -130,7 +128,7 @@ const HERO_FEATURES = [
 ] as const;
 
 export function ChatView({
-  navTo, currentJob, events, topicError, clearTopicError,
+  currentJob, events, topicError, clearTopicError,
   handleCreateJob, handleApprovePlan, handleRevisePlan, handleUpdatePlan, handleResumeJob,
   tone, setTone, sections, setSections, numImages = 0, keywordsInput, setKeywordsInput, selectedModel
 }: ChatViewProps) {
@@ -371,12 +369,11 @@ export function ChatView({
         {/* -------- Job Controls Banner + Pipeline Rail (pinned) --------
              Sticky so the at-a-glance status stays on screen while the agent
              log scrolls underneath it. */}
-        {currentJob && (
+        {currentJob && currentJob.status !== 'completed' && (
           <div className="sticky top-0 z-20 -mt-2 pt-2 pb-1 bg-base-950/85 backdrop-blur-xl">
             <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl glass-panel border border-white/8 backdrop-blur-md w-full">
               <div className="flex items-center gap-2">
                 <span className={`w-2.5 h-2.5 rounded-full ${
-                  currentJob.status === 'completed' ? 'bg-emerald-400' :
                   currentJob.status === 'failed' ? 'bg-signal-error' :
                   currentJob.status === 'awaiting_approval' ? 'bg-amber-400 animate-ping' :
                   'bg-accent-400 animate-pulse'
@@ -404,20 +401,10 @@ export function ChatView({
                     Resume Checkpoint
                   </button>
                 )}
-
-                {currentJob.status === 'completed' && (
-                  <button
-                    onClick={() => navTo('content')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 transition-all cursor-pointer"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    View Studio Draft
-                  </button>
-                )}
               </div>
             </div>
 
-            {currentJob.status !== 'completed' && currentJob.status !== 'failed' && (
+            {currentJob.status !== 'failed' && (
               <ProgressTracker events={events} jobStatus={currentJob.status} />
             )}
           </div>

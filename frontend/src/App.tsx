@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { APIClient, WebSocketClient, Job, AgentEvent, CreateJobParams } from './api';
-import { appendUniqueEvent } from './events';
+import { appendUniqueEvent, collectFreshCompletions } from './events';
 import { ViewState } from './types';
 import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
@@ -20,6 +20,10 @@ export default function App() {
   const [currentJob, setCurrentJob]   = useState<Job | null>(null);
   const [events, setEvents]           = useState<AgentEvent[]>([]);
   const [topicError, setTopicError]   = useState<{ reason: string; category?: string; suggested_topic?: string } | null>(null);
+  // Bell notifications: jobs that finished while this session was open.
+  const [notifications, setNotifications] = useState<Job[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const seenDoneRef                   = useRef<Set<string> | null>(null);
   const wsClientRef                   = useRef<WebSocketClient>(new WebSocketClient());
 
   // Lifted configurations
@@ -48,6 +52,16 @@ export default function App() {
     try {
       const fetched = await APIClient.fetchJobs();
       setJobs(fetched);
+      // Anything that completes after the first fetch is news worth ringing the
+      // bell for; jobs already finished when the app opened only seed the
+      // baseline. Reached from both the 15s poll and the WS status refresh, so
+      // a finished blog lands in the bell within a tick of the backend saying so.
+      const done = collectFreshCompletions(seenDoneRef.current, fetched);
+      seenDoneRef.current = done.seen;
+      if (done.fresh.length) {
+        setNotifications(prev => [...done.fresh, ...prev].slice(0, 10));
+        setUnreadCount(n => n + done.fresh.length);
+      }
       // If the currently-open job changed status server-side (e.g. transitioned
       // to awaiting_approval while WS was disconnected), re-pull the full record
       // so currentJob.plan becomes available for the HITL PlanEditor.
@@ -258,10 +272,16 @@ export default function App() {
         setKeywordsInput={setKeywordsInput}
       />
       <div className={`flex-1 flex flex-col h-dvh relative transition-[margin] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isSidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'}`}>
-        <TopNav view={view} onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)} />
+        <TopNav
+          view={view}
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
+          notifications={notifications}
+          unread={unreadCount}
+          onOpenNotifications={() => setUnreadCount(0)}
+          onSelectNotification={(id) => { loadJob(id); navTo('content'); }}
+        />
         {view === 'chat' && (
           <ChatView
-            navTo={navTo}
             currentJob={currentJob}
             events={events}
             topicError={topicError}
