@@ -13,6 +13,7 @@ import { TabButton } from './components/TabButton';
 import { EmptyState } from './components/EmptyState';
 import { LoadingState } from './components/LoadingState';
 import { DeepEvalSection } from './components/DeepEvalSection';
+import { QAAuditSection } from './components/QAAuditSection';
 import { RubricDetailCard } from './components/RubricDetailCard';
 import { PodcastPlayer } from './components/PodcastPlayer';
 import { useJobActions } from './hooks/useJobActions';
@@ -340,7 +341,14 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
 
             {/* G-EVAL TAB */}
             {activeTab === 'geval' && (
-              <div>
+              <div className="space-y-6">
+                {/* Always mounted: QA can be re-run on a finished blog even
+                    when the G-Eval pass never produced scores. */}
+                <QAAuditSection
+                  currentJob={currentJob}
+                  isRunning={!!triggering['qa'] || isTaskRunning('qa_agent')}
+                  onRun={() => handleTrigger('qa')}
+                />
                 {currentJob.geval_scores ? (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 

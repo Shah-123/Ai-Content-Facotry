@@ -40,10 +40,15 @@ def load_runs() -> dict[str, list[dict]]:
         except Exception as exc:
             print(f"  ! skipping unreadable {summary}: {exc}")
             continue
+        if "repetition" not in data:
+            # Pre-ablation artefacts: written before metrics.py existed, so they
+            # carry no dependent variable. Counting them as treatment runs both
+            # crashed compare_arms() and inflated the reported n -- the number
+            # that ends up in the results chapter.
+            print(f"  ! skipping {summary.parent.name}: no metrics (pre-ablation run)")
+            continue
         arm = data.get("arm")
         if arm not in arms:
-            # Pre-ablation artefacts have no 'arm' key; treat them as treatment
-            # runs, since evidence distribution was already enabled by default.
             arm = "assigned"
         arms[arm].append(data)
     return arms

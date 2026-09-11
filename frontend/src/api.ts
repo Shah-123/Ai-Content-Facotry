@@ -254,6 +254,14 @@ export class APIClient {
     if (!res.ok) throw new Error('Failed to trigger QA');
   }
 
+  /** Full QA audit text (reports/qa_report.txt). Empty string when the job
+      never ran QA — the caller shows the empty state, not an error. */
+  static async getQAReport(id: string): Promise<string> {
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/qa-report`);
+    if (!res.ok) throw new Error('Failed to load the QA report');
+    return (await res.json()).report || '';
+  }
+
   static async runDeepEval(id: string): Promise<void> {
     const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/run-deepeval`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger deepeval academic audit');
