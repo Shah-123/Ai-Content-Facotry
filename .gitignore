@@ -59,3 +59,7 @@ BS_FYP_development/*
 !BS_FYP_development/*.tex
 !BS_FYP_development/*.bib
 FYP Thsis.zip
+
+# Third-party skills installed via `npx skills add` — local tooling, not project code.
+.claude/skills/
+skills-lock.json
