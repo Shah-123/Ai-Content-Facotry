@@ -42,6 +42,7 @@ from datetime import datetime
 from typing import List, Optional
 
 import numpy as np
+from proglog import ProgressBarLogger
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
 
@@ -711,6 +712,30 @@ def _generate_hook_card(topic: str, script: str) -> HookCard:
 # MAIN COMPOSITOR — builds the final Shorts-ready video
 # ============================================================================
 
+class _RenderProgress(ProgressBarLogger):
+    """Relay moviepy's render progress to the job event bus.
+
+    Encoding a 60s Shorts video runs for 10-20 minutes with every frame passing
+    through two Python transforms. Without this the UI sees one "Compositing..."
+    event and then nothing, which reads as a hang and gets the job re-triggered.
+    proglog's own min_time_interval does the throttling.
+    """
+
+    def __init__(self, job_id: str, interval: float = 5.0):
+        super().__init__(min_time_interval=interval)
+        self.job_id = job_id
+
+    def bars_callback(self, bar, attr, value, old_value=None):
+        total = self.bars[bar].get("total")
+        if attr == "index" and total:
+            pct = min(100, value * 100 // total)
+            # The `progress` metric marks this as a tick that supersedes the
+            # previous one, so the UI shows one updating line instead of ~180
+            # stacked percentage cards. See frontend/src/events.ts.
+            _emit(self.job_id, "video", "working",
+                  f"Rendering video... {pct}%", {"progress": pct / 100})
+
+
 def composite_shorts_video(
     raw_clip_paths: List[str],
     audio_path: str,
@@ -718,6 +743,7 @@ def composite_shorts_video(
     caption_chunks: List[dict],
     hook: HookCard,
     output_path: str,
+    job_id: str = "",
 ) -> bool:
     """
     Assembles the final 9:16 MP4 from raw clips + audio + captions + hook.
@@ -860,7 +886,7 @@ def composite_shorts_video(
         audio_codec="aac",
         preset="ultrafast",
         ffmpeg_params=["-crf", "23"],
-        logger=None,
+        logger=_RenderProgress(job_id) if job_id else None,
     )
 
     # Cleanup
@@ -1030,6 +1056,7 @@ def video_generator_node(state: State) -> dict:
         caption_chunks=caption_chunks,
         hook=hook,
         output_path=output_file,
+        job_id=_job(state),
     )
 
     # Cleanup temp audio

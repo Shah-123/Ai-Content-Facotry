@@ -28,7 +28,21 @@ export function appendUniqueEvent(prev: AgentEvent[], event: AgentEvent): AgentE
       && e.message === event.message
       && Math.abs(e.timestamp - event.timestamp) < 0.01
   );
-  return isDupe ? prev : [...prev, event];
+  if (isDupe) return prev;
+
+  // A progress tick supersedes the one before it instead of stacking. A video
+  // render emits one every 5s for a quarter of an hour, and ChatView gives
+  // every event its own bubble, so appending them buried the pipeline history
+  // under ~180 near-identical percentage cards. Only consecutive ticks from the
+  // same agent collapse, so the distinct working steps around them survive.
+  const last = prev[prev.length - 1];
+  if (last
+    && last.agent_name === event.agent_name
+    && typeof last.metrics?.progress === 'number'
+    && typeof event.metrics?.progress === 'number') {
+    return [...prev.slice(0, -1), event];
+  }
+  return [...prev, event];
 }
 
 /**

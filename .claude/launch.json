@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "backend",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd Agents_backend && python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload --reload-exclude \"data/*\" --reload-exclude \"blogs/*\" --reload-exclude \"uploads/*\" --reload-exclude \"tests/*\""
+      ],
+      "port": 8000
+    },
+    {
       "name": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev"],

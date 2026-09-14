@@ -233,6 +233,12 @@ Guidelines:
             f"🎙️ Synthesising turn {idx + 1}/{len(script.turns)} "
             f"({turn.speaker} → voice: {voice})..."
         )
+        # One TTS call per turn, ~6 minutes for a full episode. Without a
+        # per-turn event the UI sits on "Generating..." long enough to look
+        # hung, and users re-trigger a task that is still running fine.
+        _emit(_job(state), "podcast_generator", "working",
+              f"Synthesising audio... turn {idx + 1}/{len(script.turns)}",
+              {"progress": (idx + 1) / len(script.turns)})
 
         success = False
         for attempt in range(1, _TTS_MAX_ATTEMPTS + 1):
@@ -271,6 +277,7 @@ Guidelines:
     wav_path = output_path.replace(".mp3", "_temp.wav") if is_mp3 else output_path
 
     try:
+        _emit(_job(state), "podcast_generator", "working", "Merging audio and encoding MP3...")
         logger.info(f"🎙️ Writing merged WAV → {wav_path}")
         # 0.3s of silence at 24000 Hz, 16-bit mono: 24000 * 0.3 * 2 = 14400 bytes
         silence_bytes = b"\x00" * 14400

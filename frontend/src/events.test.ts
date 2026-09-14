@@ -34,6 +34,32 @@ assert.equal(appendUniqueEvent(feed, ev('qa_agent', 'Searching the web...', 1000
 // Same agent, different message, same instant is a different event.
 assert.equal(appendUniqueEvent(feed, ev('research', 'Found 8 sources.', 1000.0)).length, 3);
 
+// --- Progress ticks collapse ------------------------------------------------
+const tick = (pct: number, timestamp: number): AgentEvent =>
+  ({ job_id: 'j', agent_name: 'video', status: 'working',
+     message: `Rendering video... ${pct}%`, timestamp, metrics: { progress: pct / 100 } });
+
+// A run of ticks from one agent leaves a single, latest bubble â€” not one per tick.
+const ticked = [tick(10, 2000), tick(20, 2005), tick(30, 2010)]
+  .reduce(appendUniqueEvent, [a, b]);
+assert.equal(ticked.length, 3);
+assert.equal(ticked[2].message, 'Rendering video... 30%');
+
+// A real working step between ticks is history and must survive.
+const withStep = [tick(40, 2015), ev('video', 'Compositing...', 2020), tick(50, 2025)]
+  .reduce(appendUniqueEvent, ticked);
+assert.deepEqual(
+  withStep.slice(2).map(e => e.message),
+  ['Rendering video... 40%', 'Compositing...', 'Rendering video... 50%']
+);
+
+// Ticks from a different agent do not swallow each other.
+const twoAgents = appendUniqueEvent(
+  withStep,
+  { ...tick(60, 2030), agent_name: 'podcast_generator' }
+);
+assert.equal(twoAgents.length, withStep.length + 1);
+
 // --- Bell notifications -----------------------------------------------------
 const job = (id: string, status: Job['status']): Job =>
   ({ id, topic: `t-${id}`, tone: 'professional', sections: 3, status, created_at: '' });
