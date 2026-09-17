@@ -164,8 +164,7 @@ def _handle_podcast(context: ManualTaskContext) -> None:
 def _handle_deepeval(context: ManualTaskContext) -> None:
     from Graph.nodes import deepeval_evaluation_node
 
-    evidence_path = context.base_path / "research" / "evidence.json"
-    context.state["evidence"] = _read_json(evidence_path, warning_label="evidence.json", default=[]) if evidence_path.exists() else []
+    context.state["evidence"] = _load_evidence(context.base_path)
 
     result = deepeval_evaluation_node(context.state)
     scores = result.get("deepeval_scores")
@@ -217,6 +216,7 @@ def _handle_content_task(context: ManualTaskContext) -> None:
     elif context.task_name == "qa":
         from Graph.nodes import qa_agent_node, revision_node
 
+        context.state["evidence"] = _load_evidence(context.base_path)
         context.state.update(qa_agent_node(context.state))
         if context.state.get("qa_verdict") == "NEEDS_REVISION":
             context.state.update(revision_node(context.state))
@@ -293,6 +293,22 @@ def _read_json(path: Path, warning_label: str | None = None, default: Any = None
         if warning_label:
             logger.warning("Could not load %s: %s", warning_label, error)
         return default
+
+
+def _load_evidence(base_path: Path) -> list[Any]:
+    """Reload the research evidence a finished job was grounded in.
+
+    A rebuilt state has no ``evidence`` key, and the grounding-aware nodes read
+    it to decide what counts as supported. Without it the QA citation verifier
+    sees an empty evidence pool, flags every link in the article as a
+    hallucination, and the revision pass that follows rewrites the citations
+    out — so this must run before any node that audits or revises content.
+    """
+    evidence_path = base_path / "research" / "evidence.json"
+    if not evidence_path.exists():
+        return []
+    evidence = _read_json(evidence_path, warning_label="evidence.json", default=[])
+    return evidence if isinstance(evidence, list) else []
 
 
 def _ensure_output_folders(base_path: Path) -> None:

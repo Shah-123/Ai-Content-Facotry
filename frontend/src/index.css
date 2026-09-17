@@ -37,12 +37,24 @@
   --color-base-750: #35425c;
   --color-base-700: #425272;
   --color-base-600: #576b91;
-  --color-base-500: #748ba9;
+  --color-base-500: #8098b5;
   --color-base-400: #9bb1d0;
   --color-base-300: #c2d4ec;
   --color-base-200: #e2ebf7;
   --color-base-100: #f4f8fc;
   --color-base-50:  #ffffff;
+
+  /* --- Type scale ---
+     Tailwind's ramp starts at text-xs (12px), so every micro-label in the app
+     had been hand-rolled as an arbitrary value: text-[7px] through text-[15px],
+     seven off-scale sizes and 78 usages sitting alongside the named steps.
+     `text-label` is the one step that was actually missing — 11px, for the
+     uppercase tracked eyebrows and status badges, where all-caps and letter-
+     spacing carry more apparent size than the nominal value. Everything else
+     maps onto xs/sm/base. Floor: nothing below 11px, and nothing that is not
+     uppercase below 12px. */
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1.4;
 
   /* --- Accent: Warm amber/gold --- */
   --color-accent-500: #f59e0b;
@@ -125,8 +137,8 @@
   --color-base-800: #d9d9e0;
   --color-base-750: #cfcfd8;
   --color-base-700: #bdbdc9;
-  --color-base-600: #9a9aab;
-  --color-base-500: #7a7a8c;
+  --color-base-600: #7a7a8c;
+  --color-base-500: #67677a;
   --color-base-400: #5a5a6c;
   --color-base-300: #3f3f50;
   --color-base-200: #2a2a38;
@@ -158,7 +170,15 @@
   --color-accent-glow: rgba(37, 99, 235, 0.15);
   --accent-rgb: 37, 99, 235;
 
-  /* Light theme signal error tokens (high-contrast red on light bg) */
+  /* Signal colors need their own light-theme values. The dark palette's
+     emerald/amber/blue are tuned for a near-black surface and collapse on
+     #f5f5f7: success #34d399 was 1.77:1, warning #fbbf24 1.53:1, info
+     #60a5fa 2.33:1 — all far below the 4.5:1 needed for body text. Error
+     already had an override; these are the missing three. Info is cyan, not
+     blue, so it stays distinguishable from the light-theme accent. */
+  --color-signal-success: #047857;
+  --color-signal-warning: #b45309;
+  --color-signal-info: #0e7490;
   --color-signal-error: #dc2626;
   --color-signal-error-dim: rgba(220, 38, 38, 0.08);
   --color-error: #dc2626;
@@ -338,11 +358,11 @@ input[type="range"] {
 :root[data-theme="light"] .text-shimmer {
   background: linear-gradient(
     90deg,
-    #1d4ed8 0%,
-    #2563eb 25%,
-    #3b82f6 50%,
-    #2563eb 75%,
-    #1d4ed8 100%
+    #3b82f6 0%,
+    #1d4ed8 30%,
+    #1e3a8a 50%,
+    #1d4ed8 70%,
+    #3b82f6 100%
   );
   background-size: 200% auto;
   -webkit-background-clip: text;
@@ -940,22 +960,34 @@ input[type="range"] {
 
   /* --- Gradient text shimmer (hero headings) --- */
   .text-shimmer {
+    /* The five stops used to run accent-300 -> 500 -> 200 -> 500 -> 300: all
+       mid-to-light ambers, so the sweep moved but there was almost nothing to
+       see. Widened to a real dark -> white-hot -> dark ramp, which turns the
+       same animation into a visible glint. Darkest stop #d97706 is 5.67:1 on
+       base-950 - this utility is only safe on large bold text (3:1), which is
+       its one caller, the hero h3. */
     background: linear-gradient(
       90deg,
-      var(--color-accent-300) 0%,
-      var(--color-accent-500) 25%,
-      var(--color-accent-200) 50%,
-      var(--color-accent-500) 75%,
-      var(--color-accent-300) 100%
+      var(--color-accent-600) 0%,
+      var(--color-accent-400) 30%,
+      #fffbeb 50%,
+      var(--color-accent-400) 70%,
+      var(--color-accent-600) 100%
     );
     background-size: 200% auto;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    animation: textShimmer 4s linear infinite;
+    animation: textShimmer 5s ease-in-out infinite;
   }
+  /* The gradient is symmetric and background-size is 200%, so 0% and 200%
+     paint identically - the loop restarts with no jump. Holding at both ends
+     makes it read as a glint that passes and rests, rather than a permanent
+     crawl. The old keyframe had only a `to`, leaving `from` as whatever the
+     underlying value happened to be. */
   @keyframes textShimmer {
-    to { background-position: 200% center; }
+    0%, 20%   { background-position: 0% center; }
+    80%, 100% { background-position: 200% center; }
   }
 
   /* --- Tilt hover card --- */
@@ -1094,5 +1126,28 @@ input[type="range"] {
     padding: 1rem !important;
     border-radius: 8px !important;
     page-break-inside: avoid !important;
+  }
+}
+
+/* ===================================================================
+   REDUCED MOTION
+   The app runs several always-on animations — the two aurora washes
+   behind the dashboard, statusPulse on running jobs, shimmer and
+   skeletonSweep on loading rows, orbitalSpin, textShimmer. For anyone
+   who gets motion sickness or migraines from movement, an ambient
+   25s loop is not decoration, it is a reason to close the tab.
+   Nothing in the app listens for animationend/transitionend, so
+   collapsing the durations is safe rather than leaving state stuck.
+   Framer Motion is handled separately by <MotionConfig reducedMotion="user">
+   in main.tsx — this block only covers CSS.
+   =================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

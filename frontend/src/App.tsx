@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { APIClient, WebSocketClient, Job, AgentEvent, CreateJobParams } from './api';
-import { appendUniqueEvent, collectFreshCompletions } from './events';
+import { appendUniqueEvent, collectFreshCompletions, orderWriterSections } from './events';
 import { ViewState } from './types';
 import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
@@ -91,7 +91,7 @@ export default function App() {
     const ws = wsClientRef.current;
     ws.disconnect();
     ws.connect(jobId, (event) => {
-      setEvents(prev => appendUniqueEvent(prev, event));
+      setEvents(prev => orderWriterSections(appendUniqueEvent(prev, event)));
       // Refresh whenever the backend signals a state transition, so the job
       // record (plan, final content, usage) and the sidebar badge stay current.
       if (WS_REFRESH_STATUSES.includes(event.status)) {
@@ -126,7 +126,7 @@ export default function App() {
         APIClient.getJobEvents(jobId),
       ]);
       setCurrentJob(job);
-      setEvents(historicalEvents || []);
+      setEvents(orderWriterSections(historicalEvents || []));
 
       connectWS(jobId);
     } catch (e) {
@@ -346,7 +346,7 @@ export default function App() {
             {/* Model Selection */}
             <div className="space-y-4">
               <div>
-                <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1.5 block">Default Foundation LLM</label>
+                <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5 block">Default Foundation LLM</label>
                 <select
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
@@ -363,7 +363,7 @@ export default function App() {
                     <option value="gpt-4o">GPT-4o (Premium Quality)</option>
                   </optgroup>
                 </select>
-                <p className="text-[11px] text-base-500 mt-1.5 leading-relaxed">
+                <p className="text-xs text-base-500 mt-1.5 leading-relaxed">
                   Sets the model used by the parallel section writers. Planning, QA, and
                   evaluation use the server-configured default (<code className="text-base-400">LLM_QUALITY_MODEL</code>).
                 </p>
@@ -372,7 +372,7 @@ export default function App() {
               {/* OpenAI Image Generation Settings */}
               <div className="pt-3 border-t border-white/10 space-y-3">
                 <div>
-                  <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1.5 block">OpenAI Image Model</label>
+                  <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5 block">OpenAI Image Model</label>
                   <select
                     value={imageModel}
                     onChange={(e) => setImageModel(e.target.value)}
@@ -386,7 +386,7 @@ export default function App() {
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1 block">Size</label>
+                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Size</label>
                     <select
                       value={imageSize}
                       onChange={(e) => setImageSize(e.target.value)}
@@ -399,7 +399,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1 block">Quality</label>
+                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Quality</label>
                     <select
                       value={imageQuality}
                       disabled={imageModel === 'dall-e-2'}
@@ -412,7 +412,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1 block">Style</label>
+                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Style</label>
                     <select
                       value={imageStyle}
                       disabled={imageModel !== 'dall-e-3'}

@@ -59,3 +59,29 @@ export function collectFreshCompletions(seen: Set<string> | null, jobs: Job[]): 
   fresh.forEach(j => seen.add(j.id));
   return { seen, fresh };
 }
+
+/**
+ * Render the parallel writers' section events in section order.
+ *
+ * fanout() dispatches every section at once and each one announces itself when
+ * it finishes, so arrival order is LLM-latency order: the feed showed
+ * "Section 6/7 done" above "Section 1/7 done". Only the slots the writer events
+ * occupy are re-ordered — every event keeps its own real completion timestamp,
+ * and non-writer events keep their arrival position — so the feed reads 1..N
+ * without inventing times or holding sections back until the whole fanout ends.
+ *
+ * Returns `events` unchanged when nothing moves, so React can bail out.
+ */
+export function orderWriterSections(events: AgentEvent[]): AgentEvent[] {
+  const slots = events.flatMap(
+    (e, i) => (e.agent_name === 'writer' && typeof e.metrics?.section === 'number' ? [i] : [])
+  );
+  const ordered = slots
+    .map(i => events[i])
+    .sort((a, b) => a.metrics!.section - b.metrics!.section);
+  if (ordered.every((e, k) => e === events[slots[k]])) return events;
+
+  const out = [...events];
+  slots.forEach((slot, k) => { out[slot] = ordered[k]; });
+  return out;
+}

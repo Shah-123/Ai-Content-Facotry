@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { ShieldCheck, RefreshCw, Sparkles, AlertTriangle } from 'lucide-react';
-import { APIClient, Job } from '../api';
+import { Job } from '../api';
 
 /** QA audit panel. The re-run wires to POST /api/jobs/{id}/run-qa, which
     re-audits the CURRENT saved article and, on NEEDS_REVISION, runs one
@@ -19,17 +18,12 @@ export function QAAuditSection({
   const verdict = currentJob.qa_verdict;
   const hasScore = typeof score === 'number';
   const needsRevision = verdict === 'NEEDS_REVISION';
-  const [report, setReport] = useState('');
 
-  // Refetch whenever the job or its score changes, so the text on screen
-  // always belongs to the run the score came from.
-  useEffect(() => {
-    let stale = false;
-    APIClient.getQAReport(currentJob.id)
-      .then(text => { if (!stale) setReport(text); })
-      .catch(() => { if (!stale) setReport(''); });
-    return () => { stale = true; };
-  }, [currentJob.id, currentJob.qa_score, isRunning]);
+  // The raw qa_report.txt dump is deliberately NOT rendered here: it is an
+  // internal audit trail (model-written prose, weights, per-issue fix notes),
+  // not something the reader of a finished article should be handed. The score
+  // and verdict badges above are the whole user-facing result; the full text
+  // stays on disk and behind GET /api/jobs/{id}/qa-report.
 
   return (
     <div className="glass-panel rounded-2xl border border-white/6 overflow-hidden">
@@ -42,13 +36,13 @@ export function QAAuditSection({
             <h3 className="text-base font-bold text-base-50 flex items-center gap-2 flex-wrap">
               QA Audit
               {hasScore && (
-                <span className="text-[10px] font-mono font-bold text-accent-300 bg-accent-500/10 border border-accent-500/20 px-1.5 py-0.5 rounded">
+                <span className="text-xs font-mono font-bold text-accent-300 bg-accent-500/10 border border-accent-500/20 px-1.5 py-0.5 rounded">
                   {score!.toFixed(1)} / 10
                 </span>
               )}
               {verdict && (
                 <span
-                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wider border ${
+                  className={`text-label font-semibold px-1.5 py-0.5 rounded uppercase tracking-wider border ${
                     needsRevision
                       ? 'text-signal-warning bg-signal-warning-dim border-signal-warning/20'
                       : 'text-accent-300 bg-accent-500/10 border-accent-500/20'
@@ -93,26 +87,22 @@ export function QAAuditSection({
             </div>
             <p className="mt-2">Re-auditing the article (plus one revision pass if needed)...</p>
           </div>
-        ) : report ? (
-          <>
-            {needsRevision && (
-              <div className="flex items-start gap-2.5 mb-4 p-3 rounded-xl bg-signal-warning-dim border border-signal-warning/15 text-xs text-base-200 leading-relaxed">
-                <AlertTriangle className="w-4 h-4 text-signal-warning shrink-0 mt-px" />
-                <span>
-                  The verdict is set by the LLM auditor independently of the score. The pipeline
-                  only loops back into a revision when at least one issue is marked{' '}
-                  <strong className="text-signal-warning">critical</strong>.
-                </span>
-              </div>
-            )}
-            <pre className="text-[11px] text-base-300 leading-relaxed bg-base-950/40 p-4 rounded-xl border border-white/4 overflow-x-auto whitespace-pre-wrap font-mono">
-              {report}
-            </pre>
-          </>
-        ) : (
+        ) : !hasScore ? (
           <p className="text-center py-8 text-sm text-base-400">
-            No QA report yet. Click <strong className="text-accent-400">Run QA</strong> above to
-            audit the current article.
+            Not audited yet. Click <strong className="text-accent-400">Run QA</strong> above to
+            check the current article.
+          </p>
+        ) : needsRevision ? (
+          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-signal-warning-dim border border-signal-warning/15 text-xs text-base-200 leading-relaxed">
+            <AlertTriangle className="w-4 h-4 text-signal-warning shrink-0 mt-px" />
+            <span>
+              At least one issue was marked <strong className="text-signal-warning">critical</strong>,
+              so the pipeline runs a revision pass over the article before publishing.
+            </span>
+          </div>
+        ) : (
+          <p className="text-center py-2 text-sm text-base-400">
+            Audit passed — no critical issues found.
           </p>
         )}
       </div>

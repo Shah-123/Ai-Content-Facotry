@@ -82,8 +82,8 @@ export function Sidebar({
         </div>
         {!rail && (
           <div className="min-w-0 flex-1">
-            <h1 className="text-[15px] font-extrabold text-gradient-amber tracking-tight leading-tight truncate">AI Content Factory</h1>
-            <p className="text-[10px] text-base-400 font-semibold tracking-wider uppercase opacity-80 whitespace-nowrap">Multi-Agent Engine</p>
+            <h1 className="text-sm font-extrabold text-gradient-amber tracking-tight leading-tight truncate">AI Content Factory</h1>
+            <p className="text-label text-base-400 font-semibold tracking-wider uppercase opacity-80 whitespace-nowrap">Multi-Agent Engine</p>
           </div>
         )}
         {onToggleCollapse && (
@@ -113,7 +113,7 @@ export function Sidebar({
       </div>
 
       <nav className={`flex flex-col gap-1 grow ${rail ? 'px-3' : 'px-4'}`}>
-        {!rail && <div className="text-[10px] font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Navigation</div>}
+        {!rail && <div className="text-label font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Navigation</div>}
         {navItems.map(item => (
           <button key={item.key} onClick={() => navTo(item.key)}
             title={rail ? item.label : undefined}
@@ -137,7 +137,7 @@ export function Sidebar({
           rather than in the composer next to Attach Doc. */}
       {onOpenSettings && (
         <div className={`pb-1 ${rail ? 'px-3' : 'px-4'}`}>
-          {!rail && <div className="text-[10px] font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Engine</div>}
+          {!rail && <div className="text-label font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Engine</div>}
           <button
             onClick={onOpenSettings}
             title={rail ? `Foundation LLM: ${selectedModel}` : 'Change foundation LLM'}
@@ -160,9 +160,9 @@ export function Sidebar({
           the session, not the message being typed — the same reason Engine is
           here. The rail hides them: a bare field with no label is not usable. */}
       <div className={`px-4 pt-2 pb-1 ${rail ? 'hidden' : ''}`}>
-        <div className="text-[10px] font-bold text-base-500 mb-2 uppercase tracking-widest px-2 whitespace-nowrap">Generation</div>
+        <div className="text-label font-bold text-base-500 mb-2 uppercase tracking-widest px-2 whitespace-nowrap">Generation</div>
         <div className="flex flex-col gap-3 px-2">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+          <label className="text-label font-bold uppercase tracking-wider text-base-400">
             Tone
             <select
               value={tone}
@@ -178,7 +178,7 @@ export function Sidebar({
             </select>
           </label>
 
-          <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+          <label className="text-label font-bold uppercase tracking-wider text-base-400">
             Target keywords
             <input
               value={keywordsInput}
@@ -191,7 +191,7 @@ export function Sidebar({
           {/* Side by side: both are single digits, so a full-width field each
               wasted a row of sidebar height that a short screen needs. */}
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+            <label className="text-label font-bold uppercase tracking-wider text-base-400">
               Sections
               <input
                 type="number"
@@ -204,7 +204,7 @@ export function Sidebar({
               />
             </label>
 
-            <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
+            <label className="text-label font-bold uppercase tracking-wider text-base-400">
               AI images
               <input
                 type="number"
@@ -224,7 +224,7 @@ export function Sidebar({
           rail hides it rather than showing a column of unreadable stubs. */}
       <div className={`px-4 pb-4 pt-2 ${rail ? 'hidden' : ''}`}>
         <div className="flex justify-between items-center mb-2.5 px-2">
-          <span className="text-[10px] font-bold text-base-500 uppercase tracking-widest whitespace-nowrap">Recent Jobs</span>
+          <span className="text-label font-bold text-base-500 uppercase tracking-widest whitespace-nowrap">Recent Jobs</span>
           <button
             onClick={onRefreshJobs}
             className="text-base-500 hover:text-accent-400 transition-colors p-1 rounded-lg hover:bg-white/5"
@@ -245,30 +245,30 @@ export function Sidebar({
             >
               <button onClick={() => loadJob(job.id)}
                 className={`w-full text-left rounded-xl pl-3 pr-8 py-2 text-xs flex justify-between items-center transition-all duration-200 sidebar-glow ${currentJob?.id === job.id ? 'bg-accent-500/10 border border-accent-500/30 text-base-100 font-semibold shadow-sm' : 'text-base-400 hover:text-base-200 border border-transparent hover:bg-white/4'}`}>
-                <span className="truncate pr-2 text-[12px] font-medium">{job.topic}</span>
+                <span className="truncate pr-2 text-xs font-medium">{job.topic}</span>
                 <div className="shrink-0 group-hover:opacity-0 transition-opacity">
                   {job.status === 'completed'         && (
-                    <span className="text-[9px] font-bold text-signal-success bg-signal-success-dim border border-signal-success/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
+                    <span className="text-label font-bold text-signal-success bg-signal-success-dim border border-signal-success/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
                       Done
                     </span>
                   )}
                   {job.status === 'failed'            && (
-                    <span className="text-[9px] font-bold text-signal-error bg-signal-error-dim border border-signal-error/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block fail-pulse">
+                    <span className="text-label font-bold text-signal-error bg-signal-error-dim border border-signal-error/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block fail-pulse">
                       Fail
                     </span>
                   )}
                   {job.status === 'running'           && (
-                    <span className="text-[9px] font-bold text-accent-400 bg-accent-glow border border-accent-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
+                    <span className="text-label font-bold text-accent-400 bg-accent-glow border border-accent-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
                       Active
                     </span>
                   )}
                   {job.status === 'awaiting_approval' && (
-                    <span className="text-[9px] font-bold text-signal-warning bg-signal-warning-dim border border-signal-warning/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
+                    <span className="text-label font-bold text-signal-warning bg-signal-warning-dim border border-signal-warning/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
                       Review
                     </span>
                   )}
                   {job.status === 'pending'           && (
-                    <span className="text-[9px] font-bold text-base-400 bg-white/5 border border-white/6 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
+                    <span className="text-label font-bold text-base-400 bg-white/5 border border-white/6 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
                       Queue
                     </span>
                   )}

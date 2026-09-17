@@ -59,7 +59,12 @@ BS_FYP_development/*
 !BS_FYP_development/*.tex
 !BS_FYP_development/*.bib
 FYP Thsis.zip
+AI_Content_Factory_FYP.pptx
 
 # Third-party skills installed via `npx skills add` — local tooling, not project code.
 .claude/skills/
 skills-lock.json
+
+# Brag output
+brag-output/
+

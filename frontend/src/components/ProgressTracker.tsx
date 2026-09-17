@@ -9,23 +9,24 @@ interface ProgressTrackerProps {
 }
 
 /** Maps agent_name values to pipeline stages. */
+// Keys MUST match the agent_name strings event_bus.emit() is actually called
+// with. Half of them used to be node-function names (worker, merge_content,
+// decide_images...) that no emit ever produced, so the Write stage never lit
+// while the writers ran. ProgressTracker.test.ts pins the writing path.
 const STAGE_MAP: Record<string, number> = {
   router: 0,
-  document_ingest: 0,
+  ingest: 0,
   research: 0,
   orchestrator: 1,
-  worker: 2,
-  merge_content: 2,
-  decide_images: 2,
-  generate_and_place_images: 2,
-  completion_validator: 2,
+  writer: 2,
+  merger: 2,
+  images: 2,
   qa_agent: 3,
   revision: 3,
-  keyword_optimizer: 4,
-  blog_evaluator: 4,
   geval_evaluator: 4,
+  deepeval_evaluator: 4,
   campaign_generator: 4,
-  video_generator: 4,
+  video: 4,
   podcast_generator: 4,
   // 'system' is deliberately unmapped: it fires "Pipeline started" at t=0,
   // which would light the final stage before any work has happened. The
@@ -100,10 +101,10 @@ export function ProgressTracker({ events, jobStatus }: ProgressTrackerProps) {
     >
       <div className="glass-panel rounded-2xl p-5 border border-white/6">
         <div className="flex items-center justify-between mb-4 px-1">
-          <span className="text-[10px] font-bold text-base-500 uppercase tracking-[0.15em]">Pipeline Progress</span>
+          <span className="text-label font-bold text-base-500 uppercase tracking-[0.15em]">Pipeline Progress</span>
           <div className="flex items-center gap-1.5">
             {states.filter(s => s === 'completed').length > 0 && (
-              <span className="text-[10px] font-mono text-base-500">
+              <span className="text-xs font-mono text-base-500">
                 {states.filter(s => s === 'completed').length}/{STAGES.length}
               </span>
             )}
@@ -140,7 +141,7 @@ export function ProgressTracker({ events, jobStatus }: ProgressTrackerProps) {
                       )}
                     </motion.div>
                   </AnimatePresence>
-                  <span className={`text-[10px] font-medium transition-colors ${
+                  <span className={`text-xs font-medium transition-colors ${
                     state === 'completed' ? 'text-signal-success'
                     : state === 'active' ? 'text-accent-400'
                     : state === 'error' ? 'text-signal-error'

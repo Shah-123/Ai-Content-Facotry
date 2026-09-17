@@ -39,7 +39,7 @@ export function LoadingState({
           <div className="absolute top-0 left-0 w-1 h-full bg-accent-500/10"></div>
 
           <div className="flex items-center justify-between mb-5 px-1">
-            <div className="text-[10px] font-bold text-base-500 uppercase tracking-[0.2em]">
+            <div className="text-label font-bold text-base-500 uppercase tracking-[0.2em]">
               Neural Pipeline Status
             </div>
             <div className="flex gap-1">
@@ -98,7 +98,7 @@ export function LoadingState({
 
                   <div className="flex-1 pb-1">
                     <p
-                      className={`text-[13px] font-medium transition-colors duration-300 ${
+                      className={`text-sm font-medium transition-colors duration-300 ${
                         isError ? 'text-signal-error' : showTick ? 'text-base-300' : 'text-base-100'
                       }`}
                     >
@@ -111,7 +111,7 @@ export function LoadingState({
                     )}
                   </div>
 
-                  <span className="text-[9px] font-mono text-base-600 mt-1 uppercase">
+                  <span className="text-label font-mono text-base-600 mt-1 uppercase">
                     {new Date(event.timestamp * 1000).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',

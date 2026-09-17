@@ -109,7 +109,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
 
         {/* Blog Title */}
         <div className="bg-base-950/40 p-4.5 rounded-2xl border border-white/5 mb-4.5 focus-within:border-accent-500/25 transition-all duration-300">
-          <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Blog Title</label>
+          <label className="text-label font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Blog Title</label>
           <input
             type="text"
             className="w-full bg-base-900/60 border border-white/6 rounded-xl px-3.5 py-2.5 text-sm text-base-100 font-medium focus:outline-none focus:border-accent-500/40 transition-all focus:shadow-[0_0_10px_var(--color-accent-glow)]"
@@ -121,7 +121,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
         {/* Sections */}
         <div className="space-y-3.5 mb-5">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] font-bold text-base-400 uppercase tracking-widest">Sections ({tasks.length})</span>
+            <span className="text-label font-bold text-base-400 uppercase tracking-widest">Sections ({tasks.length})</span>
           </div>
 
           {tasks.map((task, idx) => (
@@ -129,7 +129,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
               {/* Section Header — always visible */}
               <div className="flex items-center gap-3 px-4 py-3">
                 <GripVertical className="w-3.5 h-3.5 text-base-500 shrink-0" />
-                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/10 text-accent-400 text-[10px] font-bold shrink-0">
+                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/10 text-accent-400 text-xs font-bold shrink-0">
                   {idx + 1}
                 </span>
                 <input
@@ -161,7 +161,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
               {expandedSection === idx && (
                 <div className="px-4 pb-4.5 pt-1.5 border-t border-white/4 space-y-4">
                   <div>
-                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Goal</label>
+                    <label className="text-label font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Goal</label>
                     <input
                       type="text"
                       className="w-full bg-base-900/60 border border-white/6 rounded-lg px-3.5 py-2.5 text-sm text-base-200 focus:outline-none focus:border-accent-500/40 transition-colors"
@@ -171,7 +171,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Key Points (one per line)</label>
+                    <label className="text-label font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Key Points (one per line)</label>
                     <textarea
                       className="w-full bg-base-900/60 border border-white/6 rounded-lg px-3.5 py-2.5 text-sm text-base-200 focus:outline-none focus:border-accent-500/40 transition-colors resize-none h-24"
                       placeholder="Enter key points, one per line..."
@@ -181,7 +181,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
                   </div>
                   <div className="flex gap-3">
                     <div className="flex-1">
-                      <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Target Words</label>
+                      <label className="text-label font-bold text-base-400 uppercase tracking-widest mb-1.5 block">Target Words</label>
                       <input
                         type="number"
                         className="w-full bg-base-900/60 border border-white/6 rounded-lg px-3.5 py-2.5 text-sm text-base-200 focus:outline-none focus:border-accent-500/40 transition-colors"
@@ -201,7 +201,7 @@ export function PlanEditor({ plan, onApprove, onRevise, onUpdatePlan }: PlanEdit
                       />
                     </div>
                     <div className="flex-1">
-                      <label className="text-[10px] font-bold text-base-400 uppercase tracking-widest mb-1.5 block">SEO Tags (comma-sep)</label>
+                      <label className="text-label font-bold text-base-400 uppercase tracking-widest mb-1.5 block">SEO Tags (comma-sep)</label>
                       <input
                         type="text"
                         className="w-full bg-base-900/60 border border-white/6 rounded-lg px-3.5 py-2.5 text-sm text-base-200 focus:outline-none focus:border-accent-500/40 transition-colors"

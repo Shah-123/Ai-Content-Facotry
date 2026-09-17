@@ -10,9 +10,38 @@ const API_KEY = import.meta.env.VITE_API_KEY || '';
 export const withApiKey = (url: string): string =>
   API_KEY ? `${url}${url.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(API_KEY)}` : url;
 
-/** fetch() with the API key header attached when one is configured. */
-const apiFetch = (url: string, init: RequestInit = {}): Promise<Response> =>
-  fetch(url, API_KEY ? { ...init, headers: { ...init.headers, 'X-API-Key': API_KEY } } : init);
+// ── Signed-in user ─────────────────────────────────────────────────────────
+// The token is an HMAC-signed blob minted by Agents_backend/api/users.py and
+// kept in localStorage so a refresh doesn't sign the user out.
+const TOKEN_KEY = 'auth-token';
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  created_at?: string;
+}
+
+export const auth = {
+  get token(): string { return localStorage.getItem(TOKEN_KEY) || ''; },
+  set token(value: string) {
+    if (value) localStorage.setItem(TOKEN_KEY, value);
+    else localStorage.removeItem(TOKEN_KEY);
+  },
+  /** Whoever the last successful auth call resolved to. Set by APIClient so
+   *  components (the TopNav avatar) can read it without a second round-trip. */
+  user: null as AuthUser | null,
+  /** Drop the token and start over at the login screen. */
+  signOut() { this.token = ''; this.user = null; window.location.reload(); },
+};
+
+/** fetch() with the API key and bearer token attached when present. */
+const apiFetch = (url: string, init: RequestInit = {}): Promise<Response> => {
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+  if (API_KEY) headers['X-API-Key'] = API_KEY;
+  if (auth.token) headers['Authorization'] = `Bearer ${auth.token}`;
+  return fetch(url, { ...init, headers });
+};
 
 export type SourceMode = 'closed_book' | 'hybrid' | 'auto_topic';
 
@@ -130,6 +159,40 @@ export interface AgentEvent {
 }
 
 export class APIClient {
+  /** Shared by login and signup — both return `{token, user}` or a 4xx detail. */
+  private static async authPost(path: string, body: object): Promise<AuthUser> {
+    const res = await apiFetch(`${API_BASE_URL}/api/auth/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || 'Something went wrong. Try again.');
+    auth.token = data.token;
+    auth.user = data.user;
+    return data.user;
+  }
+
+  static signUp(email: string, password: string, name: string): Promise<AuthUser> {
+    return APIClient.authPost('signup', { email, password, name });
+  }
+
+  static logIn(email: string, password: string): Promise<AuthUser> {
+    return APIClient.authPost('login', { email, password });
+  }
+
+  /** The signed-in user, or null when the token is missing/expired/invalid. */
+  static async me(): Promise<AuthUser | null> {
+    if (!auth.token) return null;
+    const res = await apiFetch(`${API_BASE_URL}/api/auth/me`);
+    if (!res.ok) {
+      if (res.status === 401) auth.token = '';   // stale token, clear it
+      return null;
+    }
+    auth.user = await res.json();
+    return auth.user;
+  }
+
   static async fetchJobs(): Promise<Job[]> {
     const res = await apiFetch(`${API_BASE_URL}/api/jobs`);
     if (!res.ok) throw new Error('Failed to fetch jobs');
@@ -252,14 +315,6 @@ export class APIClient {
   static async triggerQA(id: string): Promise<void> {
     const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/run-qa`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger QA');
-  }
-
-  /** Full QA audit text (reports/qa_report.txt). Empty string when the job
-      never ran QA — the caller shows the empty state, not an error. */
-  static async getQAReport(id: string): Promise<string> {
-    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/qa-report`);
-    if (!res.ok) throw new Error('Failed to load the QA report');
-    return (await res.json()).report || '';
   }
 
   static async runDeepEval(id: string): Promise<void> {

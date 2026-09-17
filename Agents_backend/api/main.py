@@ -35,6 +35,7 @@ import event_bus as events
 from api.routes.uploads import router as uploads_router
 from api.routes.websocket import router as websocket_router
 from api.routes.jobs import router as jobs_router
+from api.users import router as auth_router
 
 logger = logging.getLogger("api.main")
 
@@ -78,6 +79,7 @@ async def global_exception_handler(request, exc):
 # The WebSocket router checks the key itself (browsers can't set WS headers).
 from api.auth import require_api_key
 
+app.include_router(auth_router, dependencies=[Depends(require_api_key)])
 app.include_router(uploads_router, dependencies=[Depends(require_api_key)])
 app.include_router(websocket_router)
 app.include_router(jobs_router, dependencies=[Depends(require_api_key)])

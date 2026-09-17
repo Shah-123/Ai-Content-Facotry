@@ -44,7 +44,7 @@ export function RubricDetailCard({
             return (
               <motion.span
                 key={lvl}
-                className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold border transition-all ${
+                className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-bold border transition-all ${
                   active
                     ? 'bg-accent-500/20 border-accent-500/40 text-accent-400 shadow-[0_0_8px_var(--color-accent-glow)]'
                     : 'bg-white/2 border-white/5 text-base-500'

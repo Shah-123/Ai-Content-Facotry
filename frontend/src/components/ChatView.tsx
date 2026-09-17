@@ -249,14 +249,14 @@ export function ChatView({
                     : 'Generating…'}
           </h2>
           <p className="text-base-400 text-sm flex items-center gap-2.5">
-            <span className="font-mono text-[11px] text-base-500">Powered by LangGraph</span>
+            <span className="font-mono text-xs text-base-500">Powered by LangGraph</span>
             {currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed' && (
-              <span className="px-2 py-0.5 rounded-md bg-accent-glow text-accent-400 text-[11px] font-semibold border border-accent-500/20 flex items-center gap-1.5">
+              <span className="px-2 py-0.5 rounded-md bg-accent-glow text-accent-400 text-xs font-semibold border border-accent-500/20 flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-accent-500 status-pulse" /> Processing
               </span>
             )}
             {currentJob?.status === 'completed' && (
-              <span className="px-2 py-0.5 rounded-md bg-signal-success-dim text-signal-success text-[11px] font-semibold border border-signal-success/20 flex items-center gap-1.5">
+              <span className="px-2 py-0.5 rounded-md bg-signal-success-dim text-signal-success text-xs font-semibold border border-signal-success/20 flex items-center gap-1.5">
                 <CheckCircle2 className="w-3 h-3" /> Completed
               </span>
             )}
@@ -280,10 +280,10 @@ export function ChatView({
               transition={{ delay: 0.1, duration: 0.4 }}
               className="hidden sm:flex items-center gap-2.5 mb-5 relative z-10"
             >
-              <span className="glass-pill px-3 py-1 text-[10px] font-bold text-accent-400 tracking-wider uppercase border border-accent-500/20">
+              <span className="glass-pill px-3 py-1 text-label font-bold text-accent-400 tracking-wider uppercase border border-accent-500/20">
                 Orchestration Engine v2.0
               </span>
-              <span className="glass-pill px-3 py-1 text-[10px] font-medium text-base-300 border border-white/6 flex items-center gap-1.5 shadow-sm">
+              <span className="glass-pill px-3 py-1 text-xs font-medium text-base-300 border border-white/6 flex items-center gap-1.5 shadow-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-signal-success animate-pulse"></span>
                 Active LLM: <span className="font-mono text-accent-400 font-bold">{selectedModel}</span>
               </span>
@@ -301,7 +301,7 @@ export function ChatView({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.4 }}
-              className="text-base-400 text-center max-w-lg mb-4 md:mb-8 px-2 text-[13px] md:text-sm leading-relaxed relative z-10"
+              className="text-base-400 text-center max-w-lg mb-4 md:mb-8 px-2 text-sm leading-relaxed relative z-10"
             >
               Enter a topic below and our multi-agent pipeline will research, write, and polish a publication-ready blog — with optional video, podcast, and social campaigns.
             </motion.p>
@@ -332,9 +332,9 @@ export function ChatView({
                       <feat.icon className="w-5 h-5 text-accent-400" />
                     </span>
                     <span className="block font-bold text-base-100 text-sm mb-1">{feat.title}</span>
-                    <span className="block text-[12px] text-base-400 leading-relaxed mb-4">{feat.desc}</span>
+                    <span className="block text-xs text-base-400 leading-relaxed mb-4">{feat.desc}</span>
                   </span>
-                  <span className="text-[10px] text-accent-400 font-semibold underline underline-offset-2 opacity-70 group-hover:opacity-100 group-hover:text-accent-300 transition-all duration-200">
+                  <span className="text-xs text-accent-400 font-semibold underline underline-offset-2 opacity-70 group-hover:opacity-100 group-hover:text-accent-300 transition-all duration-200">
                     Use Template
                   </span>
                 </motion.button>
@@ -355,7 +355,7 @@ export function ChatView({
                       setTone(feat.sampleTone);
                       setSections(feat.sampleSections);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/8 bg-base-900/70 px-2.5 py-1.5 text-[11px] font-semibold text-base-300 transition-colors hover:border-accent-500/35 hover:text-accent-400"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/8 bg-base-900/70 px-2.5 py-1.5 text-xs font-semibold text-base-300 transition-colors hover:border-accent-500/35 hover:text-accent-400"
                   >
                     <Icon className="h-3.5 w-3.5 text-accent-400" />
                     {feat.title}
@@ -366,11 +366,17 @@ export function ChatView({
           </motion.div>
         )}
 
-        {/* -------- Job Controls Banner + Pipeline Rail (pinned) --------
-             Sticky so the at-a-glance status stays on screen while the agent
-             log scrolls underneath it. */}
+        {/* -------- Job Controls Banner (pinned) + Pipeline Rail --------
+             Only the one-line status bar pins. The pipeline rail used to sit
+             inside this sticky wrapper too, which made the pinned block 234px
+             on desktop and ~500px of an 812px phone - the feed scrolled into a
+             sliver and messages were clipped mid-sentence behind it.
+             The fill is opaque for the same reason: at bg-base-950/85 the feed
+             showed through the pinned bar at 15%, and a bright element like the
+             amber topic bubble read as two cards drawn on top of each other. */}
         {currentJob && currentJob.status !== 'completed' && (
-          <div className="sticky top-0 z-20 -mt-2 pt-2 pb-1 bg-base-950/85 backdrop-blur-xl">
+          <>
+          <div className="sticky top-0 z-20 -mt-2 pt-2 pb-2 bg-base-950">
             <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl glass-panel border border-white/8 backdrop-blur-md w-full">
               <div className="flex items-center gap-2">
                 <span className={`w-2.5 h-2.5 rounded-full ${
@@ -384,7 +390,7 @@ export function ChatView({
                     : 'Starting pipeline'}
                 </span>
                 {isLive && (
-                  <span className="text-[11px] font-mono text-base-400 tabular-nums px-2 py-0.5 rounded-md bg-white/5 border border-white/8">
+                  <span className="text-xs font-mono text-base-400 tabular-nums px-2 py-0.5 rounded-md bg-white/5 border border-white/8">
                     {formatElapsed(elapsed)}
                   </span>
                 )}
@@ -403,11 +409,12 @@ export function ChatView({
                 )}
               </div>
             </div>
-
-            {currentJob.status !== 'failed' && (
-              <ProgressTracker events={events} jobStatus={currentJob.status} />
-            )}
           </div>
+
+          {currentJob.status !== 'failed' && (
+            <ProgressTracker events={events} jobStatus={currentJob.status} />
+          )}
+          </>
         )}
 
         {currentJob && (
@@ -416,7 +423,7 @@ export function ChatView({
               <p className="text-base font-medium">Write a blog on: {currentJob.topic}</p>
               <p className="text-sm opacity-70 mt-1">Tone: {currentJob.tone}</p>
             </div>
-            <div className="text-right mt-1.5 text-[11px] text-base-500 font-medium">You</div>
+            <div className="text-right mt-1.5 text-xs text-base-500 font-medium">You</div>
           </div>
         )}
 
@@ -432,10 +439,10 @@ export function ChatView({
             </div>
             <div className="glass-panel p-4.5 rounded-2xl rounded-tl-sm flex-1 border border-white/5 shadow-sm">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider bg-accent-500/10 border border-accent-500/20 text-accent-400">
+                <span className="text-label font-bold px-2 py-0.5 rounded-md uppercase tracking-wider bg-accent-500/10 border border-accent-500/20 text-accent-400">
                   topic guard
                 </span>
-                <span className="text-[10px] text-base-500 font-mono">{formatElapsed(elapsed)}</span>
+                <span className="text-xs text-base-500 font-mono">{formatElapsed(elapsed)}</span>
               </div>
               <p className="text-base-200 text-sm flex items-center gap-2.5 leading-relaxed mt-2.5">
                 <RefreshCw className="w-3.5 h-3.5 text-accent-400 animate-spin shrink-0" />
@@ -472,11 +479,11 @@ export function ChatView({
               <div className="glass-panel p-4.5 rounded-2xl rounded-tl-sm flex-1 border border-white/5 shadow-sm">
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${config.bgColor} ${config.textColor}`}>
+                    <span className={`text-label font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${config.bgColor} ${config.textColor}`}>
                       {event.agent_name}
                     </span>
                   </div>
-                  <span className="text-[10px] text-base-500 font-mono">{new Date(event.timestamp * 1000).toLocaleTimeString()}</span>
+                  <span className="text-xs text-base-500 font-mono">{new Date(event.timestamp * 1000).toLocaleTimeString()}</span>
                 </div>
                 <p className="text-base-200 text-sm flex items-center gap-2.5 leading-relaxed mt-2.5">
                   {event.status === 'error'
@@ -502,7 +509,7 @@ export function ChatView({
             <div className="glass-panel p-4 rounded-2xl rounded-tl-sm flex-1">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="font-semibold text-sm text-accent-400 capitalize">system</span>
-                {currentJob.completed_at && <span className="text-[11px] text-base-500 font-mono">{new Date(currentJob.completed_at).toLocaleTimeString()}</span>}
+                {currentJob.completed_at && <span className="text-xs text-base-500 font-mono">{new Date(currentJob.completed_at).toLocaleTimeString()}</span>}
               </div>
               <p className="text-base-200 text-sm flex items-center gap-2 leading-relaxed">
                 <CheckCircle2 className="w-4 h-4 text-signal-success shrink-0" />
@@ -556,7 +563,7 @@ export function ChatView({
                 {/* Error Details */}
                 {currentJob.error_message && (
                   <div className="mb-4 p-3 rounded-xl bg-base-950/60 border border-signal-error/20">
-                    <div className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1.5">Error Details</div>
+                    <div className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5">Error Details</div>
                     <p className="text-xs text-signal-error font-mono leading-relaxed break-all font-medium">
                       {currentJob.error_message}
                     </p>
@@ -597,7 +604,7 @@ export function ChatView({
                       </>
                     )}
                   </motion.button>
-                  <span className="text-[11px] text-base-500">
+                  <span className="text-xs text-base-500">
                     Picks up from the last completed step — no work is repeated.
                   </span>
                 </div>
@@ -711,8 +718,8 @@ export function ChatView({
 
               {/* Right Side Tools: Shortcut Hint + Send Button */}
               <div className="ml-auto flex shrink-0 items-center gap-3">
-                <span className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-base-400">
-                  <span>Press <kbd className="px-1.5 py-0.5 rounded-md bg-base-800 border border-base-700 text-[10px] text-base-300 font-sans shadow-inner">Enter ↵</kbd></span>
+                <span className="hidden md:flex items-center gap-1.5 text-xs font-mono text-base-400">
+                  <span>Press <kbd className="px-1.5 py-0.5 rounded-md bg-base-800 border border-base-700 text-xs text-base-300 font-sans shadow-inner">Enter ↵</kbd></span>
                 </span>
 
                 <motion.button

@@ -118,7 +118,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
           <h2 className="text-2xl font-bold text-base-50 tracking-tight line-clamp-1">Studio: {currentJob.topic}</h2>
           <div className="flex items-center gap-2.5 shrink-0">
-            <span className="px-2.5 py-1 rounded-lg bg-accent-glow text-accent-400 text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5 border border-accent-500/20">
+            <span className="px-2.5 py-1 rounded-lg bg-accent-glow text-accent-400 text-label font-semibold uppercase tracking-wider flex items-center gap-1.5 border border-accent-500/20">
               {currentJob?.status === 'completed' ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
               {currentJob?.status || 'Draft'}
             </span>
@@ -354,7 +354,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
 
                     {/* Left Side: Score card and SVG Radar Chart */}
                     <div className="lg:col-span-1 glass-panel p-6 rounded-2xl flex flex-col items-center border border-white/6 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
-                      <h3 className="text-lg font-bold text-base-50 mb-1 tracking-wide uppercase text-[11px] text-base-400">Weighted Quality Grade</h3>
+                      <h3 className="font-bold text-base-50 mb-1 tracking-wide uppercase text-label text-base-400">Weighted Quality Grade</h3>
 
                       {/* Animated Score Ring */}
                       <div className="my-4">
@@ -371,7 +371,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                             >
                               {currentJob.geval_scores.overall_score}
                             </motion.span>
-                            <span className="text-[10px] text-base-500 uppercase tracking-widest font-semibold mt-0.5">out of 5</span>
+                            <span className="text-label text-base-500 uppercase tracking-widest font-semibold mt-0.5">out of 5</span>
                           </div>
                         </div>
                       </div>
@@ -603,7 +603,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                               />
                               <div className="absolute inset-0 bg-gradient-to-t from-base-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-between p-4">
-                                <span className="text-[11px] font-mono font-semibold text-white/90 truncate max-w-[200px]">
+                                <span className="text-xs font-mono font-semibold text-white/90 truncate max-w-[200px]">
                                   {filename}
                                 </span>
                                 <a

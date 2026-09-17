@@ -3,7 +3,7 @@
  *  into four call sites in App.tsx and two of them had silently lost it, so a
  *  dropped socket mid-run rendered the whole agent feed twice. */
 import assert from 'node:assert/strict';
-import { appendUniqueEvent, collectFreshCompletions } from './events';
+import { appendUniqueEvent, collectFreshCompletions, orderWriterSections } from './events';
 import type { AgentEvent, Job } from './api';
 
 const ev = (agent_name: string, message: string, timestamp: number): AgentEvent =>
@@ -39,7 +39,7 @@ const tick = (pct: number, timestamp: number): AgentEvent =>
   ({ job_id: 'j', agent_name: 'video', status: 'working',
      message: `Rendering video... ${pct}%`, timestamp, metrics: { progress: pct / 100 } });
 
-// A run of ticks from one agent leaves a single, latest bubble â€” not one per tick.
+// A run of ticks from one agent leaves a single, latest bubble — not one per tick.
 const ticked = [tick(10, 2000), tick(20, 2005), tick(30, 2010)]
   .reduce(appendUniqueEvent, [a, b]);
 assert.equal(ticked.length, 3);
@@ -79,3 +79,28 @@ assert.deepEqual(fresh, []);
 assert.deepEqual(fresh, []);
 
 console.log('WebSocket event de-dupe + bell notifications: all assertions passed');
+
+// --- Parallel writer sections -----------------------------------------------
+// The writers fan out, so section 6 can finish before section 1. The feed must
+// still read 1..N, with every event keeping its own completion timestamp.
+const sec = (n: number, timestamp: number): AgentEvent =>
+  ({ job_id: 'j', agent_name: 'writer', status: 'completed',
+     message: `Section ${n}/7 done`, timestamp, metrics: { section: n, total: 7 } });
+
+const dispatch = ev('writer', 'Dispatching 7 parallel writers...', 900.0);
+const merge    = ev('merger', 'Merging all sections...', 2000.0);
+const jumbled  = [dispatch, sec(6, 1045), sec(1, 1047), sec(2, 1048), merge];
+const fixed    = orderWriterSections(jumbled);
+
+assert.deepEqual(fixed.map(e => e.metrics?.section ?? e.agent_name),
+                 ['writer', 1, 2, 6, 'merger']);
+// Timestamps travel with their own event — no invented completion times.
+assert.equal(fixed[1].timestamp, 1047);
+// Non-writer events never move.
+assert.equal(fixed[0], dispatch);
+assert.equal(fixed[4], merge);
+// Already in order (and the no-writer case) returns the same array so React bails.
+assert.equal(orderWriterSections(fixed), fixed);
+assert.equal(orderWriterSections(feed), feed);
+
+console.log('events.test.ts: all assertions passed');

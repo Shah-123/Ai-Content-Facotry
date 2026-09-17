@@ -26,6 +26,19 @@ assert.deepEqual(
   ['completed', 'active', 'pending', 'pending', 'pending'],
 );
 
+// The writing path. These agent_name strings are what the backend actually
+// emits; when they drifted from STAGE_MAP's keys the Write stage stayed dark
+// for the whole run and nothing caught it.
+assert.deepEqual(
+  getStageStates([ev('research', 'completed'), ev('orchestrator', 'completed'), ev('writer', 'completed')], 'running'),
+  ['completed', 'completed', 'completed', 'pending', 'pending'],
+);
+assert.equal(getStageStates([ev('ingest', 'working')], 'running')[0], 'active');
+assert.equal(getStageStates([ev('merger', 'completed')], 'running')[2], 'completed');
+assert.equal(getStageStates([ev('images', 'working')], 'running')[2], 'active');
+assert.equal(getStageStates([ev('video', 'working')], 'running')[4], 'active');
+assert.equal(getStageStates([ev('deepeval_evaluator', 'working')], 'running')[4], 'active');
+
 // An errored stage surfaces as an error, not as progress.
 assert.equal(getStageStates([ev('qa_agent', 'error')], 'running')[3], 'error');
 
