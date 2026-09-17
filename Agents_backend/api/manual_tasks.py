@@ -185,14 +185,18 @@ def _handle_deepeval(context: ManualTaskContext) -> None:
 
 
 def _handle_campaign(context: ManualTaskContext) -> None:
-    from Graph.nodes import campaign_generator_node
+    from Graph.nodes import campaign_generator_node, _safe_slug
 
     if context.job.get("social_linkedin") or context.job.get("social_twitter"):
         events.emit(context.job_id, context.task_name, "completed", "Social media already exists. Skipping.")
         return
 
     context.state.update(campaign_generator_node(context.state))
-    slug = context.plan.blog_title.replace(" ", "_").lower()[:50] if context.plan else "blog"
+    # Must be _safe_slug, the same call the pipeline writer uses (main.py). The
+    # hand-rolled version here kept every character the title had, so a title
+    # ending in "?" built a path Windows rejects outright (OSError 22) and the
+    # manual re-run died after the posts had already been generated.
+    slug = _safe_slug(context.plan.blog_title) if context.plan else "blog"
     social_dir = context.base_path / "social_media"
     if context.state.get("linkedin_post"):
         (social_dir / f"linkedin_{slug}.txt").write_text(context.state["linkedin_post"], encoding="utf-8")

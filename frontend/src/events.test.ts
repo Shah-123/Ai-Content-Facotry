@@ -45,6 +45,12 @@ const ticked = [tick(10, 2000), tick(20, 2005), tick(30, 2010)]
 assert.equal(ticked.length, 3);
 assert.equal(ticked[2].message, 'Rendering video... 30%');
 
+// The render's final tick renames itself to the mux stage (video.py), so the
+// panel must swap the percentage line for it, not stack a second bubble.
+const exported = appendUniqueEvent(ticked, { ...tick(100, 2012), message: 'Exporting video...' });
+assert.equal(exported.length, ticked.length);
+assert.equal(exported[exported.length - 1].message, 'Exporting video...');
+
 // A real working step between ticks is history and must survive.
 const withStep = [tick(40, 2015), ev('video', 'Compositing...', 2020), tick(50, 2025)]
   .reduce(appendUniqueEvent, ticked);

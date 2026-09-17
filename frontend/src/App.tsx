@@ -126,7 +126,11 @@ export default function App() {
         APIClient.getJobEvents(jobId),
       ]);
       setCurrentJob(job);
-      setEvents(orderWriterSections(historicalEvents || []));
+      // Replay the persisted history through the same reducer the live WS feed
+      // uses. Setting it in bulk skipped appendUniqueEvent, so a reopened job
+      // rendered every saved "Rendering video... N%" tick as its own row while
+      // the same ticks arriving live collapsed to one.
+      setEvents(orderWriterSections((historicalEvents || []).reduce(appendUniqueEvent, [] as AgentEvent[])));
 
       connectWS(jobId);
     } catch (e) {

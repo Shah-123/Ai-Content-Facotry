@@ -25,7 +25,7 @@ def test_render_progress_reports_percentage(monkeypatch):
     assert messages == [
         "Rendering video... 0%",
         "Rendering video... 25%",
-        "Rendering video... 100%",
+        "Exporting video...",   # frame bar done; ffmpeg is still muxing
     ]
 
 

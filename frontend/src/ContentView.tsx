@@ -86,6 +86,14 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
 
   const radarPoints = useGEvalRadar(currentJob);
 
+  // ffmpeg keeps muxing for minutes after the last frame, so the backend's
+  // render ticks end on "Exporting video..." (Graph/agents/video.py). Echo the
+  // stage in the headline: a frozen "Generating Video..." reads as a stall.
+  const videoEvents = getCurrentRunEvents('video');
+  const videoTitle = videoEvents[videoEvents.length - 1]?.message.startsWith('Exporting')
+    ? 'Exporting Video...'
+    : 'Generating Video...';
+
   if (!currentJob) {
     return (
       <main className="flex-1 p-6 md:p-10 flex items-center justify-center">
@@ -483,7 +491,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                     </div>
                   </div>
                 ) : isTaskRunning('video') ? (
-                  <LoadingState title="Generating Video..." description="Our AI is crafting a storyboard, generating voiceovers, and compiling your video." agentEvents={getCurrentRunEvents('video')} />
+                  <LoadingState title={videoTitle} description="Our AI is crafting a storyboard, generating voiceovers, and compiling your video." agentEvents={videoEvents} />
                 ) : (
                   <EmptyState
                     icon={<Film className="w-12 h-12" />}

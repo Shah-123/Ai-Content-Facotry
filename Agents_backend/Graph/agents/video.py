@@ -656,27 +656,26 @@ def make_portrait_frame(frame_array: np.ndarray) -> np.ndarray:
     h, w = frame_array.shape[:2]
     target_w, target_h = SHORTS_W, SHORTS_H
 
+    scale = target_w / w if h >= w else target_h / h
+    new_w, new_h = int(w * scale), int(h * scale)
+
+    # Crop in *source* coordinates and resize only that region straight to its
+    # final size. Scaling the whole frame up first (a 1080p landscape becomes
+    # 3413×1920) and then throwing two thirds of it away meant every frame paid
+    # for 6.5M LANCZOS pixels to keep 2M. BILINEAR because this runs 30×/second
+    # of output and the difference is invisible in motion.
+    out_w, out_h = min(new_w, target_w), min(new_h, target_h)
+    src_w, src_h = out_w / scale, out_h / scale
+    left, top    = (w - src_w) / 2, (h - src_h) / 2
+
+    box = (left, top, left + src_w, top + src_h)
     img = PILImage.fromarray(frame_array)
+    # Pexels is asked for portrait, so the source is usually already 1080×1920
+    # and needs no resampling at all — crop is a copy, resize is a full pass.
+    img = img.crop(box) if out_w == src_w and out_h == src_h else \
+          img.resize((out_w, out_h), PILImage.BILINEAR, box=box)
 
-    if h >= w:
-        # Portrait or square: scale width to target_w, keep aspect
-        scale   = target_w / w
-        new_w   = target_w
-        new_h   = int(h * scale)
-    else:
-        # Landscape: scale height to target_h, then crop width
-        scale   = target_h / h
-        new_h   = target_h
-        new_w   = int(w * scale)
-
-    img = img.resize((new_w, new_h), PILImage.LANCZOS)
-
-    # Centre-crop to exact target dimensions
-    left = max(0, (new_w - target_w) // 2)
-    top  = max(0, (new_h - target_h) // 2)
-    img  = img.crop((left, top, left + target_w, top + target_h))
-
-    # If somehow still smaller, pad with black
+    # Source too narrow/short for a full cover crop — pad the rest with black.
     if img.size != (target_w, target_h):
         canvas = PILImage.new("RGB", (target_w, target_h), (0, 0, 0))
         canvas.paste(img, ((target_w - img.width) // 2, (target_h - img.height) // 2))
@@ -726,14 +725,23 @@ class _RenderProgress(ProgressBarLogger):
         self.job_id = job_id
 
     def bars_callback(self, bar, attr, value, old_value=None):
+        # write_videofile runs two proglog bars: "chunk" for the temp audio
+        # track (seconds of work) and "frame_index" for the frames (the long
+        # one). Relaying both made the UI count to 100% and restart, which
+        # read as the video rendering twice. Only the frame bar is the render.
+        if bar == "chunk":
+            return
         total = self.bars[bar].get("total")
         if attr == "index" and total:
             pct = min(100, value * 100 // total)
+            # The last frame lands minutes before the file does: ffmpeg still
+            # has to flush its buffers and mux the audio track. Sitting on
+            # "100%" for that tail reads as a hang, so name what is happening.
+            msg = "Exporting video..." if pct == 100 else f"Rendering video... {pct}%"
             # The `progress` metric marks this as a tick that supersedes the
             # previous one, so the UI shows one updating line instead of ~180
             # stacked percentage cards. See frontend/src/events.ts.
-            _emit(self.job_id, "video", "working",
-                  f"Rendering video... {pct}%", {"progress": pct / 100})
+            _emit(self.job_id, "video", "working", msg, {"progress": pct / 100})
 
 
 def composite_shorts_video(
@@ -786,11 +794,11 @@ def composite_shorts_video(
             dur       = min(12.0, clip.duration)   # max 12s per raw clip
             clip      = clip.subclipped(0, dur)
 
-            # Re-render every frame as portrait
-            clip = clip.image_transform(
-                lambda frame: make_portrait_frame(frame)
-            )
-            clip = clip.resized((SHORTS_W, SHORTS_H))
+            # Re-render every frame as portrait. No .resized() after this:
+            # make_portrait_frame already returns exactly SHORTS_W×SHORTS_H, and
+            # moviepy's Resize does not short-circuit a same-size request — it
+            # was running a full LANCZOS pass per frame to produce the input.
+            clip = clip.image_transform(make_portrait_frame)
             video_clips.append(clip)
         except Exception as e:
             logger.warning(f"   ⚠️ Skipping clip {path}: {e}")
@@ -1005,12 +1013,21 @@ def video_generator_node(state: State) -> dict:
     # 5. Plan video scenes (portrait queries)
     # ------------------------------------------------------------------
     _emit(_job(state), "video", "working", "Planning stock footage queries...")
-    planner = llm.with_structured_output(VideoScenePlan)
-    plan    = planner.invoke([
-        SystemMessage(content=VIDEO_PLAN_SYSTEM),
-        HumanMessage(content=f"Topic: {topic}\n\nVoiceover Script:\n{script}"),
-    ])
-    queries = plan.keywords if plan.keywords else [f"{topic} vertical", "abstract background portrait"]
+    fallback_queries = [f"{topic} vertical", "abstract background portrait"]
+    try:
+        planner = llm.with_structured_output(VideoScenePlan)
+        plan    = planner.invoke([
+            SystemMessage(content=VIDEO_PLAN_SYSTEM),
+            HumanMessage(content=f"Topic: {topic}\n\nVoiceover Script:\n{script}"),
+        ])
+        queries = plan.keywords or fallback_queries
+    except Exception as e:
+        # Same guard as the hook card above. This call only returns a 3-5 word
+        # keyword list, but unguarded it blocks the job for the full
+        # timeout x retries budget and then kills a video that already has
+        # its audio and captions. The fallback queries still find footage.
+        logger.warning(f"Scene planning failed ({e}), using fallback queries.")
+        queries = fallback_queries
     logger.info(f"   🎥 Pexels queries: {queries}")
 
     # ------------------------------------------------------------------
