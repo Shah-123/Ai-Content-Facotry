@@ -327,6 +327,11 @@ PEXELS_API_KEY=...
 # independent-judge arm WITHOUT also changing the QA auditor and reviser,
 # which read LLM_QUALITY_MODEL:
 # LLM_JUDGE_MODEL=gpt-4o
+#
+# Reasoning effort for every reasoning-model stage except the judge
+# (minimal | low | medium | high). Unset = the API default, "medium".
+# Lower answers faster and costs less, at some cost to depth.
+# LLM_REASONING_EFFORT=low
 
 # PostgreSQL instead of SQLite (set automatically by docker-compose).
 # DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_content_factory

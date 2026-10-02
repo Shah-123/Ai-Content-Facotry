@@ -94,9 +94,7 @@ def get_llm(state: dict = None, temperature: float = 0.0) -> ChatOpenAI:
                 f"Ignoring unsupported model '{requested}' — get_llm only builds "
                 f"OpenAI clients. Falling back to '{model_name}'."
             )
-    return ChatOpenAI(model=model_name, temperature=temperature,
-                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
-                      callbacks=[_usage_cb])
+    return _chat(model_name, temperature)
 
 _FAST_MODEL = os.getenv("LLM_FAST_MODEL", "gpt-5-mini")
 _QUALITY_MODEL = os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini")
@@ -136,6 +134,29 @@ _REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "180"))
 _MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
 # ---------------------------------------------------------------------------
+# REASONING EFFORT — the one latency knob every LLM stage shares
+# ---------------------------------------------------------------------------
+# gpt-5-mini is a reasoning model: before every answer it generates hidden
+# reasoning tokens, at the API's default "medium" effort. "low" or "minimal"
+# answers sooner and bills fewer tokens, at some cost to depth. Unset keeps
+# the API default, so nothing changes unless LLM_REASONING_EFFORT is set.
+#
+# Sent only to reasoning models (the API rejects it for gpt-4o and friends),
+# and never to llm_judge, so evaluation scores stay comparable across runs
+# whatever the writers are set to — the same reason LLM_JUDGE_MODEL exists.
+_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT") or None
+
+
+def _chat(model: str, temperature: float,
+          reasoning_effort: str | None = _REASONING_EFFORT) -> ChatOpenAI:
+    """Every chat client: shared timeout, retries, usage accounting, effort."""
+    is_reasoning = model.startswith(("gpt-5", "o1", "o3", "o4")) and "chat" not in model
+    return ChatOpenAI(model=model, temperature=temperature,
+                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
+                      callbacks=[_usage_cb],
+                      reasoning_effort=reasoning_effort if is_reasoning else None)
+
+# ---------------------------------------------------------------------------
 # A NOTE ON temperature
 # ---------------------------------------------------------------------------
 # The temperature arguments below are NOT honoured by the default model.
@@ -154,20 +175,12 @@ _MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 # out to matter, vary the prompt, not this number.
 # tests/test_evaluation.py::TestTemperatureIsInertOnReasoningModels guards this
 # so the finding is not silently rediscovered.
-llm_fast = ChatOpenAI(model=_FAST_MODEL, temperature=0,
-                      timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
-                      callbacks=[_usage_cb])
-llm_quality = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.1,
-                         timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
-                      callbacks=[_usage_cb])
-llm_judge = ChatOpenAI(model=_JUDGE_MODEL, temperature=0,
-                       timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
-                      callbacks=[_usage_cb])
+llm_fast = _chat(_FAST_MODEL, 0)
+llm_quality = _chat(_QUALITY_MODEL, 0.1)
+llm_judge = _chat(_JUDGE_MODEL, 0, reasoning_effort=None)
 # Planner LLM uses higher temperature so blog outlines vary across runs
 # instead of converging on the same headings for the same topic.
-llm_planner = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.7,
-                         timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
-                      callbacks=[_usage_cb])
+llm_planner = _chat(_QUALITY_MODEL, 0.7)
 
 # Backward compat alias
 llm = llm_fast

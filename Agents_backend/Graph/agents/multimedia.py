@@ -4,6 +4,7 @@ import time
 import random
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from pathlib import Path
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -213,15 +214,23 @@ def generate_and_place_images(state: State) -> dict:
     image_quality = state.get("image_quality") or "standard"
     image_style = state.get("image_style") or "vivid"
 
-    for idx, img in enumerate(image_specs):
-        logger.info(f"Processing image {idx+1}/{len(image_specs)}: {img.get('filename')}")
-        img_bytes = _generate_image_multi_provider(
+    # Each image is an independent 10-20s provider call, so generate them all
+    # at once: the wait becomes the slowest image instead of the sum of them.
+    # Placement below stays sequential, in spec order.
+    def _generate(img: dict) -> Optional[bytes]:
+        return _generate_image_multi_provider(
             img["prompt"],
             model=image_model,
             size=image_size,
             quality=image_quality,
             style=image_style
         )
+
+    with ThreadPoolExecutor(max_workers=min(5, len(image_specs))) as pool:
+        all_bytes = list(pool.map(_generate, image_specs))
+
+    for idx, (img, img_bytes) in enumerate(zip(image_specs, all_bytes)):
+        logger.info(f"Processing image {idx+1}/{len(image_specs)}: {img.get('filename')}")
 
         if img_bytes:
             img_slug = _safe_slug(img.get("filename", f"image_{idx+1}"))

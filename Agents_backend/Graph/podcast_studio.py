@@ -2,6 +2,7 @@ import os
 import time
 import random
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -221,20 +222,16 @@ Guidelines:
     import io
     import wave as wave_lib
 
-    audio_segments: list[bytes] = []   # raw PCM frames for each turn
-
-    for idx, turn in enumerate(script.turns):
+    def _synthesise_turn(idx: int, turn: DialogueTurn) -> bytes | None:
+        """Raw PCM for one turn, or None once every retry has failed."""
         voice    = _VOICE_MAP.get(turn.speaker, "nova")
         turn_txt = turn.text.strip()
-        if not turn_txt:
-            continue
 
         logger.info(
             f"🎙️ Synthesising turn {idx + 1}/{len(script.turns)} "
             f"({turn.speaker} → voice: {voice})..."
         )
 
-        success = False
         for attempt in range(1, _TTS_MAX_ATTEMPTS + 1):
             try:
                 # OpenAI TTS — returns raw MP3/PCM bytes directly
@@ -244,22 +241,28 @@ Guidelines:
                     input=turn_txt,
                     response_format="pcm",  # 24 kHz, 16-bit, mono — matches WAV params
                 )
-                audio_segments.append(response.content)
                 logger.info(f"   ✅ Turn {idx + 1} synthesised ({len(response.content):,} bytes).")
-                success = True
-                break
+                return response.content
 
             except Exception as e:
-                err = str(e)
                 logger.warning(f"   ⚠️ Turn {idx + 1} attempt {attempt} failed: {e}")
                 if attempt < _TTS_MAX_ATTEMPTS:
                     wait = (_TTS_BACKOFF_BASE ** attempt) + random.random()
                     logger.info(f"   ⏳ Retrying in {wait:.1f}s...")
                     time.sleep(wait)
 
-        if not success:
-            logger.error(f"   ❌ Turn {idx + 1} failed after {_TTS_MAX_ATTEMPTS} attempts.")
-            return False
+        logger.error(f"   ❌ Turn {idx + 1} failed after {_TTS_MAX_ATTEMPTS} attempts.")
+        return None
+
+    # Turns are synthesised independently, so request them concurrently —
+    # ~20 back-to-back TTS calls were most of this fallback's runtime. map()
+    # keeps results in script order for the merge below.
+    spoken = [(idx, turn) for idx, turn in enumerate(script.turns) if turn.text.strip()]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        audio_segments = list(pool.map(lambda pair: _synthesise_turn(*pair), spoken))
+
+    if any(segment is None for segment in audio_segments):
+        return False
 
     # ── Merge all PCM segments into a single WAV ──────────────────────────
     if not audio_segments:

@@ -12,6 +12,8 @@ Max 2 revision loops to prevent infinite cycles and excessive API cost.
 After 2 failed revisions, the pipeline proceeds with the DRAFT flag.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from Graph.state import State
@@ -136,7 +138,7 @@ def revision_node(state: State) -> dict:
         logger.info(f"   🎯 Targeted revision: fixing {len(flagged_sections)} specific section(s)...")
         _emit(job_id, "revision", "working", f"Targeted surgical revision on {len(flagged_sections)} section(s)...")
 
-        for sec_idx, issues in flagged_sections.items():
+        def _revise_section(sec_idx: int, issues: list) -> None:
             sec = sections[sec_idx]
             issues_text = "\n".join(
                 f"- Claim: \"{i.get('claim', '')}\"\n  Fix: {i.get('recommendation', '')}"
@@ -159,9 +161,15 @@ def revision_node(state: State) -> dict:
                 ])
                 revised_body = res.content.strip()
                 if revised_body and len(revised_body) > 100:
-                    sections[sec_idx]["body"] = revised_body
+                    sec["body"] = revised_body
             except Exception as exc:
                 logger.warning(f"   ⚠️ Section revision for '{sec['title']}' failed: {exc}")
+
+        # Sections are rewritten independently and each call writes only its
+        # own entry, so they run side by side — the loop costs one rewrite,
+        # not one per flagged section.
+        with ThreadPoolExecutor(max_workers=len(flagged_sections)) as pool:
+            list(pool.map(_revise_section, flagged_sections.keys(), flagged_sections.values()))
 
         # Reassemble full text
         reassembled = []
