@@ -4,6 +4,7 @@ import time
 import random
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from pathlib import Path
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -47,6 +48,10 @@ def decide_images(state: State) -> dict:
     _emit(_job(state), "images", "working", f"Planned {len(specs)} image(s)", {"count": len(specs)})
     return {"image_specs": specs}
 
+
+# ponytail: fixed cap, not tied to the account's rate-limit tier. Jobs plan 2
+# images by default (decide_images), so it only bites if num_images is raised.
+_IMAGE_CONCURRENCY = 4
 
 _GPT_IMAGE_SIZES = {"1792x1024": "1536x1024", "1024x1792": "1024x1536"}
 _GPT_IMAGE_QUALITY = {"standard": "medium", "hd": "high"}
@@ -222,16 +227,20 @@ def generate_and_place_images(state: State) -> dict:
     image_quality = state.get("image_quality") or "standard"
     image_style = state.get("image_style") or "vivid"
 
-    for idx, img in enumerate(image_specs):
-        logger.info(f"Processing image {idx+1}/{len(image_specs)}: {img.get('filename')}")
-        img_bytes = _generate_image_multi_provider(
-            img["prompt"],
-            model=image_model,
-            size=image_size,
-            quality=image_quality,
-            style=image_style
+    # Generated concurrently (one at a time was ~15 s per image, and a failing
+    # image walked the whole provider chain before the next could start), then
+    # saved and placed in spec order so the hero image still goes first.
+    def _generate(img: dict) -> Optional[bytes]:
+        return _generate_image_multi_provider(
+            img["prompt"], model=image_model, size=image_size,
+            quality=image_quality, style=image_style,
         )
 
+    with ThreadPoolExecutor(max_workers=min(len(image_specs), _IMAGE_CONCURRENCY)) as pool:
+        all_bytes = list(pool.map(_generate, image_specs))
+
+    for idx, (img, img_bytes) in enumerate(zip(image_specs, all_bytes)):
+        logger.info(f"Processing image {idx+1}/{len(image_specs)}: {img.get('filename')}")
         if img_bytes:
             img_slug = _safe_slug(img.get("filename", f"image_{idx+1}"))
             if not img_slug.endswith(".png"):
