@@ -35,8 +35,11 @@ import sys
 import time
 import json
 import requests
+import shutil
+import subprocess
 import tempfile
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
@@ -69,6 +72,7 @@ from .utils import logger, llm, _job, _emit
 # Target dimensions for TikTok / YouTube Shorts
 SHORTS_W = 1080
 SHORTS_H = 1920
+SHORTS_FPS = 30
 
 # Caption strip at the bottom of the frame
 CAPTION_AREA_TOP    = int(SHORTS_H * 0.72)   # captions start at 72% down
@@ -183,26 +187,23 @@ def fetch_pexels_video(query: str, download_dir: str, index: int) -> Optional[st
             logger.warning(f"No portrait videos found for: {query}")
             return None
 
-        # Pick the clip with the best resolution (prefer HD portrait)
-        best_video = None
-        best_file  = None
-        best_score = 0
-
+        # Smallest portrait file that still covers the 1920px output height.
+        # The old "first HD portrait file" rule usually landed on a 1440×2560 or
+        # 2160×3840 UHD file, which is several times the download and decode
+        # for a frame that gets scaled down to 1080×1920 anyway.
+        best_file = None
         for video in data["videos"][:5]:
-            for vf in video.get("video_files", []):
-                w = vf.get("width", 0)
-                h = vf.get("height", 0)
-                is_portrait = h > w
-                is_hd       = h >= 1080
-                score = (2 if is_portrait else 0) + (1 if is_hd else 0)
-                if score > best_score:
-                    best_score = score
-                    best_video = video
-                    best_file  = vf
+            fits = [vf for vf in video.get("video_files", [])
+                    if vf.get("height", 0) > vf.get("width", 0)
+                    and vf.get("height", 0) >= SHORTS_H]
+            if fits:
+                best_file = min(fits, key=lambda vf: vf["height"])
+                break
 
-        if not best_file and data["videos"]:
-            best_video = data["videos"][0]
-            best_file  = best_video["video_files"][0] if best_video.get("video_files") else None
+        if not best_file:
+            # Nothing tall enough — take the tallest file on offer and upscale.
+            files = [vf for v in data["videos"][:5] for vf in v.get("video_files", [])]
+            best_file = max(files, key=lambda vf: vf.get("height", 0), default=None)
 
         if not best_file:
             return None
@@ -482,7 +483,7 @@ def build_caption_chunks(
 
 
 # ============================================================================
-# FRAME COMPOSITING HELPERS (PIL)
+# FRAME COMPOSITING HELPERS (PIL images, overlaid by ffmpeg)
 # ============================================================================
 
 def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -529,159 +530,178 @@ def draw_gradient_overlay(frame_array: np.ndarray) -> np.ndarray:
     return frame_array
 
 
-def draw_progress_bar(frame_array: np.ndarray, progress: float) -> np.ndarray:
-    """
-    Draws a thin progress bar across the very top of the frame.
-    progress: 0.0 → 1.0
-    """
-    h, w = frame_array.shape[:2]
-    bar_w = int(w * max(0.0, min(1.0, progress)))
-    if bar_w > 0:
-        frame_array[:PROGRESS_BAR_H, :bar_w] = [255, 255, 255]  # white bar
-    return frame_array
+def _ffmpeg_exe() -> str:
+    """The ffmpeg binary moviepy and the tests already use (honours IMAGEIO_FFMPEG_EXE)."""
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def draw_caption_on_frame(
-    frame_array: np.ndarray,
+def _build_gradient_png(path: str) -> str:
+    """Writes draw_gradient_overlay() as a black RGBA scrim ffmpeg can overlay.
+
+    Blending black at alpha a gives frame * (1 - a), which is exactly the
+    multiply draw_gradient_overlay does — so it is applied once per clip by
+    ffmpeg instead of once per frame in numpy.
+    """
+    grad_start = int(SHORTS_H * 0.60)
+    ramp = np.linspace(0, 0.75, SHORTS_H - grad_start, dtype=np.float32)
+    rgba = np.zeros((SHORTS_H, SHORTS_W, 4), dtype=np.uint8)
+    rgba[grad_start:, :, 3] = np.round(ramp * 255).astype(np.uint8)[:, None]
+    Image.fromarray(rgba, "RGBA").save(path)
+    return path
+
+
+def _normalize_to_portrait(
+    src: str, dst: str, max_dur: float = 12.0, gradient_png: Optional[str] = None
+) -> Optional[str]:
+    """Re-encodes one stock clip as a 1080×1920, 30 fps, silent H.264 file.
+
+    Cover-scales and centre-crops (no black bars), trims to `max_dur`, and
+    optionally bakes in the caption scrim. Every normalised clip shares one
+    format, so the final pass can join them with the concat demuxer.
+    Returns `dst`, or None if ffmpeg cannot read the source.
+    """
+    # Trim by frame count after fps=: an input-side `-t 12` drops the last
+    # frame (359 instead of 360), and the shortfall accumulated at every cut.
+    # The input -t only stops ffmpeg decoding the rest of a long clip.
+    chain = (f"scale={SHORTS_W}:{SHORTS_H}:force_original_aspect_ratio=increase,"
+             f"crop={SHORTS_W}:{SHORTS_H},setsar=1,fps={SHORTS_FPS},"
+             f"trim=end_frame={int(round(max_dur * SHORTS_FPS))}")
+    cmd = [_ffmpeg_exe(), "-y", "-loglevel", "error", "-t", f"{max_dur + 1:.3f}", "-i", src]
+    if gradient_png:
+        cmd += ["-i", gradient_png]
+        graph = f"[0:v]{chain}[v];[v][1:v]overlay=0:0,format=yuv420p[out]"
+    else:
+        graph = f"[0:v]{chain},format=yuv420p[out]"
+    cmd += ["-filter_complex", graph, "-map", "[out]", "-an",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", dst]
+
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0 or not os.path.exists(dst) or os.path.getsize(dst) == 0:
+        logger.warning(f"   ⚠️ Skipping clip {src}: "
+                       f"{result.stderr.decode('utf-8', 'replace').strip()[-300:]}")
+        return None
+    return dst
+
+
+def _caption_layer(
     chunk: dict,
-    current_time: float,
+    active: tuple,
     font: ImageFont.FreeTypeFont,
     highlight_font: ImageFont.FreeTypeFont,
-) -> np.ndarray:
-    """
-    Draws a caption chunk onto the frame.
-    Words that are currently being spoken are highlighted in yellow.
-    All other words are white.
+) -> Image.Image:
+    """Draws one caption state on a transparent strip spanning CAPTION_AREA_TOP → bottom.
 
-    chunk format: {"text": str, "start": float, "end": float,
-                   "words": [{"word": str, "start": float, "end": float}]}
+    `active` holds one flag per word in chunk["words"]: True renders that word
+    highlighted (karaoke). With no per-word timing the chunk renders flat white.
     """
-    img  = Image.fromarray(frame_array)
+    img  = Image.new("RGBA", (SHORTS_W, SHORTS_H - CAPTION_AREA_TOP), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-
-    h, w = frame_array.shape[:2]
-    y    = int(h * 0.76)   # vertical centre of caption area
+    w    = SHORTS_W
+    y    = int(SHORTS_H * 0.76) - CAPTION_AREA_TOP
 
     words_with_ts = chunk.get("words", [])
 
     if not words_with_ts:
-        # No per-word timing — render flat white text
         text = chunk["text"]
         bbox = draw.textbbox((0, 0), text, font=font)
-        tw   = bbox[2] - bbox[0]
-        x    = (w - tw) // 2
-        # Shadow
-        draw.text((x + 3, y + 3), text, font=font, fill=(0, 0, 0, 180))
+        x    = (w - (bbox[2] - bbox[0])) // 2
+        draw.text((x + 3, y + 3), text, font=font, fill=(0, 0, 0, 255))
         draw.text((x, y), text, font=font, fill=(255, 255, 255, 255))
-    else:
-        # Karaoke: render word by word, advance x position
-        # First pass: measure total width
-        parts = []
-        for wobj in words_with_ts:
-            word   = wobj["word"] + " "
-            active = wobj["start"] <= current_time <= wobj["end"]
-            f      = highlight_font if active else font
-            bbox   = draw.textbbox((0, 0), word, font=f)
-            parts.append((word, f, bbox[2] - bbox[0], active))
+        return img
 
-        total_w = sum(p[2] for p in parts)
-        x = (w - total_w) // 2
+    parts = []
+    for wobj, is_active in zip(words_with_ts, active):
+        word = wobj["word"] + " "
+        f    = highlight_font if is_active else font
+        bbox = draw.textbbox((0, 0), word, font=f)
+        parts.append((word, f, bbox[2] - bbox[0], is_active))
 
-        for word, f, ww, active in parts:
-            color = (255, 230, 0, 255) if active else (255, 255, 255, 230)
-            # Shadow
-            draw.text((x + 2, y + 2), word, font=f, fill=(0, 0, 0, 160))
-            draw.text((x, y), word, font=f, fill=color)
-            x += ww
-
-    return np.array(img)
+    x = (w - sum(p[2] for p in parts)) // 2
+    for word, f, ww, is_active in parts:
+        color = (255, 230, 0, 255) if is_active else (255, 255, 255, 255)
+        draw.text((x + 2, y + 2), word, font=f, fill=(0, 0, 0, 255))
+        draw.text((x, y), word, font=f, fill=color)
+        x += ww
+    return img
 
 
-def draw_hook_card(
-    frame_array: np.ndarray,
+def _write_caption_track(
+    chunks: List[dict],
+    duration: float,
+    work_dir: Path,
+    font: ImageFont.FreeTypeFont,
+    highlight_font: ImageFont.FreeTypeFont,
+) -> str:
+    """Renders each distinct caption state once; returns an ffconcat playlist timing them.
+
+    A 60 s short is ~1,800 frames but only a few hundred caption states (one
+    per highlighted word), so drawing per state instead of per frame is where
+    the time goes away. The state is still looked up at every frame time, with
+    the old per-frame compositor's rules: nothing before 0.4 s, the first chunk
+    with start <= t <= end + 0.05, a word highlighted while start <= t <= end.
+    """
+    def state_at(t: float):
+        if t < 0.4:
+            return None
+        for i, c in enumerate(chunks):
+            if c["start"] <= t <= c["end"] + 0.05:
+                return (i, tuple(w["start"] <= t <= w["end"] for w in c.get("words", [])))
+        return None
+
+    timeline = []  # [state, first frame], consecutive duplicates merged
+    n_frames = int(round(duration * SHORTS_FPS))
+    for k in range(n_frames):
+        s = state_at(k / SHORTS_FPS)
+        if not timeline or timeline[-1][0] != s:
+            timeline.append([s, k])
+
+    files = {}
+    lines = ["ffconcat version 1.0"]
+    for k, (s, first) in enumerate(timeline):
+        if s not in files:
+            name = f"cap_{len(files):04d}.png"
+            layer = (_caption_layer(chunks[s[0]], s[1], font, highlight_font) if s
+                     else Image.new("RGBA", (SHORTS_W, SHORTS_H - CAPTION_AREA_TOP), (0, 0, 0, 0)))
+            layer.save(work_dir / name, compress_level=1)
+            files[s] = name
+        last = timeline[k + 1][1] if k + 1 < len(timeline) else n_frames
+        # framerate pins the image's time base to the output frame grid; at the
+        # image demuxer's default of 25 fps every switch drifted by up to a frame.
+        lines += [f"file '{files[s]}'", f"option framerate {SHORTS_FPS}",
+                  f"duration {(last - first) / SHORTS_FPS:.6f}"]
+    # The concat demuxer drops the final entry's duration; listing it again holds it.
+    lines += [f"file '{files[timeline[-1][0]]}'", f"option framerate {SHORTS_FPS}"]
+
+    playlist = work_dir / "captions.ffconcat"
+    playlist.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(playlist)
+
+
+def _hook_layer(
     headline: str,
     subline: str,
-    alpha: float,
     title_font: ImageFont.FreeTypeFont,
     sub_font: ImageFont.FreeTypeFont,
-) -> np.ndarray:
-    """
-    Composites a full-frame hook title card over the video frame.
-    alpha: 0.0 (invisible) → 1.0 (fully opaque).
-    Fades in during 0–0.4s and fades out during 2.0–2.5s.
-    """
-    h, w = frame_array.shape[:2]
-
-    overlay = Image.fromarray(frame_array).convert("RGBA")
-    scrim   = Image.new("RGBA", (w, h), (0, 0, 0, int(180 * alpha)))
-    overlay = Image.alpha_composite(overlay, scrim)
-
+) -> Image.Image:
+    """The full-frame hook title card (scrim + text) at full opacity; ffmpeg fades it."""
+    w, h = SHORTS_W, SHORTS_H
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 180))
     draw = ImageDraw.Draw(overlay)
 
-    # Headline
     bbox = draw.textbbox((0, 0), headline, font=title_font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     hx = (w - tw) // 2
     hy = int(h * 0.38)
-    color_a = int(255 * alpha)
-    draw.text((hx + 4, hy + 4), headline, font=title_font, fill=(0, 0, 0, int(160 * alpha)))
-    draw.text((hx, hy), headline, font=title_font, fill=(255, 255, 255, color_a))
+    draw.text((hx + 4, hy + 4), headline, font=title_font, fill=(0, 0, 0, 255))
+    draw.text((hx, hy), headline, font=title_font, fill=(255, 255, 255, 255))
 
-    # Subline
     bbox2 = draw.textbbox((0, 0), subline, font=sub_font)
     sx = (w - (bbox2[2] - bbox2[0])) // 2
     sy = hy + th + 28
-    draw.text((sx + 3, sy + 3), subline, font=sub_font, fill=(0, 0, 0, int(140 * alpha)))
-    draw.text((sx, sy), subline, font=sub_font, fill=(255, 220, 60, color_a))
-
-    return np.array(overlay.convert("RGB"))
-
-
-# ============================================================================
-# PORTRAIT CROP / PAD
-# ============================================================================
-
-def make_portrait_frame(frame_array: np.ndarray) -> np.ndarray:
-    """
-    Converts any frame to 1080×1920 (9:16).
-
-    Strategy:
-      - If the clip is already taller than it is wide: centre-crop to 1080×1920.
-      - If the clip is landscape (wider than tall): scale to height=1920,
-        then centre-crop the width to 1080.
-      - After crop/scale, zero-pad any missing dimension with black.
-    """
-    from PIL import Image as PILImage
-
-    h, w = frame_array.shape[:2]
-    target_w, target_h = SHORTS_W, SHORTS_H
-
-    scale = target_w / w if h >= w else target_h / h
-    new_w, new_h = int(w * scale), int(h * scale)
-
-    # Crop in *source* coordinates and resize only that region straight to its
-    # final size. Scaling the whole frame up first (a 1080p landscape becomes
-    # 3413×1920) and then throwing two thirds of it away meant every frame paid
-    # for 6.5M LANCZOS pixels to keep 2M. BILINEAR because this runs 30×/second
-    # of output and the difference is invisible in motion.
-    out_w, out_h = min(new_w, target_w), min(new_h, target_h)
-    src_w, src_h = out_w / scale, out_h / scale
-    left, top    = (w - src_w) / 2, (h - src_h) / 2
-
-    box = (left, top, left + src_w, top + src_h)
-    img = PILImage.fromarray(frame_array)
-    # Pexels is asked for portrait, so the source is usually already 1080×1920
-    # and needs no resampling at all — crop is a copy, resize is a full pass.
-    img = img.crop(box) if out_w == src_w and out_h == src_h else \
-          img.resize((out_w, out_h), PILImage.BILINEAR, box=box)
-
-    # Source too narrow/short for a full cover crop — pad the rest with black.
-    if img.size != (target_w, target_h):
-        canvas = PILImage.new("RGB", (target_w, target_h), (0, 0, 0))
-        canvas.paste(img, ((target_w - img.width) // 2, (target_h - img.height) // 2))
-        img = canvas
-
-    return np.array(img)
+    draw.text((sx + 3, sy + 3), subline, font=sub_font, fill=(0, 0, 0, 255))
+    draw.text((sx, sy), subline, font=sub_font, fill=(255, 220, 60, 255))
+    return overlay
 
 
 # ============================================================================
@@ -712,12 +732,11 @@ def _generate_hook_card(topic: str, script: str) -> HookCard:
 # ============================================================================
 
 class _RenderProgress(ProgressBarLogger):
-    """Relay moviepy's render progress to the job event bus.
+    """Relay the ffmpeg render's frame count to the job event bus.
 
-    Encoding a 60s Shorts video runs for 10-20 minutes with every frame passing
-    through two Python transforms. Without this the UI sees one "Compositing..."
-    event and then nothing, which reads as a hang and gets the job re-triggered.
-    proglog's own min_time_interval does the throttling.
+    Without this the UI sees one "Compositing..." event and then nothing,
+    which reads as a hang and gets the job re-triggered. ffmpeg's
+    -stats_period 5 does the throttling (proglog only throttles iter_bar).
     """
 
     def __init__(self, job_id: str, interval: float = 5.0):
@@ -756,159 +775,105 @@ def composite_shorts_video(
     """
     Assembles the final 9:16 MP4 from raw clips + audio + captions + hook.
 
+    Everything per-frame runs inside ffmpeg; Python only draws the images that
+    change (one per caption state, one hook card). The previous MoviePy
+    compositor pulled every frame through numpy/PIL and took 750–1,300 s for a
+    60 s short.
+
     Pipeline:
-      1. Load clips → convert each frame to portrait 1080×1920
-      2. Concatenate with crossfades
-      3. Loop if total footage < audio duration
-      4. For each frame:
-           a. Dark gradient overlay (bottom third)
-           b. Progress bar (top)
-           c. Hook card (first HOOK_DURATION seconds)
-           d. Karaoke caption
-      5. Attach audio and export
+      1. Normalise each clip to 1080×1920 / SHORTS_FPS with the scrim baked in
+         (in parallel, one ffmpeg per clip)
+      2. One ffmpeg pass: concat + loop the clips to the audio length, overlay
+         the progress bar, the fading hook card and the caption track, mux audio
 
     Returns True on success, False on any unrecoverable error.
     """
+    work = Path(tempfile.mkdtemp())
     try:
-        try:
-            # MoviePy v2.x
-            from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips
-            from moviepy.video.fx import Loop
-        except (ImportError, AttributeError):
-            # MoviePy v1.x fallback
-            from moviepy.video.io.VideoFileClip import VideoFileClip
-            from moviepy.audio.io.AudioFileClip import AudioFileClip
-            from moviepy import concatenate_videoclips
-            from moviepy.video.fx.loop import Loop
-    except ImportError as e:
-        logger.error(f"moviepy import failed: {e}")
-        return False
-    # ------------------------------------------------------------------
-    # 1. Load raw clips → portrait resize
-    # ------------------------------------------------------------------
-    logger.info("   🎞️ Loading and resizing clips to 1080×1920...")
-    video_clips = []
-    for path in raw_clip_paths:
-        try:
-            clip      = VideoFileClip(path)
-            dur       = min(12.0, clip.duration)   # max 12s per raw clip
-            clip      = clip.subclipped(0, dur)
+        # --------------------------------------------------------------
+        # 1. Normalise clips (12 s max each, as before)
+        # --------------------------------------------------------------
+        logger.info("   🎞️ Normalising clips to 1080×1920...")
+        gradient = _build_gradient_png(str(work / "gradient.png"))
+        with ThreadPoolExecutor(max_workers=max(1, len(raw_clip_paths))) as pool:
+            normalised = list(pool.map(
+                lambda ip: _normalize_to_portrait(
+                    ip[1], str(work / f"clip_{ip[0]}.mp4"), 12.0, gradient),
+                enumerate(raw_clip_paths),
+            ))
+        clips = [p for p in normalised if p]
+        if not clips:
+            logger.error("No valid clips available for compositing.")
+            return False
 
-            # Re-render every frame as portrait. No .resized() after this:
-            # make_portrait_frame already returns exactly SHORTS_W×SHORTS_H, and
-            # moviepy's Resize does not short-circuit a same-size request — it
-            # was running a full LANCZOS pass per frame to produce the input.
-            clip = clip.image_transform(make_portrait_frame)
-            video_clips.append(clip)
-        except Exception as e:
-            logger.warning(f"   ⚠️ Skipping clip {path}: {e}")
+        footage = work / "footage.ffconcat"
+        footage.write_text(
+            "ffconcat version 1.0\n" + "".join(f"file '{Path(p).name}'\n" for p in clips),
+            encoding="utf-8",
+        )
 
-    if not video_clips:
-        logger.error("No valid clips available for compositing.")
-        return False
+        # --------------------------------------------------------------
+        # 2. Static overlays: caption states + hook card
+        # --------------------------------------------------------------
+        captions = _write_caption_track(
+            caption_chunks, audio_duration, work,
+            _load_font(CAPTION_FONT_SIZE, bold=False),
+            _load_font(CAPTION_FONT_SIZE, bold=True),
+        )
+        hook_png = str(work / "hook.png")
+        _hook_layer(hook.headline, hook.subline,
+                    _load_font(HOOK_FONT_SIZE, bold=True),
+                    _load_font(HOOK_SUB_SIZE, bold=False)).save(hook_png)
 
-    # ------------------------------------------------------------------
-    # 2. Concatenate + loop to match audio duration
-    #    (clips hard-cut; the old "crossfade" only dipped to black and was
-    #     removed. ponytail: re-add a real crossfade via CrossFadeIn +
-    #     concatenate(padding=-d) if smooth dissolves are actually wanted.)
-    # ------------------------------------------------------------------
-    try:
-        combined = concatenate_videoclips(video_clips, method="compose")
-    except Exception:
-        combined = concatenate_videoclips(video_clips)
+        # --------------------------------------------------------------
+        # 3. Final pass
+        # --------------------------------------------------------------
+        dur = f"{audio_duration:.3f}"
+        graph = (
+            f"color=c=white:s={SHORTS_W}x{PROGRESS_BAR_H}:r={SHORTS_FPS}[bar];"
+            # Progress bar slides in from the left: visible width = W * t / duration
+            f"[0:v][bar]overlay=x='-w+trunc(W*t/{dur})':y=0[a];"
+            f"[2:v]format=rgba,"
+            f"fade=t=in:st=0:d=0.4:alpha=1,"
+            f"fade=t=out:st={HOOK_DURATION - 0.5}:d=0.5:alpha=1[hook];"
+            f"[a][hook]overlay=0:0:eof_action=pass[b];"
+            f"[b][3:v]overlay=0:{CAPTION_AREA_TOP},format=yuv420p[out]"
+        )
+        cmd = [
+            _ffmpeg_exe(), "-y", "-loglevel", "error",
+            "-nostats", "-progress", "pipe:1", "-stats_period", "5",
+            # Loop the footage until -t cuts it at the audio length
+            "-stream_loop", "-1", "-f", "concat", "-safe", "0", "-i", str(footage),
+            "-i", audio_path,
+            "-loop", "1", "-framerate", str(SHORTS_FPS), "-t", str(HOOK_DURATION), "-i", hook_png,
+            "-f", "concat", "-safe", "0", "-i", captions,
+            "-filter_complex", graph,
+            "-map", "[out]", "-map", "1:a",
+            "-t", dur, "-r", str(SHORTS_FPS),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            "-c:a", "aac",
+            output_path,
+        ]
 
-    if combined.duration < audio_duration:
-        combined = combined.with_effects([Loop(duration=audio_duration)])
-    else:
-        combined = combined.subclipped(0, audio_duration)
-
-    # ------------------------------------------------------------------
-    # 4. Load fonts
-    # ------------------------------------------------------------------
-    caption_font   = _load_font(CAPTION_FONT_SIZE,   bold=False)
-    highlight_font = _load_font(CAPTION_FONT_SIZE,   bold=True)
-    hook_title_f   = _load_font(HOOK_FONT_SIZE,      bold=True)
-    hook_sub_f     = _load_font(HOOK_SUB_SIZE,        bold=False)
-
-    # Pre-build caption lookup: for each frame time → active chunk index
-    def _find_chunk(t: float) -> Optional[dict]:
-        for chunk in caption_chunks:
-            if chunk["start"] <= t <= chunk["end"] + 0.05:
-                return chunk
-        return None
-
-    # ------------------------------------------------------------------
-    # 5. Frame-level compositor
-    # ------------------------------------------------------------------
-    total_dur = combined.duration
-
-    def process_frame(get_frame, t: float) -> np.ndarray:
-        frame = get_frame(t).copy()
-
-        # a) Dark gradient overlay
-        frame = draw_gradient_overlay(frame)
-
-        # b) Progress bar
-        progress = t / total_dur
-        frame    = draw_progress_bar(frame, progress)
-
-        # c) Hook card (first HOOK_DURATION seconds)
-        if t < HOOK_DURATION:
-            # Fade in 0→0.4s, hold, fade out from (HOOK_DURATION-0.5)
-            if t < 0.4:
-                alpha = t / 0.4
-            elif t > HOOK_DURATION - 0.5:
-                alpha = (HOOK_DURATION - t) / 0.5
-            else:
-                alpha = 1.0
-            alpha = max(0.0, min(1.0, alpha))
-            frame = draw_hook_card(
-                frame, hook.headline, hook.subline,
-                alpha, hook_title_f, hook_sub_f
-            )
-
-        # d) Karaoke caption (skip during hook card fully opaque phase)
-        if t >= 0.4:  # give hook card a moment before showing captions
-            chunk = _find_chunk(t)
-            if chunk:
-                frame = draw_caption_on_frame(
-                    frame, chunk, t, caption_font, highlight_font
-                )
-
-        return frame
-
-    composited = combined.transform(process_frame)
-
-    # ------------------------------------------------------------------
-    # 6. Attach audio + export
-    # ------------------------------------------------------------------
-    logger.info(f"   🎬 Exporting {SHORTS_W}×{SHORTS_H} portrait video → {output_path}")
-    audio_clip = AudioFileClip(audio_path)
-    composited = composited.with_audio(audio_clip)
-
-    composited.write_videofile(
-        output_path,
-        fps=30,
-        codec="libx264",
-        audio_codec="aac",
-        preset="ultrafast",
-        ffmpeg_params=["-crf", "23"],
-        logger=_RenderProgress(job_id) if job_id else None,
-    )
-
-    # Cleanup
-    for c in video_clips:
-        try: c.close()
-        except: pass
-    try: combined.close()
-    except: pass
-    try: composited.close()
-    except: pass
-    try: audio_clip.close()
-    except: pass
-
-    return True
+        logger.info(f"   🎬 Exporting {SHORTS_W}×{SHORTS_H} portrait video → {output_path}")
+        progress = _RenderProgress(job_id) if job_id else None
+        if progress:
+            progress(frame_index__total=int(audio_duration * SHORTS_FPS))
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, encoding="utf-8", errors="replace")
+        for line in proc.stdout:
+            if progress and line.startswith("frame="):
+                try:
+                    progress(frame_index__index=int(line.split("=", 1)[1]))
+                except ValueError:
+                    pass
+        stderr = proc.stderr.read()
+        if proc.wait() != 0:
+            logger.error(f"ffmpeg compositing failed: {stderr.strip()[-1000:]}")
+            return False
+        return True
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 # ============================================================================
@@ -1034,14 +999,12 @@ def video_generator_node(state: State) -> dict:
     # 6. Fetch portrait Pexels clips
     # ------------------------------------------------------------------
     _emit(_job(state), "video", "working", f"Fetching {len(queries)} portrait stock clips...")
-    downloaded = []
-    for i, q in enumerate(queries):
-        clip_path = fetch_pexels_video(q, temp_dir, i)
-        if clip_path:
-            downloaded.append(clip_path)
-            logger.info(f"   ✅ Downloaded clip {i+1}: {q}")
-        if len(downloaded) * 12 > audio_dur + 10:
-            break  # have enough footage
+    # Fetched in parallel: one at a time this step took ~100 s for 5 clips.
+    with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+        fetched = list(pool.map(lambda iq: fetch_pexels_video(iq[1], temp_dir, iq[0]),
+                                enumerate(queries)))
+    downloaded = [p for p in fetched if p]
+    logger.info(f"   ✅ Downloaded {len(downloaded)}/{len(queries)} clips")
 
     if not downloaded:
         fallback = fetch_pexels_video("abstract minimal portrait", temp_dir, 99)
