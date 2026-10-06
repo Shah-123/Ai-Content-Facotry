@@ -345,8 +345,19 @@ This mode runs the complete web app with live WebSocket logs, outline editing, a
 1. **Start the FastAPI Backend Server:**
    ```bash
    cd Agents_backend
-   uvicorn api:app --reload --reload-exclude "data/*" --host 0.0.0.0 --port 8000
+   uvicorn api:app --reload --reload-exclude "data/*" --reload-exclude "blogs/*" --reload-exclude "uploads/*" --reload-exclude "tests/*" --host 0.0.0.0 --port 8000
    ```
+
+   > **It is `api:app`, run from `Agents_backend/`.** Two near-misses produce
+   > confusing errors:
+   > * `uvicorn main:app` — `main.py` is the pipeline module and defines no
+   >   `app`, so uvicorn reports *"Attribute 'app' not found in module 'main'"*.
+   > * Running from `Agents_backend/api/` — `main:app` resolves there and the
+   >   server does start, but the reloader then watches only that folder.
+   >
+   > The `--reload-exclude` flags matter: without them, generated blog folders,
+   > uploads and the SQLite files under `data/` all trigger reloads, and a
+   > reload mid-generation kills the running job.
 2. **Start the Vite Frontend Server:**
    ```bash
    cd frontend

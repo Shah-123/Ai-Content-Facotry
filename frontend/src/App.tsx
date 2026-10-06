@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { APIClient, WebSocketClient, Job, AgentEvent, CreateJobParams } from './api';
+import { appendUniqueEvent, collectFreshCompletions, orderWriterSections } from './events';
 import { ViewState } from './types';
 import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
@@ -8,8 +9,10 @@ import { Toasts, toast } from './components/Toast';
 import { Cpu, X } from 'lucide-react';
 import { motion } from 'motion/react';
 
+/** Backend statuses that mean the job record changed and should be re-fetched. */
+const WS_REFRESH_STATUSES = ['completed', 'error', 'plan_ready', 'plan_revised', 'plan_approved'];
+
 const ContentView = lazy(() => import('./ContentView').then(({ ContentView }) => ({ default: ContentView })));
-const AgentGraphCanvas = lazy(() => import('./components/AgentGraphCanvas'));
 
 export default function App() {
   const [view, setView]               = useState<ViewState>('chat');
@@ -17,6 +20,10 @@ export default function App() {
   const [currentJob, setCurrentJob]   = useState<Job | null>(null);
   const [events, setEvents]           = useState<AgentEvent[]>([]);
   const [topicError, setTopicError]   = useState<{ reason: string; category?: string; suggested_topic?: string } | null>(null);
+  // Bell notifications: jobs that finished while this session was open.
+  const [notifications, setNotifications] = useState<Job[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const seenDoneRef                   = useRef<Set<string> | null>(null);
   const wsClientRef                   = useRef<WebSocketClient>(new WebSocketClient());
 
   // Lifted configurations
@@ -25,12 +32,19 @@ export default function App() {
   const [numImages, setNumImages]     = useState<number>(2);
   const [keywordsInput, setKeywordsInput] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<string>('gpt-5-mini');
-  const [imageModel, setImageModel]   = useState<string>('dall-e-3');
+  const [imageModel, setImageModel]   = useState<string>('gpt-image-1-mini');
   const [imageSize, setImageSize]     = useState<string>('1024x1024');
   const [imageQuality, setImageQuality] = useState<string>('standard');
   const [imageStyle, setImageStyle]   = useState<string>('vivid');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  // Desktop sidebar collapse, remembered across sessions.
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem('sidebar-collapsed') === '1'
+  );
+  useEffect(() => {
+    localStorage.setItem('sidebar-collapsed', isSidebarCollapsed ? '1' : '0');
+  }, [isSidebarCollapsed]);
 
   const navTo = (v: ViewState) => setView(v);
 
@@ -38,6 +52,16 @@ export default function App() {
     try {
       const fetched = await APIClient.fetchJobs();
       setJobs(fetched);
+      // Anything that completes after the first fetch is news worth ringing the
+      // bell for; jobs already finished when the app opened only seed the
+      // baseline. Reached from both the 15s poll and the WS status refresh, so
+      // a finished blog lands in the bell within a tick of the backend saying so.
+      const done = collectFreshCompletions(seenDoneRef.current, fetched);
+      seenDoneRef.current = done.seen;
+      if (done.fresh.length) {
+        setNotifications(prev => [...done.fresh, ...prev].slice(0, 10));
+        setUnreadCount(n => n + done.fresh.length);
+      }
       // If the currently-open job changed status server-side (e.g. transitioned
       // to awaiting_approval while WS was disconnected), re-pull the full record
       // so currentJob.plan becomes available for the HITL PlanEditor.
@@ -55,6 +79,26 @@ export default function App() {
       // the user actually triggered.
       console.error('Failed to fetch jobs:', e);
     }
+  };
+
+  // One WebSocket wiring for every caller. The de-dupe is load-bearing: the
+  // backend replays a job's whole event history on each connect (see
+  // api/routes/websocket.py) and WebSocketClient retries an unclean drop up to
+  // five times, so without it one network hiccup mid-run renders every agent
+  // event twice. This used to be four near-identical copies and two of them had
+  // drifted without the guard.
+  const connectWS = (jobId: string) => {
+    const ws = wsClientRef.current;
+    ws.disconnect();
+    ws.connect(jobId, (event) => {
+      setEvents(prev => orderWriterSections(appendUniqueEvent(prev, event)));
+      // Refresh whenever the backend signals a state transition, so the job
+      // record (plan, final content, usage) and the sidebar badge stay current.
+      if (WS_REFRESH_STATUSES.includes(event.status)) {
+        APIClient.getJob(jobId).then(setCurrentJob).catch(console.error);
+        fetchJobsList();
+      }
+    });
   };
 
   // Poll jobs every 15s and clean up the websocket on unmount.
@@ -82,25 +126,13 @@ export default function App() {
         APIClient.getJobEvents(jobId),
       ]);
       setCurrentJob(job);
-      setEvents(historicalEvents || []);
+      // Replay the persisted history through the same reducer the live WS feed
+      // uses. Setting it in bulk skipped appendUniqueEvent, so a reopened job
+      // rendered every saved "Rendering video... N%" tick as its own row while
+      // the same ticks arriving live collapsed to one.
+      setEvents(orderWriterSections((historicalEvents || []).reduce(appendUniqueEvent, [] as AgentEvent[])));
 
-      const ws = wsClientRef.current;
-      ws.disconnect();
-      ws.connect(jobId, (event) => {
-        setEvents(prev => {
-          const isDupe = prev.some(
-            e => e.agent_name === event.agent_name
-              && e.message === event.message
-              && Math.abs(e.timestamp - event.timestamp) < 0.01
-          );
-          if (isDupe) return prev;
-          return [...prev, event];
-        });
-        // Refresh currentJob whenever the backend signals a state transition.
-        if (['completed', 'error', 'plan_ready', 'plan_revised', 'plan_approved'].includes(event.status)) {
-          APIClient.getJob(jobId).then(setCurrentJob).catch(console.error);
-        }
-      });
+      connectWS(jobId);
     } catch (e) {
       toast.fromError(e, 'Could not open that job. Check the backend is running.');
     }
@@ -111,23 +143,7 @@ export default function App() {
   // events list so only the new task's events are displayed.
   const reconnectWS = (jobId: string) => {
     setEvents([]);
-    const ws = wsClientRef.current;
-    ws.disconnect();
-    ws.connect(jobId, (event) => {
-      setEvents(prev => {
-        // De-dupe replayed events by (agent + message + ~timestamp).
-        const isDupe = prev.some(
-          e => e.agent_name === event.agent_name
-            && e.message === event.message
-            && Math.abs(e.timestamp - event.timestamp) < 0.01
-        );
-        if (isDupe) return prev;
-        return [...prev, event];
-      });
-      if (event.agent_name === 'system' && (event.status === 'completed' || event.status === 'error')) {
-        APIClient.getJob(jobId).then(setCurrentJob).catch(console.error);
-      }
-    });
+    connectWS(jobId);
   };
 
   const refreshCurrentJob = async (jobId: string) => {
@@ -141,6 +157,19 @@ export default function App() {
 
   const handleCreateJob = async (params: CreateJobParams) => {
     setTopicError(null);
+    setEvents([]);
+    // Flip the screen to the pipeline view NOW. POST /api/jobs blocks on the
+    // Topic Guard LLM call (seconds) before it returns a job, so waiting for
+    // the response leaves the user staring at a dead hero screen after Enter.
+    // Rolled back in catch() if the topic is rejected.
+    setCurrentJob({
+      id: '',
+      topic: params.topic,
+      tone: params.tone ?? tone,
+      sections: params.sections ?? sections,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    });
     try {
       const payload = {
         selected_model: selectedModel,
@@ -152,17 +181,10 @@ export default function App() {
       };
       const newJob = await APIClient.createJob(payload);
       setCurrentJob(newJob);
-      setEvents([]);
       fetchJobsList();
-      const ws = wsClientRef.current;
-      ws.disconnect();
-      ws.connect(newJob.id, (event) => {
-        setEvents(prev => [...prev, event]);
-        if (['completed','error','plan_ready','plan_revised','plan_approved'].includes(event.status)) {
-          APIClient.getJob(newJob.id).then(setCurrentJob).catch(console.error);
-        }
-      });
+      connectWS(newJob.id);
     } catch (e: any) {
+      setCurrentJob(null);   // roll back the optimistic job
       if (e?.code === 'topic_rejected') {
         setTopicError({
           reason: e.reason || 'Topic was rejected.',
@@ -197,15 +219,7 @@ export default function App() {
       await APIClient.resumeJob(jobId);
       refreshCurrentJob(jobId);
       fetchJobsList();  // Update sidebar status badge (Fail → Active)
-      const ws = wsClientRef.current;
-      ws.disconnect();
-      ws.connect(jobId, (event) => {
-        setEvents(prev => [...prev, event]);
-        if (['completed','error','plan_ready','plan_revised','plan_approved'].includes(event.status)) {
-          APIClient.getJob(jobId).then(setCurrentJob).catch(console.error);
-          fetchJobsList();  // Keep sidebar in sync
-        }
-      });
+      connectWS(jobId);
     } catch (e) {
       toast.fromError(e, 'Could not resume this job.');
     }
@@ -247,22 +261,31 @@ export default function App() {
         onResumeJob={handleResumeJob}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
+        onRefreshJobs={fetchJobsList}
+        selectedModel={selectedModel}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        tone={tone}
+        setTone={setTone}
+        sections={sections}
+        setSections={setSections}
+        numImages={numImages}
+        setNumImages={setNumImages}
+        keywordsInput={keywordsInput}
+        setKeywordsInput={setKeywordsInput}
       />
-      <div className="flex-1 md:ml-[260px] flex flex-col h-dvh relative">
-        <TopNav view={view} onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)} />
-        {view === 'graph' && (
-          <div className="flex-1 p-3 md:p-4 overflow-hidden flex flex-col min-h-0">
-            <Suspense fallback={<ViewLoadingLabel label="Loading agent graph…" />}>
-              <AgentGraphCanvas
-                events={events}
-                currentJob={currentJob}
-              />
-            </Suspense>
-          </div>
-        )}
+      <div className={`flex-1 flex flex-col h-dvh relative transition-[margin] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isSidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'}`}>
+        <TopNav
+          view={view}
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
+          notifications={notifications}
+          unread={unreadCount}
+          onOpenNotifications={() => setUnreadCount(0)}
+          onSelectNotification={(id) => { loadJob(id); navTo('content'); }}
+        />
         {view === 'chat' && (
           <ChatView
-            navTo={navTo}
             currentJob={currentJob}
             events={events}
             topicError={topicError}
@@ -277,11 +300,9 @@ export default function App() {
             sections={sections}
             setSections={setSections}
             numImages={numImages}
-            setNumImages={setNumImages}
             keywordsInput={keywordsInput}
             setKeywordsInput={setKeywordsInput}
             selectedModel={selectedModel}
-            openSettings={() => setIsSettingsOpen(true)}
           />
         )}
         {view === 'content' && (
@@ -329,7 +350,7 @@ export default function App() {
             {/* Model Selection */}
             <div className="space-y-4">
               <div>
-                <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1.5 block">Default Foundation LLM</label>
+                <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5 block">Default Foundation LLM</label>
                 <select
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
@@ -346,7 +367,7 @@ export default function App() {
                     <option value="gpt-4o">GPT-4o (Premium Quality)</option>
                   </optgroup>
                 </select>
-                <p className="text-[11px] text-base-500 mt-1.5 leading-relaxed">
+                <p className="text-xs text-base-500 mt-1.5 leading-relaxed">
                   Sets the model used by the parallel section writers. Planning, QA, and
                   evaluation use the server-configured default (<code className="text-base-400">LLM_QUALITY_MODEL</code>).
                 </p>
@@ -355,12 +376,13 @@ export default function App() {
               {/* OpenAI Image Generation Settings */}
               <div className="pt-3 border-t border-white/10 space-y-3">
                 <div>
-                  <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1.5 block">OpenAI Image Model</label>
+                  <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5 block">OpenAI Image Model</label>
                   <select
                     value={imageModel}
                     onChange={(e) => setImageModel(e.target.value)}
                     className="w-full bg-base-900 border border-white/8 rounded-xl px-3 py-2 text-sm text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors"
                   >
+                    <option value="gpt-image-1-mini">GPT Image 1 Mini (Fast &amp; Affordable)</option>
                     <option value="dall-e-3">DALL-E 3 (Premium Quality - HD / Vivid)</option>
                     <option value="dall-e-2">DALL-E 2 (Standard Quality)</option>
                   </select>
@@ -368,7 +390,7 @@ export default function App() {
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1 block">Size</label>
+                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Size</label>
                     <select
                       value={imageSize}
                       onChange={(e) => setImageSize(e.target.value)}
@@ -381,10 +403,10 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1 block">Quality</label>
+                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Quality</label>
                     <select
                       value={imageQuality}
-                      disabled={imageModel !== 'dall-e-3'}
+                      disabled={imageModel === 'dall-e-2'}
                       onChange={(e) => setImageQuality(e.target.value)}
                       className="w-full bg-base-900 border border-white/8 rounded-xl px-2 py-1.5 text-xs text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors disabled:opacity-40"
                     >
@@ -394,7 +416,7 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1 block">Style</label>
+                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Style</label>
                     <select
                       value={imageStyle}
                       disabled={imageModel !== 'dall-e-3'}

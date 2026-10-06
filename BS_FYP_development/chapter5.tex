@@ -57,94 +57,109 @@ The codebase of the AI Content Factory is split into specialized modules, each i
 
 \section{User Interface Implementation}
 
-The user interface was built using Vite React, Vanilla CSS, and Tailwind CSS. The interface is styled with a modern dark theme to present a professional dashboard experience, with dynamic accent token inheritance for light theme mode (`data-theme="light"`). The core interactive components of the system are detailed below:
+The user interface was built using Vite React, Vanilla CSS, and Tailwind CSS. The interface ships with a light and a dark theme that share one accent token set, switching on the \texttt{data-theme="light"} attribute applied to the document root; every screenshot in this section was captured from the light theme. The core interactive components of the system are detailed below:
 
 \begin{itemize}
-    \item \textbf{Sidebar View \& Live Console Stream:} Lists all active and previous content generation runs, displaying their status (completed, running, paused, failed). It features a terminal window that displays WebSocket streams, printing colored logs in real-time as agents execute nodes. Additionally, it hosts theme-adaptive range sliders for section counts and image quantities. Figure \ref{fig:ui_dashboard} illustrates the main dashboard view.
-    
-    \begin{figure}[htbp]
-        \centering
-        \IfFileExists{Mian UI.png}{%
-            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{Mian UI.png}%
-        }{%
-            \IfFileExists{dashboard_main.png}{%
-                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{dashboard_main.png}%
-            }{%
-                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: Main Dashboard with Live Console]}\\\small(Save screenshot as `Mian UI.png` or `dashboard_main.png` in `BS_FYP_development` folder)\vfil}}%
-            }%
-        }
-        \caption{AI Content Factory Main Dashboard with Live Console}
-        \label{fig:ui_dashboard}
-    \end{figure}
+    \item \textbf{Sidebar Console \& Run Configuration:} Hosts the engine selector, tone, target keywords, section and image counts, and the run history, which lists each job with its live status (done, review, active, failed). Figure \ref{fig:ui_dashboard} shows the dashboard in its idle state.
 
-    \item \textbf{Interactive Plan Editor Drawer:} Opens when the backend hits the outline interrupt, showing a table of subheadings, word counts, and bullet points which the user can edit, reorder, or regenerate. Figure \ref{fig:ui_plan_editor} shows this Human-in-the-Loop review screen.
-    
-    \begin{figure}[htbp]
-        \centering
-        \IfFileExists{Plan editor.png}{%
-            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{Plan editor.png}%
-        }{%
-            \IfFileExists{plan_editor.png}{%
-                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{plan_editor.png}%
-            }{%
-                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: Interactive Plan Editor Drawer]}\\\small(Save screenshot as `Plan editor.png` or `plan_editor.png` in `BS_FYP_development` folder)\vfil}}%
-            }%
-        }
-        \caption{Interactive Plan Editor and Outline Approval Drawer}
-        \label{fig:ui_plan_editor}
-    \end{figure}
+    \item \textbf{Live Agent Event Stream:} During execution every agent writes to a central \texttt{EventBus} which is relayed over WebSockets and rendered as a timestamped, colour-coded transcript alongside a five-stage pipeline tracker. Figures \ref{fig:ui_pipeline_research} and \ref{fig:ui_parallel_writers} show this stream mid-run.
 
-    \item \textbf{Media Preview Windows \& Podcast Audio Player:} Integrates HTML5 video and audio players to play and preview synthesized WAV podcasts (generated natively via Gemini GenAI SDK) and MP4 videos, allowing users to verify audio narration quality and download generated media assets directly. Figure \ref{fig:ui_media_preview} displays the synthetic video preview player.
+    \item \textbf{Interactive Plan Editor:} Opens when the graph interrupts after the orchestrator node, exposing the generated outline as an editable, reorderable list with per-section edit and delete controls, a free-text box for LLM-driven plan revision, and an explicit approval control. Figure \ref{fig:ui_plan_editor} shows this Human-in-the-Loop review screen.
 
-    \item \textbf{Agent Analytics \& Telemetry Dashboard:} Provides a centralized monitoring view for system performance, displaying real-time metrics including total estimated token consumption, API execution cost breakdowns, active worker node counts, section parallelization rates, and individual node execution latency statistics.
+    \item \textbf{Studio Output Workspace:} A six-tab workspace (Blog, G-Eval Audit, Video, Podcast, Social Media, Images) that presents every artefact of a completed run together with its token and cost accounting and four export formats. Figure \ref{fig:ui_article} shows the rendered article.
 
-    \item \textbf{Quality Audit Scorecard:} Features an interactive DeepEval G-Eval Audit Scorecard panel displaying multi-dimensional quality metrics (Coherence, Relevance, Accuracy, Tone) and radar breakdown charts. Figure \ref{fig:ui_geval_scorecard} illustrates the DeepEval G-Eval audit scorecard, while Figure \ref{fig:ui_image_gallery} shows the Generated Images Gallery.
-    
-    \begin{figure}[htbp]
-        \centering
-        \IfFileExists{Media Preview.png}{%
-            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{Media Preview.png}%
-        }{%
-            \IfFileExists{media_preview.png}{%
-                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{media_preview.png}%
-            }{%
-                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: Media Player Previews]}\\\small(Save screenshot as `Media Preview.png` or `media_preview.png` in `BS_FYP_development` folder)\vfil}}%
-            }%
-        }
-        \caption{Synthetic Video Player and Media Preview Panel}
-        \label{fig:ui_media_preview}
-    \end{figure}
+    \item \textbf{Quality Audit Scorecards:} Presents the in-house QA verdict and the four-dimension G-Eval rubric as a weighted grade, radar chart and per-dimension justification (Figure \ref{fig:ui_geval_scorecard}), with an optional cross-validation against the official \texttt{deepeval} implementation (Figure \ref{fig:ui_deepeval_audit}).
 
-    \begin{figure}[htbp]
-        \centering
-        \IfFileExists{G-Eval Scorecard.png}{%
-            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{G-Eval Scorecard.png}%
-        }{%
-            \IfFileExists{geval_scorecard.png}{%
-                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{geval_scorecard.png}%
-            }{%
-                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: G-Eval Audit Scorecard]}\\\small(Save screenshot as `G-Eval Scorecard.png` or `geval_scorecard.png` in `BS_FYP_development` folder)\vfil}}%
-            }%
-        }
-        \caption{DeepEval G-Eval Audit Scorecard and Multi-Dimensional Quality Metrics Panel}
-        \label{fig:ui_geval_scorecard}
-    \end{figure}
-
-    \begin{figure}[htbp]
-        \centering
-        \IfFileExists{Image Gallery.png}{%
-            \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{Image Gallery.png}%
-        }{%
-            \IfFileExists{image_gallery.png}{%
-                \includegraphics[width=0.9\textwidth,height=0.45\textheight,keepaspectratio]{image_gallery.png}%
-            }{%
-                \framebox[0.9\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[UI Screenshot Placeholder: Generated Images Gallery Grid]}\\\small(Save screenshot as `Image Gallery.png` or `image_gallery.png` in `BS_FYP_development` folder)\vfil}}%
-            }%
-        }
-        \caption{Generated Images Gallery Grid and High-Resolution Visual Download Interface}
-        \label{fig:ui_image_gallery}
-    \end{figure}
+    \item \textbf{Media Preview Windows \& Podcast Audio Player:} Integrates HTML5 video and audio players to preview the rendered MP4 (Figure \ref{fig:ui_video_player}) and the synthesised podcast (Figure \ref{fig:ui_podcast_studio}), plus a gallery of generated visuals (Figure \ref{fig:ui_image_gallery}) and the derived social campaign (Figure \ref{fig:ui_social_campaign}).
 \end{itemize}
+
+\subsection{Walkthrough of a Complete Generation Run}
+
+The figures in this subsection were captured from the running system during a single
+end-to-end execution on the topic \emph{Human-in-the-Loop Design for Multi-Agent AI
+Systems} (job \texttt{\#0ECFE6A0}), using \texttt{gpt-5-mini} in the professional tone.
+They are presented in pipeline order so that each stage of the agent graph described in
+Chapter 4 can be matched to the interface state it produces. Two figures are sourced
+differently, and the job identifier visible in each screenshot makes this explicit.
+Figure \ref{fig:ui_plan_editor} is taken from a second execution of the same topic
+(job \texttt{\#09507520}), because the walkthrough run had already been carried past the
+approval interrupt before it could be captured. Figures \ref{fig:ui_video_player}--%
+\ref{fig:ui_social_campaign} are drawn from earlier runs that exercised the optional
+multimedia and campaign branches, which were disabled for the walkthrough run.
+
+% One helper instead of repeating the \IfFileExists guard for every screenshot.
+\providecommand{\uifig}[3]{%
+  \begin{figure}[htbp]
+    \centering
+    \IfFileExists{#1}{%
+      \includegraphics[width=0.95\textwidth,height=0.60\textheight,keepaspectratio]{#1}%
+    }{%
+      \framebox[0.95\textwidth]{\vbox to 5cm{\vfil\centering\textbf{[Missing screenshot: #1]}\vfil}}%
+    }
+    \caption{#2}
+    \label{#3}
+  \end{figure}%
+}
+
+\uifig{ui_dashboard.png}{\textbf{Stage 1 --- Run configuration.} The dashboard before
+submission. The sidebar exposes the foundation model, tone, target keywords and the
+section and image counts that are posted to \texttt{POST /api/jobs}, while the run
+history lists previous jobs with their terminal status.}{fig:ui_dashboard}
+
+\uifig{ui_pipeline_research.png}{\textbf{Stage 2 --- Routing and research.} The pipeline
+tracker reports 1/5 with the Research node active. The transcript beneath it is streamed
+over WebSockets directly from the agents: the router announces its strategy decision
+before the research node begins evidence collection.}{fig:ui_pipeline_research}
+
+\uifig{ui_plan_editor.png}{\textbf{Stage 3 --- Human-in-the-loop outline approval.} The
+graph has interrupted after the orchestrator node and the job is held in the
+\texttt{awaiting\_approval} state with the elapsed timer still running. The seven planned
+sections are individually editable, reorderable and deletable, and a free-text box allows
+the outline to be revised by the LLM before any writing begins.}{fig:ui_plan_editor}
+
+\uifig{ui_parallel_writers.png}{\textbf{Stage 4 --- Parallel writing, merge and QA.}
+After approval the orchestrator fans out one writer per section. The out-of-order
+completion timestamps confirm genuine parallel execution; the merge node then reports a
+single 3{,}207-word draft and control passes to the QA agent (tracker at 3/5). The
+\emph{Resume Checkpoint} control is backed by the LangGraph SQLite
+checkpointer.}{fig:ui_parallel_writers}
+
+\uifig{ui_article.png}{\textbf{Stage 5 --- Completed article.} The Studio workspace
+renders the finished markdown with the inline hyperlinked citations produced by the
+evidence-grounding pass, together with the measured token usage and cost for the run
+(99{,}684 tokens, \$0.0942) and the four available export formats.}{fig:ui_article}
+
+\uifig{ui_geval_scorecard.png}{\textbf{Stage 6 --- Quality audit scorecard.} The QA
+agent's verdict (7.7/10, \textsc{ready}) sits above the in-house G-Eval rubric, which
+reports a weighted grade of 4/5 with a radar breakdown across Coherence, Relevance,
+Accuracy and Tone and a written justification for each dimension.}{fig:ui_geval_scorecard}
+
+\uifig{ui_deepeval_audit.png}{\textbf{Stage 6b --- Academic cross-validation.} The
+optional audit re-scores the article with the official \texttt{deepeval} G-Eval
+implementation, reporting each of the four rubrics on a 0.0--1.0 scale with
+chain-of-thought justifications. Because this audit is judged independently of the
+in-house rubric, the two need not agree; the accuracy dimension in particular diverges
+sharply here.}{fig:ui_deepeval_audit}
+
+\uifig{ui_video_player.png}{\textbf{Stage 7 --- Synthetic video.} The rendered MP4 plays
+inline with the AI voiceover and the burned-in word-level subtitles generated by the
+video node, composited over Pexels B-roll selected to match the
+narration.}{fig:ui_video_player}
+
+\uifig{ui_image_gallery.png}{\textbf{Stage 7b --- Generated images gallery.} Visuals
+synthesised for the article by the multimedia node, each downloadable at full resolution
+and regenerable without re-running the pipeline.}{fig:ui_image_gallery}
+
+\uifig{ui_social_campaign.png}{\textbf{Stage 7c --- Social campaign.} Platform-specific
+LinkedIn and X/Twitter posts derived from the finished article, each with a
+copy-to-clipboard control.}{fig:ui_social_campaign}
+
+\uifig{ui_podcast_studio.png}{\textbf{Stage 7d --- Podcast studio.} The podcast branch is
+opt-in and can be invoked after the fact rather than blocking the main pipeline on the
+speech synthesis call. This nine-minute two-host episode was synthesised on demand from
+the finished walkthrough article using OpenAI TTS, without re-running the
+pipeline.}{fig:ui_podcast_studio}
+
 
 \section{Testing}
 
@@ -438,11 +453,11 @@ Table \ref{tab:golden_results} reports the outcome of the three golden runs.
         \textbf{Topic Fixture} & \textbf{Mode} & \textbf{Words} & \textbf{Sources} &
         \textbf{QA} & \textbf{Verdict} & \textbf{Revisions} & \textbf{G-Eval} \\
         \hline
-        Evergreen (photosynthesis) & hybrid & 2,825 & 0 & 8.0 & READY & 0 & 3.7 \\
+        Evergreen (photosynthesis) & hybrid & 2,933 & 9 & 8.0 & READY & 0 & 4.0 \\
         \hline
-        Professional (SEO 2026) & open\_book & 3,174 & 9 & 7.0 & READY & 0 & 4.0 \\
+        Professional (SEO 2026) & open\_book & 3,103 & 10 & 8.0 & READY & 1 & 4.0 \\
         \hline
-        Technical (multi-agent AI) & open\_book & 4,447 & 10 & 8.0 & NEEDS\_REVISION & 2 & 3.7 \\
+        Technical (multi-agent AI) & open\_book & 3,589 & 9 & 8.0 & READY & 0 & 4.0 \\
         \hline
     \end{tabular}
     }
@@ -451,21 +466,27 @@ Table \ref{tab:golden_results} reports the outcome of the three golden runs.
     \label{tab:golden_results}
 \end{table}
 
-The system produced substantial articles (2,825--4,447 words) in every case,
-with quality-assurance scores between 7.0 and 8.0 and weighted G-Eval scores
-between 3.7 and 4.0 out of 5.0.
+The system produced substantial articles (2,933--3,589 words) in every case,
+each grounded in 9--10 evidence items, scoring 8.0 out of 10 on the
+quality-assurance audit and 4.0 out of 5.0 on the weighted G-Eval rubric. All
+three cleared the audit; the professional fixture required one pass of the
+revision loop before doing so.
 
-One result is a negative finding and is reported as such. The evergreen fixture
-completed in \texttt{hybrid} mode having gathered \textbf{zero} evidence items,
-yet was still marked \texttt{READY} and recorded in its metadata as
-source-grounded. The article was not wrong, but the system's description of it
-was: a post written entirely from model knowledge was being reported as
-research-backed. This was traced to a missing guard in the research node, which
-returned an empty evidence list without revising the mode selected earlier by
-the router. The pipeline now downgrades the mode to \texttt{closed\_book}
-whenever research yields no usable evidence, so that the planning prompt,
-the stored metadata, and the evaluation harness all describe the article
-accurately. The behaviour is locked in by seven regression tests.
+A defect found in an earlier execution of this same harness is worth recording,
+because it is the reason one of the pipeline's guards exists. In that run the
+evergreen fixture completed in \texttt{hybrid} mode having gathered
+\textbf{zero} evidence items, yet was still marked \texttt{READY} and recorded
+in its metadata as source-grounded. The article was not wrong, but the system's
+description of it was: a post written entirely from model knowledge was being
+reported as research-backed. The cause was a missing guard in the research
+node, which returned an empty evidence list without revising the mode the
+router had selected earlier. The pipeline now downgrades the mode to
+\texttt{closed\_book} whenever research yields no usable evidence, so that the
+planning prompt, the stored metadata and the evaluation harness all describe
+the article accurately; the behaviour is fixed by seven regression tests. In
+the runs reported above the guard was not exercised, because research succeeded
+in every case --- the same fixture that previously retrieved nothing now
+retrieves nine sources, and its grounding score rose from 3 to 4 accordingly.
 
 \subsection{G-Eval Rubric Breakdown}
 
@@ -483,47 +504,189 @@ weighted arithmetic unreliably.
         \textbf{Dimension} & \textbf{Weight} & \textbf{Evergreen} &
         \textbf{Professional} & \textbf{Technical} \\
         \hline
-        Coherence (structure \& flow) & 30\% & 4 & 4 & 3 \\
+        Coherence (structure \& flow) & 30\% & 4 & 4 & 4 \\
         \hline
         Relevance (topic coverage) & 20\% & 4 & 4 & 4 \\
         \hline
-        Accuracy \& grounding & 30\% & 3 & 4 & 4 \\
+        Accuracy \& grounding & 30\% & 4 & 4 & 4 \\
         \hline
         Tone alignment & 20\% & 4 & 4 & 4 \\
         \hline
-        \textbf{Weighted overall} & --- & \textbf{3.7} & \textbf{4.0} & \textbf{3.7} \\
+        \textbf{Weighted overall} & --- & \textbf{4.0} & \textbf{4.0} & \textbf{4.0} \\
         \hline
     \end{tabular}
     \caption{G-Eval rubric scores by dimension (1--5 scale)}
     \label{tab:geval_breakdown}
 \end{table}
 
-Two patterns are visible even at this sample size. Accuracy scored lowest on the
-evergreen topic --- the run that gathered no evidence --- which is the expected
-consequence of an ungrounded article and an encouraging sign that the judge is
-sensitive to grounding rather than merely to fluency. Coherence scored lowest on
-the longest article, consistent with structural quality degrading as the number
-of independently written sections grows.
+Every dimension scored 4 on every fixture. That uniformity is itself worth
+interpreting, and not as a strong result: a judge that returns the same value
+for four distinct criteria across three different articles is exhibiting little
+discriminative power. Two readings are consistent with it --- that the articles
+genuinely are of comparable quality, or that the rubric's anchors are not
+separating cases well at this end of the scale --- and this evidence cannot
+distinguish between them. It does, however, sharpen a point already made in
+Section \ref{sec:threats}: a judge sharing a model family with the writer is a
+weak instrument, and the flat distribution is what a weak instrument looks like.
+
+An earlier execution of the same fixtures produced more varied scores (3.7,
+4.0, 3.7 overall, with accuracy dropping to 3 on the ungrounded article), which
+indicates that these figures move between runs. A single run per condition
+therefore characterises one sample of a stochastic process rather than a stable
+property of the system.
+
+\subsection{Ablation: Evidence Distribution Across Parallel Writers}
+\label{sec:ablation}
+
+The orchestrator partitions the evidence pool so that each parallel writer
+receives its own slice rather than the whole set. That mechanism exists because
+of an observed defect: with nine sections and five evidence items, every worker
+independently gravitated toward the same two or three most prominent
+statistics, and one article repeated the same figure seven times. This section
+measures whether the mitigation works.
+
+\subsubsection{Method}
+The pipeline exposes the partitioning as a switch. With
+\texttt{assign\_evidence} disabled the orchestrator skips assignment entirely
+and every worker falls back to the full evidence pool, reproducing the pre-fix
+behaviour exactly; a unit test asserts that the two arms genuinely differ, so a
+null result cannot be an artefact of both arms behaving identically. Each of the
+three topic fixtures was run once per arm, holding the writer model, the judge
+model and every other parameter fixed.
+
+Two dependent variables are recorded, both computed by deterministic text
+analysis with no model involved --- so unlike the quality scores, they are not
+exposed to judge bias:
+
+\begin{itemize}
+    \item \textbf{Worst-case section spread}: the number of distinct sections
+      reached by the single most-reused statistic. This is the primary measure,
+      because it requires no denominator and directly expresses the defect --- a
+      figure appearing in many sections is exactly what was observed.
+    \item \textbf{Repeated statistics}: how many distinct statistics appear in
+      more than one section.
+\end{itemize}
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        \textbf{Topic Fixture} & \multicolumn{2}{c|}{\textbf{Worst-case spread}} &
+        \multicolumn{2}{c|}{\textbf{Repeated statistics}} \\
+        \cline{2-5}
+         & Full pool & Partitioned & Full pool & Partitioned \\
+        \hline
+        Evergreen (photosynthesis) & 4 & 2 & 3 & 1 \\
+        \hline
+        Professional (SEO 2026) & 4 & 2 & 4 & 1 \\
+        \hline
+        Technical (multi-agent AI) & 2 & 2 & 2 & 5 \\
+        \hline
+        \textbf{Mean} & \textbf{3.3} & \textbf{2.0} & \textbf{3.0} & \textbf{2.3} \\
+        \hline
+    \end{tabular}
+    \caption{Evidence-distribution ablation, $n=1$ run per fixture per arm.
+             Lower is better in every column.}
+    \label{tab:ablation}
+\end{table}
+
+\subsubsection{Result}
+On the primary measure the mitigation behaves as designed. Under partitioning
+no statistic reached more than two sections in any fixture; without it, two of
+the three articles contained a figure that recurred across four. The treatment
+is never worse than the control on this measure, and is strictly better on two
+of three fixtures.
+
+The secondary measure is mixed, and the reason is instructive. On the technical
+fixture the partitioned run repeated five statistics against the control's two
+--- apparently a worse outcome. But that run also surfaced \textbf{17 distinct
+statistics against the control's 8}. A raw count of repetitions is not
+comparable between articles containing different numbers of facts: the
+partitioned article repeated 5 of 17 figures (29\%) while the control repeated 2
+of 8 (25\%), a near-identical proportion over more than twice the factual
+density. Read that way, partitioning did not increase repetition on this
+fixture; it roughly doubled the number of distinct facts the article drew on
+while holding the repetition proportion approximately constant.
+
+\subsubsection{Limitations of this experiment}
+The result supports the mechanism but does not establish an effect size. One run
+per condition cannot separate the treatment from run-to-run variance, and the
+figures in Table \ref{tab:golden_results} are known to move between runs. The
+evergreen fixture is close to degenerate for this purpose: the partitioned run
+contained only a single distinct statistic, so its repetition \emph{rate} is
+1.0 by construction and carries no information --- which is why the rate is
+excluded from Table \ref{tab:ablation} in favour of the spread. A stronger
+version of this experiment would repeat each arm several times per fixture and
+report a mean with a dispersion estimate; that is the single most valuable
+extension to this work.
+
+\subsection{Cost per Generation}
+
+Every model call is metered, and token counts with an estimated cost are written
+alongside each run. Table \ref{tab:cost} reports the three fixtures under the
+production configuration.
+
+\begin{table}[ht]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|c|c|}
+        \hline
+        \textbf{Topic Fixture} & \textbf{LLM calls} & \textbf{Total tokens} &
+        \textbf{Estimated cost (USD)} \\
+        \hline
+        Evergreen (photosynthesis) & 16 & 107,737 & 0.1052 \\
+        \hline
+        Professional (SEO 2026) & 18 & 136,754 & 0.1345 \\
+        \hline
+        Technical (multi-agent AI) & 16 & 113,825 & 0.1114 \\
+        \hline
+        \textbf{Mean} & \textbf{16.7} & \textbf{119,439} & \textbf{0.1170} \\
+        \hline
+    \end{tabular}
+    \caption{Token usage and estimated cost per article, $n=3$.}
+    \label{tab:cost}
+\end{table}
+
+Three qualifications apply to these figures. They cover \textbf{chat completions
+only}: the embedding calls made during document ingestion are not metered,
+because the embeddings client silently forwards an unrecognised callback
+parameter into the API request, so instrumenting it that way would break
+ingestion. At \$0.02 per million tokens the omission is worth well under a cent
+against a run costing roughly twelve, but the figures are a lower bound rather
+than a total. They also cover the \textbf{article alone} --- the harness
+disables image, video, podcast and campaign generation, each of which would add
+materially. Finally, cost is derived from published list prices recorded in the
+source, so it is an estimate whose basis moves when vendors reprice.
 
 \subsection{Qualitative Result: the Quality Gate in Operation}
 
 Aggregate scores do not show whether the fact-checking layer performs useful
-work, so this section examines the one run that failed its audit.
+work. None of the three runs reported above failed its audit, so this section
+examines an earlier execution of the technical fixture that did. Its artefacts
+are retained alongside the current ones.
 
-The technical fixture produced an article containing the claim that a
-``SpaceX--xAI merger totaled \$1.25 trillion''. The quality-assurance
-agent flagged it as a factual error, correctly characterising it as an
-extraordinary financial claim requiring a primary source. In the same audit it
-identified four further issues: undated GitHub star counts presented as current
-figures, an internally inconsistent sourcing column in a comparison table,
-over-reliance on secondary industry summaries where primary academic sources
-existed, and repetitive signposting between sections.
+That run produced an article containing the claim that a ``SpaceX--xAI merger
+totaled \$1.25 trillion''. The quality-assurance agent flagged it as a factual
+error, correctly characterising it as an extraordinary financial claim
+requiring a primary source. In the same audit it identified four further
+issues: undated GitHub star counts presented as current figures, an internally
+inconsistent sourcing column in a comparison table, over-reliance on secondary
+industry summaries where primary academic sources existed, and repetitive
+signposting between sections.
 
 The run then exercised the bounded revision loop. Two revision attempts were
 made --- the configured maximum --- after which one critical issue remained
 unresolved. Rather than reporting the article as publication-ready, the pipeline
 retained the \texttt{NEEDS\_REVISION} verdict and prepended an explicit draft
 warning to both the article and its summary README.
+
+That the same fixture, under the same configuration, later produced three clean
+runs in succession is itself a result. The audit is not deterministic: whether a
+fabricated claim appears at all depends on what the writer generates on a given
+execution, so the quality gate cannot be characterised by a single run in either
+direction. Observing the gate fire correctly demonstrates that the mechanism
+works; it does not establish how often it needs to.
 
 This single case demonstrates three designed behaviours operating together: the
 audit detects fabricated content rather than merely scoring style; the revision
@@ -581,11 +744,21 @@ explicitly rather than left for the reader to infer.
     \item \textbf{Partial evaluation of the longest article.} Both evaluators
       cap their input to bound cost: the quality-assurance audit at 30,000
       characters and the G-Eval judge at 25,000. The technical fixture produced
-      39,025 characters, so its audit covered 77\% of the text and its G-Eval
-      score 64\% of it. Its scores are therefore partial measurements, and its
-      coherence rating --- the lowest recorded, at 3 --- may be depressed by the
-      judge having seen an article that ended mid-argument. The shorter two
-      fixtures were evaluated in full. The system now logs this truncation and
-      records the coverage fraction alongside every score, so a partial
-      measurement can no longer be mistaken for a complete one.
+      28,441 characters, so it was audited in full but judged on 88\% of its
+      text; the other two were evaluated in full. Its G-Eval score is therefore
+      a partial measurement. The system now logs this truncation and records the
+      coverage fraction alongside every score, so a partial measurement can no
+      longer be mistaken for a complete one.
+
+    \item \textbf{Run-to-run variance is substantial and now measured.} The same
+      three fixtures were executed twice under identical configuration. Between
+      those executions the technical fixture moved from
+      \texttt{NEEDS\_REVISION} with two revision passes and an unresolved
+      critical issue to \texttt{READY} with none, the evergreen fixture moved
+      from zero retrieved sources to nine, and the overall G-Eval scores moved
+      from 3.7--4.0 to a uniform 4.0. Every figure in this chapter is therefore
+      one sample of a stochastic process, not a fixed property of the system. No
+      difference reported here should be read as an effect without repeated
+      runs behind it, and the ablation in Section \ref{sec:ablation} carries the
+      same caveat.
 \end{itemize}

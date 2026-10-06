@@ -44,17 +44,41 @@ SCORING RUBRIC (use these anchors):
 # in later sections passed through completely unchecked.
 _QA_AUDIT_CHAR_LIMIT = 30_000
 
+# Weights for the QA overall score, mirroring GEVAL_WEIGHTS in agents/evaluation.py.
+# WHY THIS EXISTS: `overall_score` used to be asked of the LLM directly, while
+# the G-Eval judge one module over explicitly refuses to do the same arithmetic
+# ("The LLM is not asked to do the weighted arithmetic — it is unreliable at
+# it"). The two judges now follow the same rule: the model rates dimensions,
+# Python combines them. This also removes the 7.0 clustering that came from a
+# rubric whose 7-8 band described almost every article the pipeline produces.
+QA_WEIGHTS = {"depth_score": 0.40, "structure_score": 0.30, "readability_score": 0.30}
 
-def verify_citations(blog_text: str, evidence: list) -> list[dict]:
+# Maximum points a fully unverifiable citation set can cost. Grounding failures
+# scale with the SHARE of citations that fail, not as a flat cap: one bad link
+# in twenty is not the same defect as eight in eight. The previous
+# `min(score, 6.0)` treated them identically.
+MAX_GROUNDING_PENALTY = 3.0
+
+
+def qa_overall(report, total_links: int = 0, unverified_links: int = 0) -> float:
+    """Weighted QA score, computed in code. Grounding penalty is proportional
+    to the fraction of citations that could not be traced to the evidence."""
+    base = sum(getattr(report, dim) * weight for dim, weight in QA_WEIGHTS.items())
+    penalty = MAX_GROUNDING_PENALTY * (unverified_links / total_links) if total_links else 0.0
+    return round(max(0.0, min(10.0, base - penalty)), 1)
+
+
+def verify_citations(blog_text: str, evidence: list) -> tuple[list[dict], int]:
     """
     Parse all markdown links in the blog post and verify them against the research evidence.
-    Returns a list of dictionaries describing any citation issues found.
+    Returns (issues, total_links) — the denominator is needed to size the
+    grounding penalty proportionally rather than as a flat score cap.
     """
     issues = []
     # Find all inline markdown links: [Link Text](URL)
     links = re.findall(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', blog_text)
     if not links:
-        return issues
+        return issues, 0
 
     # Extract all valid domains and exact URLs from research evidence
     valid_urls = set()
@@ -107,7 +131,7 @@ def verify_citations(blog_text: str, evidence: list) -> list[dict]:
                 "Replace this link with a valid citation from your search results or remove it."
             )
         })
-    return issues
+    return issues, len(links)
 
 
 def qa_agent_node(state: State) -> dict:
@@ -126,7 +150,7 @@ def qa_agent_node(state: State) -> dict:
 
     # Run automated citation check
     evidence = state.get("evidence", [])
-    citation_issues = verify_citations(final_text, evidence)
+    citation_issues, total_links = verify_citations(final_text, evidence)
 
     # --- 1. STRUCTURAL PRE-CHECKS (lexical only — no auto-fixing here) ---
     # Auto-fixes were already applied by completion_validator upstream.
@@ -195,10 +219,6 @@ def qa_agent_node(state: State) -> dict:
 
     # --- 3. INTEGRATE AUTOMATED OVERRIDES ---
     if citation_issues:
-        # Guarantee verdict is NEEDS_REVISION and score is capped
-        report.verdict = "NEEDS_REVISION"
-        report.overall_score = min(report.overall_score, 6.0)
-
         # Inject citation issues if not already present in report
         for issue_dict in citation_issues:
             exists = any(
@@ -212,6 +232,27 @@ def qa_agent_node(state: State) -> dict:
                     severity="critical",
                     recommendation=issue_dict["recommendation"]
                 ))
+
+    # --- 3b. SCORE AND VERDICT ARE DERIVED IN CODE ---
+    # The model rates the three dimensions; Python decides the grade and the
+    # publish/revise call. Previously both were free-form LLM outputs, which
+    # produced the contradiction this fixes: an article graded 7.0 ("Good /
+    # Solid" by the rubric) could be stamped NEEDS_REVISION over a handful of
+    # `minor` nits, while _after_qa_manual() in main.py ignored the verdict and
+    # routed onward anyway because no issue was `critical`. The router's rule
+    # was already the real one — it is now also the displayed one.
+    llm_score, llm_verdict = report.overall_score, report.verdict
+    report.overall_score = qa_overall(report, total_links, len(citation_issues))
+    report.verdict = (
+        "NEEDS_REVISION"
+        if any(issue.severity == "critical" for issue in report.issues)
+        else "READY"
+    )
+    if (llm_score, llm_verdict) != (report.overall_score, report.verdict):
+        logger.info(
+            f"QA derived {report.overall_score}/10 {report.verdict} "
+            f"(model proposed {llm_score}/10 {llm_verdict})"
+        )
 
     # --- 4. FORMAT REPORT ---
     report_text = "QA AUDIT REPORT\n"
@@ -227,10 +268,16 @@ def qa_agent_node(state: State) -> dict:
         )
     report_text += "\n"
 
-    report_text += "Metrics:\n"
-    report_text += f"- Depth: {report.depth_score}/10\n"
-    report_text += f"- Structure: {report.structure_score}/10\n"
-    report_text += f"- Readability: {report.readability_score}/10\n\n"
+    report_text += "Metrics (overall = weighted mean of the three below, minus grounding penalty):\n"
+    report_text += f"- Depth: {report.depth_score}/10 (weight {QA_WEIGHTS['depth_score']:.0%})\n"
+    report_text += f"- Structure: {report.structure_score}/10 (weight {QA_WEIGHTS['structure_score']:.0%})\n"
+    report_text += f"- Readability: {report.readability_score}/10 (weight {QA_WEIGHTS['readability_score']:.0%})\n"
+    if total_links:
+        report_text += (
+            f"- Grounding: {total_links - len(citation_issues)}/{total_links} citations traced to "
+            f"evidence (penalty {MAX_GROUNDING_PENALTY * len(citation_issues) / total_links:.2f})\n"
+        )
+    report_text += "\n"
 
     if report.strengths:
         report_text += "Strengths:\n"

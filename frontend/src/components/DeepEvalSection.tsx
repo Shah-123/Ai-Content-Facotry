@@ -25,7 +25,7 @@ export function DeepEvalSection({
           <div>
             <h3 className="text-base font-bold text-base-50 flex items-center gap-2">
               Academic Audit
-              <span className="text-[10px] font-semibold text-accent-300 bg-accent-500/10 border border-accent-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider">
+              <span className="text-label font-semibold text-accent-300 bg-accent-500/10 border border-accent-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider">
                 deepeval
               </span>
             </h3>
@@ -91,11 +91,11 @@ export function DeepEvalSection({
                   >
                     {typeof de.overall_score === 'number' ? de.overall_score.toFixed(2) : 'N/A'}
                   </motion.span>
-                  <span className="text-[7px] text-base-500 font-semibold mt-0.5">/ 1.0</span>
+                  <span className="text-xs text-base-500 font-semibold mt-0.5">/ 1.0</span>
                 </div>
               </div>
               <div>
-                <div className="text-[11px] font-semibold text-base-500 uppercase tracking-wider mb-1">
+                <div className="text-label font-semibold text-base-500 uppercase tracking-wider mb-1">
                   Overall Academic Score
                 </div>
                 <div className="text-xs text-base-400 leading-relaxed">
@@ -174,7 +174,7 @@ function DeepEvalRubricCard({
           transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         />
       </div>
-      <p className="text-[11px] text-base-300 leading-relaxed bg-base-950/40 p-2.5 rounded-lg border border-white/4">
+      <p className="text-xs text-base-300 leading-relaxed bg-base-950/40 p-2.5 rounded-lg border border-white/4">
         {evaluation?.reasoning || 'No reasoning provided.'}
       </p>
     </motion.div>

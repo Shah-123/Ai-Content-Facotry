@@ -1,6 +1,7 @@
 import React from 'react';
 import {
-  LayoutDashboard, FileEdit, History, Plus, RefreshCw, Sparkles, Trash2, RotateCcw, Activity
+  LayoutDashboard, FileEdit, Plus, RefreshCw, Sparkles, Trash2, RotateCcw,
+  PanelLeftClose, PanelLeftOpen, Cpu, ChevronDown
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Job } from '../api';
@@ -17,14 +18,44 @@ interface SidebarProps {
   onResumeJob?: (id: string) => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  /** Desktop-only icon-rail collapse. Mobile always renders the full panel. */
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  onRefreshJobs: () => void;
+  /** Foundation LLM for the session, and the opener for its settings dialog. */
+  selectedModel?: string;
+  onOpenSettings?: () => void;
+  /** Per-run generation parameters, edited here rather than in the composer. */
+  tone: string;
+  setTone: (t: string) => void;
+  sections: number;
+  setSections: (n: number) => void;
+  numImages: number;
+  setNumImages: (n: number) => void;
+  keywordsInput: string;
+  setKeywordsInput: (k: string) => void;
+}
+
+/** Parse a number field, holding the previous value for input the field cannot
+    represent (empty, "-", "abc"). `min`/`max` attributes only gate form
+    submission, so the range is enforced here instead: `sections` and
+    `numImages` are sent to POST /api/jobs. */
+export function clampInt(raw: string, lo: number, hi: number, fallback: number): number {
+  const n = Number(raw);
+  if (raw.trim() === '' || !Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, Math.round(n)));
 }
 
 export function Sidebar({
   view, navTo, jobs, currentJob, loadJob, startNewJob, onDeleteJob, onResumeJob,
-  isMobileOpen, onCloseMobile
+  isMobileOpen, onCloseMobile, isCollapsed = false, onToggleCollapse, onRefreshJobs,
+  selectedModel, onOpenSettings,
+  tone, setTone, sections, setSections, numImages, setNumImages, keywordsInput, setKeywordsInput
 }: SidebarProps) {
+  // Collapse is a desktop affordance; on mobile the drawer is either open
+  // (full width) or off-screen, so ignore it there.
+  const rail = isCollapsed && !isMobileOpen;
   const navItems: { key: ViewState; icon: React.ReactNode; label: string }[] = [
-    { key: 'graph',   icon: <Activity        className="w-[18px] h-[18px]" />, label: 'Agent Graph' },
     { key: 'chat',    icon: <LayoutDashboard className="w-[18px] h-[18px]" />, label: 'Dashboard' },
     { key: 'content', icon: <FileEdit       className="w-[18px] h-[18px]" />, label: 'Studio' },
   ];
@@ -38,9 +69,9 @@ export function Sidebar({
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
         />
       )}
-      <aside className={`w-[260px] h-full fixed left-0 top-0 bg-base-950/95 backdrop-blur-2xl flex flex-col z-50 overflow-y-auto border-r border-white/6 shadow-xl transition-transform duration-300 md:translate-x-0 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+      <aside className={`h-full fixed left-0 top-0 bg-base-950/95 backdrop-blur-2xl flex flex-col z-50 overflow-y-auto overflow-x-hidden border-r border-white/6 shadow-xl transition-[transform,width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] md:translate-x-0 ${rail ? 'w-[260px] md:w-[72px]' : 'w-[260px]'} ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
       {/* Brand Header */}
-      <div className="flex items-center gap-3 px-6 pt-7 pb-5">
+      <div className={`flex items-center pt-7 pb-5 ${rail ? 'flex-col gap-2.5 px-3' : 'gap-2.5 px-4'}`}>
         <div className="w-9 h-9 rounded-xl aurora-chip flex items-center justify-center shadow-sm shrink-0">
           <motion.div
             animate={{ rotate: 360 }}
@@ -49,29 +80,45 @@ export function Sidebar({
             <Sparkles className="text-base-950 w-4 h-4" />
           </motion.div>
         </div>
-        <div className="min-w-0">
-          <h1 className="text-base font-extrabold text-gradient-amber tracking-tight leading-tight truncate">AI Content Factory</h1>
-          <p className="text-[10px] text-base-400 font-semibold tracking-wider uppercase opacity-80">Multi-Agent Engine</p>
-        </div>
+        {!rail && (
+          <div className="min-w-0 flex-1">
+            <h1 className="text-sm font-extrabold text-gradient-amber tracking-tight leading-tight truncate">AI Content Factory</h1>
+            <p className="text-label text-base-400 font-semibold tracking-wider uppercase opacity-80 whitespace-nowrap">Multi-Agent Engine</p>
+          </div>
+        )}
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="hidden md:flex items-center justify-center p-1.5 rounded-lg text-base-500 hover:text-accent-400 hover:bg-white/5 transition-colors shrink-0"
+            title={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!rail}
+          >
+            {rail ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+          </button>
+        )}
       </div>
 
       {/* New Job CTA */}
-      <div className="px-5 mb-5">
+      <div className={`mb-5 ${rail ? 'px-3' : 'px-5'}`}>
         <motion.button
           onClick={startNewJob}
-          className="btn-primary w-full py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 text-xs font-bold tracking-wide shadow-md hover:shadow-lg transition-all"
+          className={`btn-primary w-full rounded-xl flex items-center justify-center gap-2 text-xs font-bold tracking-wide shadow-md hover:shadow-lg transition-all ${rail ? 'py-2.5 px-0' : 'py-2.5 px-4'} whitespace-nowrap`}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
+          title={rail ? 'New Generation Job' : undefined}
         >
-          <Plus className="w-4 h-4 stroke-[2.5]" /> New Generation Job
+          <Plus className="w-4 h-4 stroke-[2.5]" /> {!rail && 'New Generation Job'}
         </motion.button>
       </div>
 
-      <nav className="flex flex-col gap-1 px-4 grow">
-        <div className="text-[10px] font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2">Navigation</div>
+      <nav className={`flex flex-col gap-1 grow ${rail ? 'px-3' : 'px-4'}`}>
+        {!rail && <div className="text-label font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Navigation</div>}
         {navItems.map(item => (
           <button key={item.key} onClick={() => navTo(item.key)}
-            className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-all duration-200 group relative sidebar-glow text-xs font-semibold ${view === item.key ? 'bg-accent-500/10 text-accent-400 font-bold border border-accent-500/20 shadow-sm' : 'text-base-400 hover:text-base-200 hover:bg-white/4 border border-transparent'}`}>
+            title={rail ? item.label : undefined}
+            aria-label={item.label}
+            className={`flex items-center py-2.5 rounded-xl transition-all duration-200 group relative sidebar-glow text-xs font-semibold ${rail ? 'justify-center px-0' : 'gap-3 px-3.5'} ${view === item.key ? 'bg-accent-500/10 text-accent-400 font-bold border border-accent-500/20 shadow-sm' : 'text-base-400 hover:text-base-200 hover:bg-white/4 border border-transparent'}`}>
             {view === item.key && (
               <motion.div
                 layoutId="nav-active-indicator"
@@ -80,16 +127,112 @@ export function Sidebar({
               />
             )}
             {item.icon}
-            <span>{item.label}</span>
+            {!rail && <span className="whitespace-nowrap">{item.label}</span>}
           </button>
         ))}
       </nav>
 
-      {/* Recent Jobs History */}
-      <div className="px-4 pb-5 pt-3">
+      {/* Which model powers the session is a workspace setting, not something
+          that describes the request being typed — so it sits with Navigation
+          rather than in the composer next to Attach Doc. */}
+      {onOpenSettings && (
+        <div className={`pb-1 ${rail ? 'px-3' : 'px-4'}`}>
+          {!rail && <div className="text-label font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Engine</div>}
+          <button
+            onClick={onOpenSettings}
+            title={rail ? `Foundation LLM: ${selectedModel}` : 'Change foundation LLM'}
+            aria-label="Change foundation LLM"
+            className={`group flex w-full items-center rounded-xl border border-accent-500/25 bg-accent-500/10 py-2 text-accent-400 transition-all hover:border-accent-500/50 hover:bg-accent-500/20 ${rail ? 'justify-center px-0' : 'gap-2 px-3.5'}`}
+          >
+            <Cpu className="h-[18px] w-[18px] shrink-0 transition-transform group-hover:rotate-12" />
+            {!rail && (
+              <>
+                <span className="min-w-0 flex-1 truncate text-left font-mono text-xs font-bold">{selectedModel}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-accent-400/70" />
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* The run's parameters. They sit here rather than in the composer so the
+          input area stays one line plus Generate, and because their lifetime is
+          the session, not the message being typed — the same reason Engine is
+          here. The rail hides them: a bare field with no label is not usable. */}
+      <div className={`px-4 pt-2 pb-1 ${rail ? 'hidden' : ''}`}>
+        <div className="text-label font-bold text-base-500 mb-2 uppercase tracking-widest px-2 whitespace-nowrap">Generation</div>
+        <div className="flex flex-col gap-3 px-2">
+          <label className="text-label font-bold uppercase tracking-wider text-base-400">
+            Tone
+            <select
+              value={tone}
+              onChange={(e) => setTone(e.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+            >
+              <option value="professional">Professional</option>
+              <option value="conversational">Conversational</option>
+              <option value="technical">Technical</option>
+              <option value="educational">Educational</option>
+              <option value="persuasive">Persuasive</option>
+              <option value="inspirational">Inspirational</option>
+            </select>
+          </label>
+
+          <label className="text-label font-bold uppercase tracking-wider text-base-400">
+            Target keywords
+            <input
+              value={keywordsInput}
+              onChange={(e) => setKeywordsInput(e.target.value)}
+              placeholder="e.g. AI agents"
+              className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium normal-case tracking-normal text-base-200 placeholder:text-base-600 focus:border-accent-500/50 focus:outline-none"
+            />
+          </label>
+
+          {/* Side by side: both are single digits, so a full-width field each
+              wasted a row of sidebar height that a short screen needs. */}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-label font-bold uppercase tracking-wider text-base-400">
+              Sections
+              <input
+                type="number"
+                min={2}
+                max={6}
+                step={1}
+                value={sections}
+                onChange={(e) => setSections(clampInt(e.target.value, 2, 6, sections))}
+                className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+              />
+            </label>
+
+            <label className="text-label font-bold uppercase tracking-wider text-base-400">
+              AI images
+              <input
+                type="number"
+                min={0}
+                max={5}
+                step={1}
+                value={numImages}
+                onChange={(e) => setNumImages(clampInt(e.target.value, 0, 5, numImages))}
+                className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent Jobs History — the list needs labels to be useful, so the
+          rail hides it rather than showing a column of unreadable stubs. */}
+      <div className={`px-4 pb-4 pt-2 ${rail ? 'hidden' : ''}`}>
         <div className="flex justify-between items-center mb-2.5 px-2">
-          <span className="text-[10px] font-bold text-base-500 uppercase tracking-widest">Recent Jobs</span>
-          <button onClick={() => window.location.reload()} className="text-base-500 hover:text-accent-400 transition-colors p-1 rounded-lg hover:bg-white/5" title="Refresh list"><RefreshCw className="w-3 h-3" /></button>
+          <span className="text-label font-bold text-base-500 uppercase tracking-widest whitespace-nowrap">Recent Jobs</span>
+          <button
+            onClick={onRefreshJobs}
+            className="text-base-500 hover:text-accent-400 transition-colors p-1 rounded-lg hover:bg-white/5"
+            title="Refresh list"
+            aria-label="Refresh job list"
+          >
+            <RefreshCw className="w-3 h-3" />
+          </button>
         </div>
         <div className="flex flex-col gap-1 max-h-[28vh] overflow-y-auto pr-1 custom-scrollbar">
           {jobs.slice(0, 10).map((job, i) => (
@@ -102,30 +245,30 @@ export function Sidebar({
             >
               <button onClick={() => loadJob(job.id)}
                 className={`w-full text-left rounded-xl pl-3 pr-8 py-2 text-xs flex justify-between items-center transition-all duration-200 sidebar-glow ${currentJob?.id === job.id ? 'bg-accent-500/10 border border-accent-500/30 text-base-100 font-semibold shadow-sm' : 'text-base-400 hover:text-base-200 border border-transparent hover:bg-white/4'}`}>
-                <span className="truncate pr-2 text-[12px] font-medium">{job.topic}</span>
+                <span className="truncate pr-2 text-xs font-medium">{job.topic}</span>
                 <div className="shrink-0 group-hover:opacity-0 transition-opacity">
                   {job.status === 'completed'         && (
-                    <span className="text-[9px] font-bold text-signal-success bg-signal-success-dim border border-signal-success/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
+                    <span className="text-label font-bold text-signal-success bg-signal-success-dim border border-signal-success/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
                       Done
                     </span>
                   )}
                   {job.status === 'failed'            && (
-                    <span className="text-[9px] font-bold text-signal-error bg-signal-error-dim border border-signal-error/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block fail-pulse">
+                    <span className="text-label font-bold text-signal-error bg-signal-error-dim border border-signal-error/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block fail-pulse">
                       Fail
                     </span>
                   )}
                   {job.status === 'running'           && (
-                    <span className="text-[9px] font-bold text-accent-400 bg-accent-glow border border-accent-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
+                    <span className="text-label font-bold text-accent-400 bg-accent-glow border border-accent-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
                       Active
                     </span>
                   )}
                   {job.status === 'awaiting_approval' && (
-                    <span className="text-[9px] font-bold text-signal-warning bg-signal-warning-dim border border-signal-warning/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
+                    <span className="text-label font-bold text-signal-warning bg-signal-warning-dim border border-signal-warning/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
                       Review
                     </span>
                   )}
                   {job.status === 'pending'           && (
-                    <span className="text-[9px] font-bold text-base-400 bg-white/5 border border-white/6 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
+                    <span className="text-label font-bold text-base-400 bg-white/5 border border-white/6 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
                       Queue
                     </span>
                   )}

@@ -275,6 +275,10 @@ def _run_pipeline(
         generate_readme(folders, saved, final_state)
 
         # ── Token usage and estimated cost ────────────────────────────────
+        # Computed before set_job_completed so the measured figures are stored
+        # on the job row. The dashboard reads them from there rather than
+        # estimating client-side, which is what it used to do.
+        run_usage = None
         try:
             run_usage = _usage.delta(usage_before)
             reports_dir = Path(folders["reports"])
@@ -319,6 +323,7 @@ def _run_pipeline(
             final_content        = final_content,
             social_linkedin      = final_state.get("linkedin_post", ""),
             social_twitter       = final_state.get("twitter_thread", ""),
+            usage_json           = run_usage,
         )
 
         events.emit(job_id, "system", "completed",
@@ -329,6 +334,7 @@ def _run_pipeline(
                         "geval_scores": final_state.get("geval_scores"),
                         "deepeval_scores": final_state.get("deepeval_scores"),
                         "blog_folder": folders["base"],
+                        "usage": run_usage,
                     })
 
     except Exception as exc:

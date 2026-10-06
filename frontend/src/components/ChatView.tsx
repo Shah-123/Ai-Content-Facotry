@@ -1,13 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
-  ListOrdered, PlusCircle, Send, Network,
-  CheckCircle2, RefreshCw, ShieldAlert, X, Hash,
+  ListOrdered, Send, Network,
+  CheckCircle2, RefreshCw, ShieldAlert, X,
   FileText, Film, Podcast, Search, Bot,
-  RotateCcw, AlertTriangle, Cpu, Sparkles, Paperclip, ChevronDown, CornerDownLeft, SlidersHorizontal
+  RotateCcw, AlertTriangle, Sparkles, Paperclip
 } from 'lucide-react';
 import { APIClient, Job, AgentEvent, CreateJobParams, UploadResult, SourceMode } from '../api';
-import { ViewState } from '../types';
 import { PlanEditor } from './PlanEditor';
 import { UploadChip } from './UploadChip';
 import { ProgressTracker } from './ProgressTracker';
@@ -73,8 +72,11 @@ function getAgentConfig(agentName: string) {
 
 const ACCEPTED_UPLOAD_TYPES = '.pdf,.docx,.txt,.md';
 
+/** mm:ss for the live run clock. */
+const formatElapsed = (secs: number) =>
+  `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+
 interface ChatViewProps {
-  navTo: (v: ViewState) => void;
   currentJob: Job | null;
   events: AgentEvent[];
   topicError?: { reason: string; category?: string; suggested_topic?: string } | null;
@@ -89,11 +91,9 @@ interface ChatViewProps {
   sections: number;
   setSections: (s: number) => void;
   numImages?: number;
-  setNumImages?: (n: number) => void;
   keywordsInput: string;
   setKeywordsInput: (k: string) => void;
   selectedModel: string;
-  openSettings?: () => void;
 }
 
 /* ---------- Hero Feature Cards ---------- */
@@ -128,14 +128,12 @@ const HERO_FEATURES = [
 ] as const;
 
 export function ChatView({
-  navTo, currentJob, events, topicError, clearTopicError,
+  currentJob, events, topicError, clearTopicError,
   handleCreateJob, handleApprovePlan, handleRevisePlan, handleUpdatePlan, handleResumeJob,
-  tone, setTone, sections, setSections, numImages = 0, setNumImages, keywordsInput, setKeywordsInput, selectedModel,
-  openSettings
+  tone, setTone, sections, setSections, numImages = 0, keywordsInput, setKeywordsInput, selectedModel
 }: ChatViewProps) {
   const [topicInput, setTopicInput] = useState('');
   const [isResuming, setIsResuming] = useState(false);
-  const [isGenerationSettingsOpen, setIsGenerationSettingsOpen] = useState(false);
 
   // Document upload state
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'ready' | 'error'>('idle');
@@ -144,6 +142,18 @@ export function ChatView({
   const [uploadError, setUploadError] = useState<string>('');
   const [sourceMode, setSourceMode] = useState<SourceMode>('hybrid');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const topicRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // The box opens at one line and grows to fit, so an empty composer does not
+  // reserve three lines of blank space. Keyed on topicInput rather than on the
+  // change handler because the hero template buttons set the topic too, and a
+  // fixed-height box would have hidden the tail of those longer samples.
+  useEffect(() => {
+    const el = topicRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }, [topicInput]);
 
 
 
@@ -203,6 +213,25 @@ export function ChatView({
 
   const isAwaitingApproval = currentJob?.status === 'awaiting_approval';
   const showHero = !currentJob && events.length === 0;
+  const isLive = !!currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed';
+
+  // Keep the newest agent event in view — the feed scrolls on desktop, so
+  // without this the live process runs off the bottom of the panel.
+  const feedEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    feedEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [events.length, currentJob?.status]);
+
+  // Run clock — a long pipeline with no moving number reads as frozen.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!isLive || !currentJob) { setElapsed(0); return; }
+    const startedAt = new Date(currentJob.created_at).getTime();
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isLive, currentJob?.id, currentJob?.created_at]);
 
   return (
     <main className="flex-1 flex flex-col p-4 md:p-8 relative overflow-y-auto md:overflow-hidden">
@@ -220,14 +249,14 @@ export function ChatView({
                     : 'Generating…'}
           </h2>
           <p className="text-base-400 text-sm flex items-center gap-2.5">
-            <span className="font-mono text-[11px] text-base-500">Powered by LangGraph</span>
+            <span className="font-mono text-xs text-base-500">Powered by LangGraph</span>
             {currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed' && (
-              <span className="px-2 py-0.5 rounded-md bg-accent-glow text-accent-400 text-[11px] font-semibold border border-accent-500/20 flex items-center gap-1.5">
+              <span className="px-2 py-0.5 rounded-md bg-accent-glow text-accent-400 text-xs font-semibold border border-accent-500/20 flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-accent-500 status-pulse" /> Processing
               </span>
             )}
             {currentJob?.status === 'completed' && (
-              <span className="px-2 py-0.5 rounded-md bg-signal-success-dim text-signal-success text-[11px] font-semibold border border-signal-success/20 flex items-center gap-1.5">
+              <span className="px-2 py-0.5 rounded-md bg-signal-success-dim text-signal-success text-xs font-semibold border border-signal-success/20 flex items-center gap-1.5">
                 <CheckCircle2 className="w-3 h-3" /> Completed
               </span>
             )}
@@ -251,10 +280,10 @@ export function ChatView({
               transition={{ delay: 0.1, duration: 0.4 }}
               className="hidden sm:flex items-center gap-2.5 mb-5 relative z-10"
             >
-              <span className="glass-pill px-3 py-1 text-[10px] font-bold text-accent-400 tracking-wider uppercase border border-accent-500/20">
+              <span className="glass-pill px-3 py-1 text-label font-bold text-accent-400 tracking-wider uppercase border border-accent-500/20">
                 Orchestration Engine v2.0
               </span>
-              <span className="glass-pill px-3 py-1 text-[10px] font-medium text-base-300 border border-white/6 flex items-center gap-1.5 shadow-sm">
+              <span className="glass-pill px-3 py-1 text-xs font-medium text-base-300 border border-white/6 flex items-center gap-1.5 shadow-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-signal-success animate-pulse"></span>
                 Active LLM: <span className="font-mono text-accent-400 font-bold">{selectedModel}</span>
               </span>
@@ -272,16 +301,22 @@ export function ChatView({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.4 }}
-              className="text-base-400 text-center max-w-lg mb-4 md:mb-8 px-2 text-[13px] md:text-sm leading-relaxed relative z-10"
+              className="text-base-400 text-center max-w-lg mb-4 md:mb-8 px-2 text-sm leading-relaxed relative z-10"
             >
               Enter a topic below and our multi-agent pipeline will research, write, and polish a publication-ready blog — with optional video, podcast, and social campaigns.
             </motion.p>
 
             {/* Feature cards */}
-            <div className="hidden md:grid md:grid-cols-3 gap-4 w-full max-w-3xl relative z-10">
+            <div className="hidden roomy:grid md:grid-cols-3 gap-4 w-full max-w-3xl relative z-10">
               {HERO_FEATURES.map((feat, i) => (
-                <motion.div
+                // A real <button>, not a clickable div: Tab, Enter and Space and
+                // the focus ring all come free, and it is announced as a button.
+                // The heading and paragraph became spans because <button> only
+                // admits phrasing content; the styling is utility classes, so
+                // nothing changes visually.
+                <motion.button
                   key={feat.title}
+                  type="button"
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4 + i * 0.1, duration: 0.4 }}
@@ -290,24 +325,25 @@ export function ChatView({
                     setTone(feat.sampleTone);
                     setSections(feat.sampleSections);
                   }}
-                  className={`glass-panel rounded-2xl p-5 border border-white/6 hover-lift cursor-pointer hover:border-accent-500/30 bg-gradient-to-br ${feat.gradient} flex flex-col justify-between group`}
+                  className={`glass-panel rounded-2xl p-5 text-left border border-white/6 hover-lift cursor-pointer hover:border-accent-500/30 focus-visible:outline-none focus-visible:border-accent-500/60 focus-visible:ring-2 focus-visible:ring-accent-500/40 bg-gradient-to-br ${feat.gradient} flex flex-col justify-between group`}
                 >
-                  <div>
-                    <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/8 flex items-center justify-center mb-3 group-hover:scale-105 group-hover:border-accent-500/20 transition-all duration-300">
+                  <span className="block">
+                    <span className="w-10 h-10 rounded-xl bg-white/5 border border-white/8 flex items-center justify-center mb-3 group-hover:scale-105 group-hover:border-accent-500/20 transition-all duration-300">
                       <feat.icon className="w-5 h-5 text-accent-400" />
-                    </div>
-                    <h4 className="font-bold text-base-100 text-sm mb-1">{feat.title}</h4>
-                    <p className="text-[12px] text-base-400 leading-relaxed mb-4">{feat.desc}</p>
-                  </div>
-                  <span className="text-[10px] text-accent-400 font-semibold underline underline-offset-2 opacity-70 group-hover:opacity-100 group-hover:text-accent-300 transition-all duration-200">
+                    </span>
+                    <span className="block font-bold text-base-100 text-sm mb-1">{feat.title}</span>
+                    <span className="block text-xs text-base-400 leading-relaxed mb-4">{feat.desc}</span>
+                  </span>
+                  <span className="text-xs text-accent-400 font-semibold underline underline-offset-2 opacity-70 group-hover:opacity-100 group-hover:text-accent-300 transition-all duration-200">
                     Use Template
                   </span>
-                </motion.div>
+                </motion.button>
               ))}
             </div>
 
-            {/* Keep templates available on mobile without pushing the prompt below the fold. */}
-            <div className="flex md:hidden flex-wrap justify-center gap-2 w-full relative z-10">
+            {/* Stands in for the feature cards on mobile and on short desktop screens,
+                so the prompt never gets pushed below the fold. */}
+            <div className="flex roomy:hidden flex-wrap justify-center gap-2 w-full relative z-10">
               {HERO_FEATURES.map((feat) => {
                 const Icon = feat.icon;
                 return (
@@ -319,7 +355,7 @@ export function ChatView({
                       setTone(feat.sampleTone);
                       setSections(feat.sampleSections);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/8 bg-base-900/70 px-2.5 py-1.5 text-[11px] font-semibold text-base-300 transition-colors hover:border-accent-500/35 hover:text-accent-400"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/8 bg-base-900/70 px-2.5 py-1.5 text-xs font-semibold text-base-300 transition-colors hover:border-accent-500/35 hover:text-accent-400"
                   >
                     <Icon className="h-3.5 w-3.5 text-accent-400" />
                     {feat.title}
@@ -330,49 +366,55 @@ export function ChatView({
           </motion.div>
         )}
 
-        {/* -------- Job Controls Banner (Resume Checkpoint & Actions) -------- */}
-        {currentJob && (
-          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl glass-panel border border-white/8 backdrop-blur-md mb-2 w-full">
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${
-                currentJob.status === 'completed' ? 'bg-emerald-400' :
-                currentJob.status === 'failed' ? 'bg-signal-error' :
-                currentJob.status === 'awaiting_approval' ? 'bg-amber-400 animate-ping' :
-                'bg-accent-400 animate-pulse'
-              }`} />
-              <span className="text-xs font-bold text-base-100 uppercase tracking-wider">
-                Job #{currentJob.id.slice(0, 8)} — {currentJob.status.replace('_', ' ')}
-              </span>
-            </div>
+        {/* -------- Job Controls Banner (pinned) + Pipeline Rail --------
+             Only the one-line status bar pins. The pipeline rail used to sit
+             inside this sticky wrapper too, which made the pinned block 234px
+             on desktop and ~500px of an 812px phone - the feed scrolled into a
+             sliver and messages were clipped mid-sentence behind it.
+             The fill is opaque for the same reason: at bg-base-950/85 the feed
+             showed through the pinned bar at 15%, and a bright element like the
+             amber topic bubble read as two cards drawn on top of each other. */}
+        {currentJob && currentJob.status !== 'completed' && (
+          <>
+          <div className="sticky top-0 z-20 -mt-2 pt-2 pb-2 bg-base-950">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl glass-panel border border-white/8 backdrop-blur-md w-full">
+              <div className="flex items-center gap-2">
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  currentJob.status === 'failed' ? 'bg-signal-error' :
+                  currentJob.status === 'awaiting_approval' ? 'bg-amber-400 animate-ping' :
+                  'bg-accent-400 animate-pulse'
+                }`} />
+                <span className="text-xs font-bold text-base-100 uppercase tracking-wider">
+                  {currentJob.id
+                    ? `Job #${currentJob.id.slice(0, 8)} — ${currentJob.status.replace('_', ' ')}`
+                    : 'Starting pipeline'}
+                </span>
+                {isLive && (
+                  <span className="text-xs font-mono text-base-400 tabular-nums px-2 py-0.5 rounded-md bg-white/5 border border-white/8">
+                    {formatElapsed(elapsed)}
+                  </span>
+                )}
+              </div>
 
-            <div className="flex items-center gap-2">
-              {(currentJob.status === 'failed' || currentJob.status === 'running') && handleResumeJob && (
-                <button
-                  onClick={() => handleResumeJob(currentJob.id)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent-500/20 text-accent-400 hover:bg-accent-500/30 border border-accent-500/30 transition-all cursor-pointer shadow-sm"
-                  title="Resume pipeline execution from the last saved SQLite checkpoint"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Resume Checkpoint
-                </button>
-              )}
-
-              {currentJob.status === 'completed' && (
-                <button
-                  onClick={() => navTo('content')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 transition-all cursor-pointer"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  View Studio Draft
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {(currentJob.status === 'failed' || currentJob.status === 'running') && handleResumeJob && (
+                  <button
+                    onClick={() => handleResumeJob(currentJob.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent-500/20 text-accent-400 hover:bg-accent-500/30 border border-accent-500/30 transition-all cursor-pointer shadow-sm"
+                    title="Resume pipeline execution from the last saved SQLite checkpoint"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Resume Checkpoint
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        )}
 
-        {/* -------- Progress Tracker (when a job is running) -------- */}
-        {currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed' && events.length > 0 && (
-          <ProgressTracker events={events} jobStatus={currentJob.status} />
+          {currentJob.status !== 'failed' && (
+            <ProgressTracker events={events} jobStatus={currentJob.status} />
+          )}
+          </>
         )}
 
         {currentJob && (
@@ -381,8 +423,37 @@ export function ChatView({
               <p className="text-base font-medium">Write a blog on: {currentJob.topic}</p>
               <p className="text-sm opacity-70 mt-1">Tone: {currentJob.tone}</p>
             </div>
-            <div className="text-right mt-1.5 text-[11px] text-base-500 font-medium">You</div>
+            <div className="text-right mt-1.5 text-xs text-base-500 font-medium">You</div>
           </div>
+        )}
+
+        {isLive && events.length === 0 && (
+          <motion.div
+            className="self-start max-w-3xl flex gap-3.5 w-full"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-accent-500/10 border-accent-500/20">
+              <Sparkles className="w-4 h-4 text-accent-400 animate-pulse" />
+            </div>
+            <div className="glass-panel p-4.5 rounded-2xl rounded-tl-sm flex-1 border border-white/5 shadow-sm">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-label font-bold px-2 py-0.5 rounded-md uppercase tracking-wider bg-accent-500/10 border border-accent-500/20 text-accent-400">
+                  topic guard
+                </span>
+                <span className="text-xs text-base-500 font-mono">{formatElapsed(elapsed)}</span>
+              </div>
+              <p className="text-base-200 text-sm flex items-center gap-2.5 leading-relaxed mt-2.5">
+                <RefreshCw className="w-3.5 h-3.5 text-accent-400 animate-spin shrink-0" />
+                <span className="flex-1">Screening your topic and warming up the agent graph…</span>
+              </p>
+              <div className="mt-3.5 space-y-2">
+                <div className="skeleton-shimmer h-2.5 w-[85%]" />
+                <div className="skeleton-shimmer h-2.5 w-[62%]" />
+              </div>
+            </div>
+          </motion.div>
         )}
 
         {events.map((event, i) => {
@@ -390,7 +461,13 @@ export function ChatView({
           const AgentIcon = config.icon;
           return (
             <motion.div
-              key={i}
+              // Identity, not position. Resuming a job or triggering a
+              // secondary task clears the feed and refills it with different
+              // events; under index keys React reused those nodes, so the entry
+              // animation never replayed and text swapped in place. This tuple
+              // is the same one appendUniqueEvent de-dupes on, so it is unique
+              // within the list by construction.
+              key={`${event.agent_name}|${event.timestamp}|${event.message}`}
               className="self-start max-w-3xl flex gap-3.5 w-full"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -402,11 +479,11 @@ export function ChatView({
               <div className="glass-panel p-4.5 rounded-2xl rounded-tl-sm flex-1 border border-white/5 shadow-sm">
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${config.bgColor} ${config.textColor}`}>
+                    <span className={`text-label font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${config.bgColor} ${config.textColor}`}>
                       {event.agent_name}
                     </span>
                   </div>
-                  <span className="text-[10px] text-base-500 font-mono">{new Date(event.timestamp * 1000).toLocaleTimeString()}</span>
+                  <span className="text-xs text-base-500 font-mono">{new Date(event.timestamp * 1000).toLocaleTimeString()}</span>
                 </div>
                 <p className="text-base-200 text-sm flex items-center gap-2.5 leading-relaxed mt-2.5">
                   {event.status === 'error'
@@ -432,7 +509,7 @@ export function ChatView({
             <div className="glass-panel p-4 rounded-2xl rounded-tl-sm flex-1">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="font-semibold text-sm text-accent-400 capitalize">system</span>
-                {currentJob.completed_at && <span className="text-[11px] text-base-500 font-mono">{new Date(currentJob.completed_at).toLocaleTimeString()}</span>}
+                {currentJob.completed_at && <span className="text-xs text-base-500 font-mono">{new Date(currentJob.completed_at).toLocaleTimeString()}</span>}
               </div>
               <p className="text-base-200 text-sm flex items-center gap-2 leading-relaxed">
                 <CheckCircle2 className="w-4 h-4 text-signal-success shrink-0" />
@@ -486,7 +563,7 @@ export function ChatView({
                 {/* Error Details */}
                 {currentJob.error_message && (
                   <div className="mb-4 p-3 rounded-xl bg-base-950/60 border border-signal-error/20">
-                    <div className="text-[10px] font-bold text-base-400 uppercase tracking-wider mb-1.5">Error Details</div>
+                    <div className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5">Error Details</div>
                     <p className="text-xs text-signal-error font-mono leading-relaxed break-all font-medium">
                       {currentJob.error_message}
                     </p>
@@ -510,7 +587,7 @@ export function ChatView({
                     className={`resume-btn flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
                       isResuming
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-wait'
-                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-base-950 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-[0.98]'
+                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-amber-950 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-[0.98]'
                     }`}
                     whileHover={!isResuming ? { scale: 1.03 } : undefined}
                     whileTap={!isResuming ? { scale: 0.97 } : undefined}
@@ -527,7 +604,7 @@ export function ChatView({
                       </>
                     )}
                   </motion.button>
-                  <span className="text-[11px] text-base-500">
+                  <span className="text-xs text-base-500">
                     Picks up from the last completed step — no work is repeated.
                   </span>
                 </div>
@@ -542,6 +619,7 @@ export function ChatView({
         )}
 
 
+        <div ref={feedEndRef} />
       </div>
 
       {(!currentJob || currentJob.status === 'completed' || currentJob.status === 'failed') && (
@@ -577,7 +655,7 @@ export function ChatView({
           )}
 
 
-          <div className="w-full max-w-4xl mx-auto rounded-3xl p-3.5 bg-base-900/90 dark:bg-base-950/90 backdrop-blur-2xl border border-base-750/80 hover:border-accent-500/40 focus-within:border-accent-500/60 focus-within:shadow-[0_8px_35px_rgba(245,158,11,0.14)] shadow-2xl transition-all duration-300 flex flex-col gap-2.5">
+          <div className="w-full max-w-4xl mx-auto rounded-3xl p-3 bg-base-900/90 dark:bg-base-950/90 backdrop-blur-2xl border border-base-750/80 hover:border-accent-500/40 focus-within:border-accent-500/60 focus-within:shadow-[0_8px_35px_rgba(245,158,11,0.14)] shadow-2xl transition-all duration-300 flex flex-col gap-2">
 
             {uploadStatus !== 'idle' && (
               <UploadChip
@@ -602,7 +680,7 @@ export function ChatView({
             {/* Prompt Textarea */}
             <div className="w-full px-1">
               <textarea
-                className="w-full bg-transparent border-none text-base-100 placeholder-base-400/70 text-base font-medium min-h-[52px] max-h-[180px] resize-none focus:outline-none focus:ring-0 leading-relaxed font-sans"
+                className="w-full bg-transparent border-none text-base-100 placeholder-base-400/70 text-base font-medium min-h-[30px] max-h-[180px] resize-none overflow-y-auto focus:outline-none focus:ring-0 leading-relaxed font-sans"
                 placeholder={
                   uploadStatus === 'ready' && sourceMode === 'auto_topic'
                     ? (uploadResult?.derived_topic
@@ -610,90 +688,24 @@ export function ChatView({
                         : 'Auto-topic mode — enter or override the title...')
                     : 'Enter a topic to generate a publication-ready blog...'
                 }
+                ref={topicRef}
+                rows={1}
                 value={topicInput}
                 onChange={e => setTopicInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitJob(); } }}
               />
             </div>
 
-            <div className="border-t border-base-800/80 pt-2.5 px-1">
-              <button
-                type="button"
-                onClick={() => setIsGenerationSettingsOpen(open => !open)}
-                aria-expanded={isGenerationSettingsOpen}
-                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold text-base-400 transition-colors hover:bg-white/5 hover:text-accent-400"
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                Generation settings
-                <span className="text-[10px] font-normal text-base-500">{tone} · {sections} sections · {numImages} images</span>
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isGenerationSettingsOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isGenerationSettingsOpen && (
-                <div className="mt-2 grid gap-3 rounded-xl border border-white/6 bg-base-950/35 p-3 sm:grid-cols-2">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
-                    Tone
-                    <select
-                      value={tone}
-                      onChange={(e) => setTone(e.target.value)}
-                      className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-2 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
-                    >
-                      <option value="professional">Professional</option>
-                      <option value="conversational">Conversational</option>
-                      <option value="technical">Technical</option>
-                      <option value="educational">Educational</option>
-                      <option value="persuasive">Persuasive</option>
-                      <option value="inspirational">Inspirational</option>
-                    </select>
-                  </label>
-
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
-                    Target keywords
-                    <input
-                      value={keywordsInput}
-                      onChange={(e) => setKeywordsInput(e.target.value)}
-                      placeholder="e.g. AI agents, content strategy"
-                      className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-2 text-xs font-medium normal-case tracking-normal text-base-200 placeholder:text-base-600 focus:border-accent-500/50 focus:outline-none"
-                    />
-                  </label>
-
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
-                    <span className="flex justify-between"><span>Body sections</span><span className="text-accent-400">{sections}</span></span>
-                    <input
-                      type="range"
-                      min={2}
-                      max={6}
-                      value={sections}
-                      onChange={(e) => setSections(Number(e.target.value))}
-                      className="mt-3 w-full cursor-pointer accent-accent-500"
-                    />
-                  </label>
-
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-base-400">
-                    <span className="flex justify-between"><span>AI images</span><span className="text-accent-400">{numImages}</span></span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={5}
-                      value={numImages}
-                      onChange={(e) => setNumImages?.(Number(e.target.value))}
-                      className="mt-3 w-full cursor-pointer accent-accent-500"
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
-
             {/* Control Toolbar */}
-            <div className="flex items-center justify-between pt-2.5 px-1">
-              {/* Left Side Tools: Attach Doc + Model Selector */}
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 border-t border-base-800/80 pt-2 px-1">
+              {/* Left Side Tools: Attach Doc */}
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploadStatus === 'uploading'}
                   title="Attach a document (PDF, DOCX, TXT, MD)"
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
+                  className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
                     uploadStatus === 'ready'
                       ? 'text-accent-400 bg-accent-500/15 border border-accent-500/30'
                       : 'text-base-300 hover:text-accent-400 bg-base-800/80 hover:bg-base-750 border border-base-700/60 hover:border-accent-500/30'
@@ -702,27 +714,12 @@ export function ChatView({
                   <Paperclip className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Attach Doc</span>
                 </button>
-
-                {openSettings && (
-                  <button
-                    type="button"
-                    onClick={openSettings}
-                    title="Change Foundation LLM"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent-500/10 hover:bg-accent-500/20 border border-accent-500/25 hover:border-accent-500/50 text-accent-400 text-xs font-mono font-bold transition-all shadow-sm group"
-                  >
-                    <Cpu className="w-3.5 h-3.5 text-accent-400 group-hover:rotate-12 transition-transform" />
-                    <span>{selectedModel}</span>
-                    <ChevronDown className="w-3 h-3 text-accent-400/70" />
-                  </button>
-                )}
               </div>
 
               {/* Right Side Tools: Shortcut Hint + Send Button */}
-              <div className="flex items-center gap-3">
-                <span className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-base-400">
-                  <span>Multi-agent synthesis</span>
-                  <span className="opacity-40">•</span>
-                  <span>Press <kbd className="px-1.5 py-0.5 rounded-md bg-base-800 border border-base-700 text-[10px] text-base-300 font-sans shadow-inner">Enter ↵</kbd></span>
+              <div className="ml-auto flex shrink-0 items-center gap-3">
+                <span className="hidden md:flex items-center gap-1.5 text-xs font-mono text-base-400">
+                  <span>Press <kbd className="px-1.5 py-0.5 rounded-md bg-base-800 border border-base-700 text-xs text-base-300 font-sans shadow-inner">Enter ↵</kbd></span>
                 </span>
 
                 <motion.button
@@ -737,7 +734,7 @@ export function ChatView({
                      || (!topicInput.trim()
                          && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic)))
                       ? 'bg-base-800 text-base-500 border border-base-700 cursor-not-allowed shadow-none'
-                      : 'bg-gradient-to-r from-accent-500 via-amber-500 to-accent-600 hover:from-accent-400 hover:to-accent-500 text-base-950 shadow-accent-500/25 active:scale-95'
+                      : 'bg-gradient-to-r from-accent-400 to-accent-600 hover:from-accent-300 hover:to-accent-500 text-base-950 shadow-accent-500/25 active:scale-95'
                   }`}
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}

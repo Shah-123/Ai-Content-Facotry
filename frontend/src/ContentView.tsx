@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle2, Clock, Podcast, Film, Share2, Download,
   FileText, Settings, Image as ImageIcon,
-  Play, Volume2, Copy, RefreshCw, LayoutTemplate, Bot, Trash2,
-  GraduationCap, Sparkles, Edit3, Zap, FileCode, Check, Printer, BarChart3, Layers, ExternalLink
+  Copy, RefreshCw, Bot, Trash2,
+  Sparkles, Edit3, Zap, FileCode, Check, Printer, ExternalLink
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,13 +13,14 @@ import { TabButton } from './components/TabButton';
 import { EmptyState } from './components/EmptyState';
 import { LoadingState } from './components/LoadingState';
 import { DeepEvalSection } from './components/DeepEvalSection';
+import { QAAuditSection } from './components/QAAuditSection';
 import { RubricDetailCard } from './components/RubricDetailCard';
 import { PodcastPlayer } from './components/PodcastPlayer';
 import { useJobActions } from './hooks/useJobActions';
-import { useJobAnalytics } from './hooks/useJobAnalytics';
+import { useGEvalRadar } from './hooks/useGEvalRadar';
 
 type ViewState = 'chat' | 'content';
-type TabState = 'blog' | 'geval' | 'analytics' | 'video' | 'podcast' | 'images' | 'social';
+type TabState = 'blog' | 'geval' | 'video' | 'podcast' | 'images' | 'social';
 
 const generatedFigureHtmlToMarkdown = (content: string) => content.replace(
   /<figure\b[^>]*>[\s\S]*?<\/figure>/gi,
@@ -61,11 +62,14 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
   const [editedContent, setEditedContent] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
 
+  // Seed the editor from the server copy whenever the job (or its content)
+  // changes. Deliberately NOT keyed on isEditing: re-running on every
+  // Edit -> Preview toggle silently overwrote whatever the user had typed.
+  // `editedContent` is the single source of truth for the article from here on,
+  // so preview, copy, and the Markdown export all show the edited text.
   useEffect(() => {
-    if (currentJob?.final_content && !isEditing) {
-      setEditedContent(currentJob.final_content);
-    }
-  }, [currentJob?.final_content, isEditing]);
+    setEditedContent(currentJob?.final_content ?? '');
+  }, [currentJob?.id, currentJob?.final_content]);
 
   const { triggering, getCurrentRunEvents, getLastTaskError, handleTrigger, isTaskRunning } = useJobActions({
     currentJob,
@@ -80,7 +84,15 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
     }
   }, [currentJob?.id]);
 
-  const { analytics, radarPoints } = useJobAnalytics(currentJob, events, isTaskRunning);
+  const radarPoints = useGEvalRadar(currentJob);
+
+  // ffmpeg keeps muxing for minutes after the last frame, so the backend's
+  // render ticks end on "Exporting video..." (Graph/agents/video.py). Echo the
+  // stage in the headline: a frozen "Generating Video..." reads as a stall.
+  const videoEvents = getCurrentRunEvents('video');
+  const videoTitle = videoEvents[videoEvents.length - 1]?.message.startsWith('Exporting')
+    ? 'Exporting Video...'
+    : 'Generating Video...';
 
   if (!currentJob) {
     return (
@@ -114,7 +126,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
           <h2 className="text-2xl font-bold text-base-50 tracking-tight line-clamp-1">Studio: {currentJob.topic}</h2>
           <div className="flex items-center gap-2.5 shrink-0">
-            <span className="px-2.5 py-1 rounded-lg bg-accent-glow text-accent-400 text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5 border border-accent-500/20">
+            <span className="px-2.5 py-1 rounded-lg bg-accent-glow text-accent-400 text-label font-semibold uppercase tracking-wider flex items-center gap-1.5 border border-accent-500/20">
               {currentJob?.status === 'completed' ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
               {currentJob?.status || 'Draft'}
             </span>
@@ -133,7 +145,6 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
         <div className="flex gap-2 text-sm font-medium overflow-x-auto pb-2 border-b border-white/4">
           <TabButton<TabState> id="blog" icon={<FileText className="w-4 h-4" />} label="Blog" activeTab={activeTab} setActiveTab={setActiveTab} />
           <TabButton<TabState> id="geval" icon={<Bot className="w-4 h-4" />} label="G-Eval Audit" activeTab={activeTab} setActiveTab={setActiveTab} />
-          <TabButton<TabState> id="analytics" icon={<BarChart3 className="w-4 h-4" />} label="Agent Analytics" activeTab={activeTab} setActiveTab={setActiveTab} />
           <TabButton<TabState> id="video" icon={<Film className="w-4 h-4" />} label="Video" activeTab={activeTab} setActiveTab={setActiveTab} />
           <TabButton<TabState> id="podcast" icon={<Podcast className="w-4 h-4" />} label="Podcast" activeTab={activeTab} setActiveTab={setActiveTab} />
           <TabButton<TabState> id="social" icon={<Share2 className="w-4 h-4" />} label="Social Media" activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -158,15 +169,43 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                 {/* Action Bar & Token Badge */}
                 {currentJob.final_content && (
                   <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-base-900/80 dark:bg-base-900/90 border border-base-750/80 backdrop-blur-xl shadow-lg">
-                    {/* Token Cost Badge */}
+                    {/* Measured token usage and cost, recorded per run by
+                        Agents_backend/usage.py and read off the job row. Never
+                        estimated client-side: the previous badge multiplied the
+                        word count by a magic constant and was 2x out on cost.
+                        Absent usage means "not measured", so it renders as such
+                        rather than as a zero or a guess. */}
                     <div className="flex items-center gap-3 text-xs font-semibold">
-                      <span className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-accent-500/10 text-accent-400 border border-accent-500/20 shadow-sm font-mono">
-                        <Zap className="w-3.5 h-3.5" />
-                        ~{Math.round((currentJob.final_content.split(/\s+/).length || 500) * 28 / 100) * 100} Tokens
-                      </span>
-                      <span className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 shadow-sm font-mono">
-                        💰 ~${((currentJob.final_content.split(/\s+/).length || 500) * 0.00008).toFixed(3)} USD
-                      </span>
+                      {currentJob.usage ? (
+                        <>
+                          <span
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-accent-500/10 text-accent-400 border border-accent-500/20 shadow-sm font-mono"
+                            title={`${currentJob.usage.total.calls} model calls · ${currentJob.usage.total.input_tokens.toLocaleString()} in / ${currentJob.usage.total.output_tokens.toLocaleString()} out`}
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                            {currentJob.usage.total.total_tokens.toLocaleString()} Tokens
+                          </span>
+                          <span
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 shadow-sm font-mono"
+                            title={currentJob.usage.priced
+                              ? 'Estimated from published list prices for the models actually called'
+                              : 'Partial: at least one model called has no published price, so the real cost is higher'}
+                          >
+                            {/* A trailing + when usage.priced is false — that flag
+                                means a called model had no known price, so this
+                                is a floor, not the total. */}
+                            💰 ${currentJob.usage.total.cost_usd.toFixed(4)}{currentJob.usage.priced ? '' : '+'} USD
+                          </span>
+                        </>
+                      ) : (
+                        <span
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 text-base-400 border border-white/8 shadow-sm font-mono"
+                          title="This job finished before usage metering existed, or never completed."
+                        >
+                          <Zap className="w-3.5 h-3.5" />
+                          Usage not recorded
+                        </span>
+                      )}
                     </div>
 
                     {/* Action Controls */}
@@ -185,7 +224,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
 
                       <button
                         onClick={() => {
-                          navigator.clipboard.writeText(isEditing ? editedContent : (currentJob.final_content || editedContent));
+                          navigator.clipboard.writeText(editedContent);
                           setCopied(true);
                           setTimeout(() => setCopied(false), 2000);
                         }}
@@ -234,7 +273,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                       {/* Markdown Download */}
                       <button
                         onClick={() => {
-                          const rawText = isEditing ? editedContent : (currentJob.final_content || editedContent || '');
+                          const rawText = editedContent;
                           const resolvedText = resolveContentImageUrls(rawText, currentJob.id);
                           const filename = `${(currentJob.topic || 'blog').replace(/[^a-z0-9]/gi, '_')}.md`;
                           const blob = new Blob([resolvedText], { type: 'text/markdown;charset=utf-8' });
@@ -263,8 +302,8 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                     isEditing ? (
                       <div className="flex flex-col gap-3">
                         <div className="flex items-center justify-between text-xs text-slate-500 border-b pb-2">
-                          <span className="font-semibold text-slate-700">WYSIWYG Markdown Editor</span>
-                          <span>Live synchronization enabled</span>
+                          <span className="font-semibold text-slate-700">Markdown Editor</span>
+                          <span>Edits apply to preview, copy, and export — not saved to the server</span>
                         </div>
                         <textarea
                           value={editedContent}
@@ -275,7 +314,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                     ) : (
                       <div className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-a:text-accent-600 hover:prose-a:text-accent-500">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {resolveContentImageUrls(isEditing ? editedContent : (currentJob.final_content || editedContent), currentJob?.id)}
+                          {resolveContentImageUrls(editedContent, currentJob?.id)}
                         </ReactMarkdown>
                       </div>
                     )
@@ -310,13 +349,20 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
 
             {/* G-EVAL TAB */}
             {activeTab === 'geval' && (
-              <div>
+              <div className="space-y-6">
+                {/* Always mounted: QA can be re-run on a finished blog even
+                    when the G-Eval pass never produced scores. */}
+                <QAAuditSection
+                  currentJob={currentJob}
+                  isRunning={!!triggering['qa'] || isTaskRunning('qa_agent')}
+                  onRun={() => handleTrigger('qa')}
+                />
                 {currentJob.geval_scores ? (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
                     {/* Left Side: Score card and SVG Radar Chart */}
                     <div className="lg:col-span-1 glass-panel p-6 rounded-2xl flex flex-col items-center border border-white/6 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
-                      <h3 className="text-lg font-bold text-base-50 mb-1 tracking-wide uppercase text-[11px] text-base-400">Weighted Quality Grade</h3>
+                      <h3 className="font-bold text-base-50 mb-1 tracking-wide uppercase text-label text-base-400">Weighted Quality Grade</h3>
 
                       {/* Animated Score Ring */}
                       <div className="my-4">
@@ -333,7 +379,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                             >
                               {currentJob.geval_scores.overall_score}
                             </motion.span>
-                            <span className="text-[10px] text-base-500 uppercase tracking-widest font-semibold mt-0.5">out of 5</span>
+                            <span className="text-label text-base-500 uppercase tracking-widest font-semibold mt-0.5">out of 5</span>
                           </div>
                         </div>
                       </div>
@@ -428,112 +474,6 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
               </div>
             )}
 
-            {/* AGENT ANALYTICS TAB */}
-            {activeTab === 'analytics' && (
-              <div className="space-y-8 fade-in">
-                {/* Metrics Highlights Header */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Est. Tokens</span>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-amber-400">
-                        ~{analytics.totalTokens.toLocaleString()}
-                      </span>
-                      <span className="text-xs text-slate-500 font-medium">tokens</span>
-                    </div>
-                  </div>
-
-                  <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Estimated Cost</span>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-emerald-400">
-                        ~${analytics.totalCost.toFixed(3)}
-                      </span>
-                      <span className="text-xs text-slate-500 font-medium">USD</span>
-                    </div>
-                  </div>
-
-                  <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Graph Agents</span>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-accent-400">{analytics.activeAgentCount}</span>
-                      <span className="text-xs text-slate-500 font-medium">/ {analytics.nodes.length} nodes active</span>
-                    </div>
-                  </div>
-
-                  <div className="glass-panel p-5 rounded-2xl border border-white/6 flex flex-col justify-between">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Parallel Threads</span>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-purple-400">{analytics.numSections}</span>
-                      <span className="text-xs text-slate-500 font-medium">fan-out workers</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Multi-Agent Architecture Table */}
-                <div className="glass-panel p-6 rounded-2xl border border-white/6 shadow-xl">
-                  <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/6">
-                    <div>
-                      <h3 className="text-lg font-bold text-base-50 flex items-center gap-2">
-                        <Layers className="w-5 h-5 text-accent-400" />
-                        Multi-Agent Execution Matrix
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-1">Real-time model mapping, role descriptions, dynamic cost tracking, and execution status across graph nodes.</p>
-                    </div>
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-accent-500/10 text-accent-400 border border-accent-500/20">
-                      LangGraph Directed Acyclic Graph (DAG)
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-white/10 text-slate-400 uppercase tracking-wider">
-                          <th className="py-3 px-4">Agent Node</th>
-                          <th className="py-3 px-4">Model / Provider</th>
-                          <th className="py-3 px-4">Role & Logic</th>
-                          <th className="py-3 px-4">Est. Cost</th>
-                          <th className="py-3 px-4">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/4 text-slate-300">
-                        {analytics.nodes.map((node) => {
-                          const isSkipped = node.status === 'Skipped';
-                          const isRunning = node.status === 'Running';
-                          return (
-                            <tr key={node.id} className={`hover:bg-white/2 transition-colors ${isSkipped ? 'opacity-50' : ''}`}>
-                              <td className="py-3 px-4 font-semibold text-base-50 flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${isSkipped ? 'bg-slate-600' : node.color}`}></span>
-                                <span className={isSkipped ? 'text-slate-400 line-through decoration-slate-600' : 'text-base-50'}>{node.name}</span>
-                              </td>
-                              <td className={`py-3 px-4 font-mono ${isSkipped ? 'text-slate-500' : node.textColor}`}>{node.model}</td>
-                              <td className="py-3 px-4 text-slate-400">{node.role}</td>
-                              <td className={`py-3 px-4 font-mono ${node.cost > 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
-                                ${node.cost.toFixed(3)}
-                              </td>
-                              <td className="py-3 px-4">
-                                {isRunning ? (
-                                  <span className="text-amber-400 font-semibold animate-pulse flex items-center gap-1">
-                                    <RefreshCw className="w-3 h-3 animate-spin" /> Running...
-                                  </span>
-                                ) : isSkipped ? (
-                                  <span className="text-slate-500 font-medium italic">Skipped</span>
-                                ) : node.status.startsWith('Passed') || node.status === 'Approved' ? (
-                                  <span className="text-emerald-400 font-semibold">{node.status}</span>
-                                ) : (
-                                  <span className="text-slate-400 font-medium">{node.status}</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* VIDEO TAB */}
             {activeTab === 'video' && (
               <div>
@@ -551,7 +491,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                     </div>
                   </div>
                 ) : isTaskRunning('video') ? (
-                  <LoadingState title="Generating Video..." description="Our AI is crafting a storyboard, generating voiceovers, and compiling your video." agentEvents={getCurrentRunEvents('video')} />
+                  <LoadingState title={videoTitle} description="Our AI is crafting a storyboard, generating voiceovers, and compiling your video." agentEvents={videoEvents} />
                 ) : (
                   <EmptyState
                     icon={<Film className="w-12 h-12" />}
@@ -671,7 +611,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                               />
                               <div className="absolute inset-0 bg-gradient-to-t from-base-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-between p-4">
-                                <span className="text-[11px] font-mono font-semibold text-white/90 truncate max-w-[200px]">
+                                <span className="text-xs font-mono font-semibold text-white/90 truncate max-w-[200px]">
                                   {filename}
                                 </span>
                                 <a

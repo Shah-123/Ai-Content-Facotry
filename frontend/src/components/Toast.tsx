@@ -105,7 +105,7 @@ export function Toasts() {
               className={`glass-panel flex items-start gap-3 rounded-xl border ${ring} ${tint} p-3 shadow-xl backdrop-blur-md`}
             >
               <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${fg}`} aria-hidden="true" />
-              <p className="flex-1 text-[13px] leading-relaxed text-base-100 break-words">
+              <p className="flex-1 text-sm leading-relaxed text-base-100 break-words">
                 {item.message}
               </p>
               <button

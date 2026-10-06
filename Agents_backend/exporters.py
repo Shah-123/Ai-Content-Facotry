@@ -8,19 +8,36 @@ import html as _html
 import base64
 import logging
 import markdown
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterator, List, Optional, Tuple
 
 logger = logging.getLogger("blog_pipeline")
 
+# A formatted run of text: the literal characters plus the marks that apply to
+# them (bold / italic / code, or a link url).
+Span = Tuple[str, dict]
+
+_MD_EXTENSIONS = ["tables", "fenced_code", "toc"]
+
+
+def _render_markdown(markdown_content: str) -> str:
+    """The single Markdown -> HTML conversion every exporter is built on.
+
+    HTML, DOCX and PDF all start from this string, so a construct that renders
+    in one format renders in all three.
+    """
+    return markdown.markdown(markdown_content, extensions=_MD_EXTENSIONS)
+
 
 # ---------------------------------------------------------------------------
 # Inline Markdown parsing (shared by the DOCX and PDF renderers)
 # ---------------------------------------------------------------------------
-# The block structure (headings, lists, tables, images) is parsed line-by-line
-# below. This handles the INLINE spans within a line — bold / italic / code /
-# links — which the exporters previously stripped, flattening all formatting.
-# One tokenizer, two thin renderers (reportlab mini-HTML + python-docx runs).
+# The block structure (headings, lists, tables, images) comes from the HTML
+# walker further down. This handles the INLINE spans within a line — bold /
+# italic / code / links — which the exporters previously stripped, flattening
+# all formatting. One tokenizer, two thin renderers (reportlab mini-HTML +
+# python-docx runs).
 
 _INLINE_RE = re.compile(
     r"\*\*(?P<bold>.+?)\*\*"                       # **bold**
@@ -30,7 +47,7 @@ _INLINE_RE = re.compile(
 )
 
 
-def _iter_inline(text: str) -> Iterator[Tuple[str, dict]]:
+def _iter_inline(text: str) -> Iterator[Span]:
     """Yield (chunk, fmt) spans, where fmt flags bold/italic/code or carries a url."""
     pos = 0
     for m in _INLINE_RE.finditer(text):
@@ -49,11 +66,39 @@ def _iter_inline(text: str) -> Iterator[Tuple[str, dict]]:
         yield text[pos:], {}
 
 
-def _md_inline_to_rl(text: str) -> str:
-    """Convert inline Markdown to reportlab's mini-HTML markup (<b>/<i>/<a>/<font>)."""
+def _as_spans(value) -> Iterator[Span]:
+    """Accept either raw Markdown text or spans already parsed by the HTML walker."""
+    return _iter_inline(value) if isinstance(value, str) else iter(value)
+
+
+# reportlab's built-in Helvetica is WinAnsi (cp1252) only, so anything outside
+# that set draws as a black box. Fold the typographic characters the writing
+# agents actually emit, then let cp1252 catch whatever is left.
+_PDF_CHAR_MAP = str.maketrans({
+    "‑": "-",    # non-breaking hyphen — by far the most common offender
+    "­": "-",    # soft hyphen
+    "−": "-",    # minus sign
+    " ": " ",    # non-breaking space
+    "​": "",     # zero-width space
+    "→": "->",
+    "←": "<-",
+    "↔": "<->",
+    "⇒": "=>",
+    "✓": "v",
+    "✗": "x",
+})
+
+
+def _pdf_safe(text: str) -> str:
+    """Keep text inside the glyph set Helvetica can actually draw."""
+    return text.translate(_PDF_CHAR_MAP).encode("cp1252", "replace").decode("cp1252")
+
+
+def _md_inline_to_rl(text) -> str:
+    """Convert inline Markdown (or parsed spans) to reportlab's mini-HTML markup."""
     out = []
-    for chunk, fmt in _iter_inline(text):
-        seg = _html.escape(chunk, quote=False)
+    for chunk, fmt in _as_spans(text):
+        seg = _html.escape(_pdf_safe(chunk), quote=False)
         if fmt.get("bold"):
             seg = f"<b>{seg}</b>"
         if fmt.get("italic"):
@@ -67,11 +112,11 @@ def _md_inline_to_rl(text: str) -> str:
     return "".join(out)
 
 
-def _add_inline_runs(paragraph, text: str):
-    """Append python-docx runs to `paragraph`, preserving inline Markdown formatting."""
+def _add_inline_runs(paragraph, text):
+    """Append python-docx runs to `paragraph`, preserving inline formatting."""
     from docx.shared import RGBColor
 
-    for chunk, fmt in _iter_inline(text):
+    for chunk, fmt in _as_spans(text):
         run = paragraph.add_run(chunk)
         if fmt.get("bold"):
             run.bold = True
@@ -88,21 +133,223 @@ def _add_inline_runs(paragraph, text: str):
     return paragraph
 
 
+# ---------------------------------------------------------------------------
+# Block structure
+# ---------------------------------------------------------------------------
+# DOCX and PDF used to re-implement a Markdown block parser line by line, and it
+# quietly disagreed with the HTML export: escaped brackets in an image's alt
+# text (which the image agent always writes), `![alt](<src>)`, multi-line
+# <figure> blocks and fenced code all fell straight through it — dropping the
+# pictures. Both renderers now walk the SAME HTML the markdown library
+# produces, so all three formats agree by construction.
+#
+# Blocks are flat tuples:
+#   ("h", level, spans)   ("p", spans)   ("quote", spans)   ("hr",)
+#   ("li", ordered, depth, index, spans)
+#   ("img", src, alt)     ("code", text) ("table", rows, has_header)
+
+_INLINE_TAGS = {"strong": "bold", "b": "bold", "em": "italic", "i": "italic", "code": "code"}
+_HEADING_TAGS = {f"h{n}": n for n in range(1, 7)}
+
+
+class _BlockWalker(HTMLParser):
+    """Flatten markdown-rendered HTML into the block list DOCX and PDF render."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.blocks: List[tuple] = []
+        self._spans: List[Span] = []
+        self._fmt_stack: List[dict] = []
+        self._open: Optional[tuple] = None
+        self._lists: List[str] = []
+        self._counts: List[int] = []
+        self._quote = 0
+        self._pre: Optional[List[str]] = None
+        self._table: Optional[list] = None
+        self._row: Optional[list] = None
+        self._cell: Optional[List[Span]] = None
+        self._saw_th = False
+
+    @property
+    def _fmt(self) -> dict:
+        merged: dict = {}
+        for layer in self._fmt_stack:
+            merged.update(layer)
+        return merged
+
+    def _start(self, *header):
+        self._flush()
+        self._open = header
+
+    def _flush(self):
+        if self._open and any(chunk.strip() for chunk, _ in self._spans):
+            self.blocks.append((*self._open, self._spans))
+        self._open, self._spans = None, []
+
+    def handle_starttag(self, tag, attrs):
+        attr = dict(attrs)
+
+        if tag == "img":
+            src = (attr.get("src") or "").strip()
+            if src:
+                resume = self._open
+                self._flush()
+                self.blocks.append(("img", src, attr.get("alt") or ""))
+                self._open = resume  # the paragraph the image sat inside continues
+            return
+        if tag in _INLINE_TAGS:
+            if tag == "code" and self._pre is not None:
+                return  # <pre><code> is one code block, not an inline span
+            self._fmt_stack.append({_INLINE_TAGS[tag]: True})
+            return
+        if tag == "a":
+            self._fmt_stack.append({"url": attr.get("href", "")})
+            return
+        if tag == "br":
+            self._spans.append(("\n", {}))
+            return
+        if tag in _HEADING_TAGS:
+            self._start("h", _HEADING_TAGS[tag])
+            return
+        if tag == "p":
+            if self._open and self._open[0] == "li":
+                return  # loose list item: absorb the <p>, keep the bullet
+            self._start("quote" if self._quote else "p")
+            return
+        if tag == "figcaption":
+            self._fmt_stack.append({"italic": True})
+            self._start("p")
+            return
+        if tag in ("ul", "ol"):
+            self._flush()
+            self._lists.append(tag)
+            self._counts.append(0)
+            return
+        if tag == "li":
+            if self._counts:
+                self._counts[-1] += 1
+            self._start(
+                "li",
+                self._lists[-1:] == ["ol"],
+                max(len(self._lists) - 1, 0),
+                self._counts[-1] if self._counts else 1,
+            )
+            return
+        if tag == "blockquote":
+            self._flush()
+            self._quote += 1
+            return
+        if tag == "pre":
+            self._flush()
+            self._pre = []
+            return
+        if tag == "table":
+            self._flush()
+            self._table, self._saw_th = [], False
+            return
+        if tag == "tr":
+            self._row = []
+            return
+        if tag in ("td", "th"):
+            self._cell = []
+            self._saw_th = self._saw_th or tag == "th"
+            return
+        if tag == "hr":
+            self._flush()
+            self.blocks.append(("hr",))
+            return
+
+    def handle_endtag(self, tag):
+        if tag in _INLINE_TAGS or tag == "a":
+            if tag == "code" and self._pre is not None:
+                return
+            if self._fmt_stack:
+                self._fmt_stack.pop()
+            return
+        if tag == "figcaption":
+            self._flush()
+            if self._fmt_stack:
+                self._fmt_stack.pop()
+            return
+        if tag == "p":
+            if not (self._open and self._open[0] == "li"):
+                self._flush()
+            return
+        if tag in _HEADING_TAGS or tag == "li":
+            self._flush()
+            return
+        if tag in ("ul", "ol"):
+            self._flush()
+            if self._lists:
+                self._lists.pop()
+            if self._counts:
+                self._counts.pop()
+            return
+        if tag == "blockquote":
+            self._flush()
+            self._quote = max(self._quote - 1, 0)
+            return
+        if tag == "pre":
+            text = "".join(self._pre or []).strip("\n")
+            self._pre = None
+            if text.strip():
+                self.blocks.append(("code", text))
+            return
+        if tag in ("td", "th"):
+            if self._row is not None:
+                self._row.append(self._cell or [])
+            self._cell = None
+            return
+        if tag == "tr":
+            if self._table is not None and self._row:
+                self._table.append(self._row)
+            self._row = None
+            return
+        if tag == "table":
+            rows, has_header = self._table or [], self._saw_th
+            self._table, self._row, self._cell = None, None, None
+            if rows:
+                self.blocks.append(("table", rows, has_header))
+            return
+
+    def handle_data(self, data):
+        if self._pre is not None:
+            self._pre.append(data)
+            return
+        if self._cell is not None:
+            self._cell.append((data, self._fmt))
+            return
+        if self._open is None:
+            if not data.strip():
+                return
+            self._start("p")  # bare text from a raw-HTML passthrough block
+        self._spans.append((data, self._fmt))
+
+
+def _md_blocks(markdown_content: str) -> List[tuple]:
+    """Parse Markdown into the flat block list the DOCX and PDF renderers walk."""
+    walker = _BlockWalker()
+    walker.feed(_render_markdown(markdown_content))
+    walker.close()
+    walker._flush()
+    return walker.blocks
+
+
 def _find_image_file(img_src: str, job_dir: Optional[Path] = None) -> Optional[Path]:
     """Helper to locate an image file on disk given relative or absolute paths."""
-    clean_src = img_src.strip().lstrip('./')
-    
+    clean_src = re.sub(r"^\./+", "", img_src.strip())
+
     # Check direct path
     p1 = Path(clean_src)
     if p1.exists() and p1.is_file():
         return p1
-        
+
     if job_dir and job_dir.exists():
         # Check inside job_dir/assets/images/...
         p2 = job_dir / clean_src
         if p2.exists() and p2.is_file():
             return p2
-            
+
         p3 = job_dir / "assets" / "images" / Path(clean_src).name
         if p3.exists() and p3.is_file():
             return p3
@@ -274,7 +521,7 @@ def export_to_docx(title: str, markdown_content: str, output_path: Path, job_dir
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = docx.Document()
-    
+
     # Page Margins
     for section in doc.sections:
         section.top_margin = Inches(1)
@@ -287,95 +534,79 @@ def export_to_docx(title: str, markdown_content: str, output_path: Path, job_dir
     h1 = doc.add_heading(clean_title, level=0)
     h1.alignment = WD_ALIGN_PARAGRAPH.LEFT
     for run in h1.runs:
-        run.font.color.rgb = RGBColor(217, 119, 6) # Accent Gold
+        run.font.color.rgb = RGBColor(217, 119, 6)  # Accent Gold
         run.font.size = Pt(24)
 
-    lines = markdown_content.split('\n')
-    in_table = False
-    table_lines: List[str] = []
+    lookup_dir = job_dir or output_path.parent.parent
+    title_seen = False
 
-    def flush_table(t_lines: List[str]):
-        if not t_lines:
+    def add_picture(src: str):
+        img_file = _find_image_file(src, lookup_dir)
+        if not img_file:
+            logger.warning("DOCX export: no file on disk for image %r", src)
             return
-        rows_data = []
-        for tl in t_lines:
-            if '|' in tl and not re.match(r'^\s*\|?\s*[-:]+[-|\s:]*$', tl):
-                cells = [c.strip() for c in tl.strip('|').split('|')]
-                rows_data.append(cells)
-        
-        if rows_data:
-            num_cols = max(len(r) for r in rows_data)
-            table = doc.add_table(rows=len(rows_data), cols=num_cols)
-            table.style = 'Table Grid'
-            for r_idx, row in enumerate(rows_data):
-                for c_idx, val in enumerate(row):
-                    if c_idx < num_cols:
-                        cell = table.cell(r_idx, c_idx)
-                        cell.text = val
-                        if r_idx == 0:
-                            for p in cell.paragraphs:
-                                for run in p.runs:
-                                    run.font.bold = True
-            doc.add_paragraph() # Spacing
+        try:
+            doc.add_picture(str(img_file), width=Inches(5.5))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        except Exception as exc:
+            logger.warning("Could not embed picture in DOCX %s: %s", img_file, exc)
 
-    for line in lines:
-        stripped = line.strip()
+    for block in _md_blocks(markdown_content):
+        kind = block[0]
 
-        # Handle Markdown Tables
-        if '|' in stripped:
-            in_table = True
-            table_lines.append(stripped)
-            continue
-        elif in_table:
-            in_table = False
-            flush_table(table_lines)
-            table_lines = []
+        if kind == "img":
+            add_picture(block[1])
 
-        if not stripped:
-            continue
+        elif kind == "h":
+            level, spans = block[1], block[2]
+            if level == 1 and not title_seen:
+                title_seen = True  # the article's own H1 — already rendered as the title
+                continue
+            p = doc.add_heading(level=min(max(level - 1, 1), 4))
+            _add_inline_runs(p, spans)
+            if level == 2:
+                for run in p.runs:
+                    run.font.color.rgb = RGBColor(31, 41, 55)
 
-        # Check for Markdown Image syntax: ![alt](src) or HTML <img src="...">
-        img_match = re.search(r'!\[([^\]]*)\]\(([^\)]+)\)', stripped) or re.search(r'<img[^>]+src=["\']([^"\']+)["\']', stripped)
-        if img_match:
-            img_src = img_match.group(2) if '![' in stripped else img_match.group(1)
-            img_file = _find_image_file(img_src, job_dir or output_path.parent.parent)
-            if img_file:
-                try:
-                    doc.add_paragraph()
-                    doc.add_picture(str(img_file), width=Inches(5.5))
-                    doc.add_paragraph()
-                    continue
-                except Exception as e:
-                    logger.warning(f"Could not embed picture in DOCX {img_file}: {e}")
+        elif kind == "li":
+            ordered, depth, spans = block[1], block[2], block[4]
+            p = doc.add_paragraph(style="List Number" if ordered else "List Bullet")
+            if depth:
+                p.paragraph_format.left_indent = Inches(0.25 * (depth + 1))
+            _add_inline_runs(p, spans)
 
-        # Headings
-        if stripped.startswith('# '):
-            continue # Already added as title
-        elif stripped.startswith('## '):
-            p = doc.add_heading(stripped[3:].strip(), level=1)
-            for run in p.runs:
-                run.font.color.rgb = RGBColor(31, 41, 55)
-        elif stripped.startswith('### '):
-            p = doc.add_heading(stripped[4:].strip(), level=2)
-        elif stripped.startswith('#### '):
-            p = doc.add_heading(stripped[5:].strip(), level=3)
-        elif stripped.startswith('- ') or stripped.startswith('* '):
-            p = doc.add_paragraph(style='List Bullet')
-            _add_inline_runs(p, stripped[2:].strip())
-        elif re.match(r'^\d+\.\s', stripped):
-            content = re.sub(r'^\d+\.\s', '', stripped)
-            p = doc.add_paragraph(style='List Number')
-            _add_inline_runs(p, content)
-        elif stripped.startswith('> '):
+        elif kind == "quote":
             p = doc.add_paragraph()
-            _add_inline_runs(p, stripped[2:].strip())
+            _add_inline_runs(p, block[1])
             p.paragraph_format.left_indent = Inches(0.5)
-        else:
-            p = doc.add_paragraph()
-            _add_inline_runs(p, stripped)
+            for run in p.runs:
+                run.italic = True
 
-    if in_table and table_lines:
-        flush_table(table_lines)
+        elif kind == "code":
+            p = doc.add_paragraph()
+            run = p.add_run(block[1])
+            run.font.name = "Courier New"
+            run.font.size = Pt(9)
+
+        elif kind == "table":
+            rows, has_header = block[1], block[2]
+            table = doc.add_table(rows=len(rows), cols=max(len(r) for r in rows))
+            table.style = "Table Grid"
+            for r_idx, row in enumerate(rows):
+                for c_idx, cell_spans in enumerate(row):
+                    cell_paragraph = table.cell(r_idx, c_idx).paragraphs[0]
+                    _add_inline_runs(cell_paragraph, cell_spans)
+                    if r_idx == 0 and has_header:
+                        for run in cell_paragraph.runs:
+                            run.font.bold = True
+            doc.add_paragraph()  # Spacing
+
+        elif kind == "hr":
+            rule = doc.add_paragraph("─" * 40)
+            rule.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        else:  # "p"
+            _add_inline_runs(doc.add_paragraph(), block[1])
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
@@ -386,16 +617,23 @@ def export_to_pdf(title: str, markdown_content: str, output_path: Path, job_dir:
     """Convert Markdown content to a PDF document using ReportLab with picture support."""
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Preformatted, Spacer, Table, TableStyle,
+        HRFlowable, Image as RLImage,
+    )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    margin = 54
+    frame_width = letter[0] - 2 * margin
 
     doc = SimpleDocTemplate(
         str(output_path),
         pagesize=letter,
-        rightMargin=54,
-        leftMargin=54,
-        topMargin=54,
-        bottomMargin=54
+        rightMargin=margin,
+        leftMargin=margin,
+        topMargin=margin,
+        bottomMargin=margin
     )
 
     styles = getSampleStyleSheet()
@@ -409,24 +647,6 @@ def export_to_pdf(title: str, markdown_content: str, output_path: Path, job_dir:
         textColor=colors.HexColor('#d97706'),
         spaceAfter=15
     )
-    h2_style = ParagraphStyle(
-        'DocH2',
-        parent=styles['Heading2'],
-        fontSize=15,
-        leading=19,
-        textColor=colors.HexColor('#1f2937'),
-        spaceBefore=14,
-        spaceAfter=8
-    )
-    h3_style = ParagraphStyle(
-        'DocH3',
-        parent=styles['Heading3'],
-        fontSize=12,
-        leading=16,
-        textColor=colors.HexColor('#374151'),
-        spaceBefore=10,
-        spaceAfter=6
-    )
     body_style = ParagraphStyle(
         'DocBody',
         parent=styles['Normal'],
@@ -435,40 +655,102 @@ def export_to_pdf(title: str, markdown_content: str, output_path: Path, job_dir:
         textColor=colors.HexColor('#1f2937'),
         spaceAfter=8
     )
-    bullet_style = ParagraphStyle(
-        'DocBullet',
-        parent=body_style,
-        leftIndent=15,
-        firstLineIndent=-10,
-        spaceAfter=4
+    heading_styles = {
+        2: ParagraphStyle('DocH2', parent=styles['Heading2'], fontSize=15, leading=19,
+                          textColor=colors.HexColor('#1f2937'), spaceBefore=14, spaceAfter=8),
+        3: ParagraphStyle('DocH3', parent=styles['Heading3'], fontSize=12, leading=16,
+                          textColor=colors.HexColor('#374151'), spaceBefore=10, spaceAfter=6),
+        4: ParagraphStyle('DocH4', parent=styles['Heading4'], fontSize=11, leading=15,
+                          textColor=colors.HexColor('#374151'), spaceBefore=8, spaceAfter=4),
+    }
+    bullet_styles = {
+        depth: ParagraphStyle(f'DocBullet{depth}', parent=body_style,
+                              leftIndent=15 + 18 * depth, firstLineIndent=-10, spaceAfter=4)
+        for depth in range(4)
+    }
+    quote_style = ParagraphStyle(
+        'DocQuote', parent=body_style, leftIndent=24, textColor=colors.HexColor('#475569'),
+        borderPadding=4
+    )
+    code_style = ParagraphStyle(
+        'DocCode', parent=styles['Code'], fontSize=8, leading=10,
+        backColor=colors.HexColor('#f1f5f9'), borderPadding=6
     )
 
     story = []
 
     # Title
     clean_title = (title or "Blog Post").strip()
-    story.append(Paragraph(clean_title, title_style))
+    story.append(Paragraph(_md_inline_to_rl(clean_title), title_style))
     story.append(Spacer(1, 10))
 
-    lines = markdown_content.split('\n')
-    in_table = False
-    table_lines: List[str] = []
+    lookup_dir = job_dir or output_path.parent.parent
+    title_seen = False
 
-    def flush_pdf_table(t_lines: List[str]):
-        if not t_lines:
+    def add_picture(src: str):
+        img_file = _find_image_file(src, lookup_dir)
+        if not img_file:
+            logger.warning("PDF export: no file on disk for image %r", src)
             return
-        rows_data = []
-        for tl in t_lines:
-            if '|' in tl and not re.match(r'^\s*\|?\s*[-:]+[-|\s:]*$', tl):
-                cells = [Paragraph(_md_inline_to_rl(c.strip()), body_style) for c in tl.strip('|').split('|')]
-                rows_data.append(cells)
-        
-        if rows_data:
-            t = Table(rows_data)
+        try:
+            natural_w, natural_h = ImageReader(str(img_file)).getSize()
+            # Scale to the text frame while preserving the aspect ratio — a fixed
+            # width x height stretched every square illustration into a letterbox.
+            width = min(float(frame_width), float(natural_w))
+            height = width * natural_h / natural_w
+            if height > 6.5 * 72:
+                height, width = 6.5 * 72, 6.5 * 72 * natural_w / natural_h
+            story.append(Spacer(1, 6))
+            story.append(RLImage(str(img_file), width=width, height=height))
+            story.append(Spacer(1, 6))
+        except Exception as exc:
+            logger.warning("Could not embed picture in PDF %s: %s", img_file, exc)
+
+    for block in _md_blocks(markdown_content):
+        kind = block[0]
+
+        if kind == "img":
+            add_picture(block[1])
+
+        elif kind == "h":
+            level, spans = block[1], block[2]
+            if level == 1 and not title_seen:
+                title_seen = True  # the article's own H1 — already rendered as the title
+                continue
+            style = heading_styles.get(level, heading_styles[4])
+            story.append(Paragraph(_md_inline_to_rl(spans), style))
+
+        elif kind == "li":
+            ordered, depth, index, spans = block[1], block[2], block[3], block[4]
+            marker = f"{index}." if ordered else "•"
+            story.append(Paragraph(
+                f"{marker} {_md_inline_to_rl(spans)}", bullet_styles[min(depth, 3)]
+            ))
+
+        elif kind == "quote":
+            story.append(Paragraph(f"<i>{_md_inline_to_rl(block[1])}</i>", quote_style))
+
+        elif kind == "code":
+            story.append(Preformatted(_pdf_safe(block[1]), code_style))
+            story.append(Spacer(1, 8))
+
+        elif kind == "table":
+            rows, has_header = block[1], block[2]
+            num_cols = max(len(r) for r in rows)
+            data = [
+                [Paragraph(_md_inline_to_rl(cell), body_style) for cell in row]
+                + [""] * (num_cols - len(row))
+                for row in rows
+            ]
+            # Fixed column widths: an auto-sized table with long cited link text
+            # used to run straight off the right edge of the page.
+            t = Table(data, colWidths=[frame_width / num_cols] * num_cols,
+                      repeatRows=1 if has_header else 0)
             t.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f1f5f9')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#0f172a')),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
@@ -477,50 +759,13 @@ def export_to_pdf(title: str, markdown_content: str, output_path: Path, job_dir:
             story.append(t)
             story.append(Spacer(1, 10))
 
-    for line in lines:
-        stripped = line.strip()
+        elif kind == "hr":
+            story.append(Spacer(1, 6))
+            story.append(HRFlowable(width="100%", color=colors.HexColor('#cbd5e1')))
+            story.append(Spacer(1, 6))
 
-        if '|' in stripped:
-            in_table = True
-            table_lines.append(stripped)
-            continue
-        elif in_table:
-            in_table = False
-            flush_pdf_table(table_lines)
-            table_lines = []
-
-        if not stripped:
-            continue
-
-        # Check for Markdown Image syntax
-        img_match = re.search(r'!\[([^\]]*)\]\(([^\)]+)\)', stripped) or re.search(r'<img[^>]+src=["\']([^"\']+)["\']', stripped)
-        if img_match:
-            img_src = img_match.group(2) if '![' in stripped else img_match.group(1)
-            img_file = _find_image_file(img_src, job_dir or output_path.parent.parent)
-            if img_file:
-                try:
-                    story.append(Spacer(1, 6))
-                    story.append(RLImage(str(img_file), width=5.5*72, height=3.5*72))
-                    story.append(Spacer(1, 6))
-                    continue
-                except Exception as e:
-                    logger.warning(f"Could not embed picture in PDF {img_file}: {e}")
-
-        if stripped.startswith('# '):
-            continue
-        elif stripped.startswith('## '):
-            story.append(Paragraph(stripped[3:].strip(), h2_style))
-        elif stripped.startswith('### '):
-            story.append(Paragraph(stripped[4:].strip(), h3_style))
-        elif stripped.startswith('- ') or stripped.startswith('* '):
-            story.append(Paragraph(f"• {_md_inline_to_rl(stripped[2:].strip())}", bullet_style))
-        elif re.match(r'^\d+\.\s', stripped):
-            story.append(Paragraph(_md_inline_to_rl(stripped), bullet_style))
-        else:
-            story.append(Paragraph(_md_inline_to_rl(stripped), body_style))
-
-    if in_table and table_lines:
-        flush_pdf_table(table_lines)
+        else:  # "p"
+            story.append(Paragraph(_md_inline_to_rl(block[1]), body_style))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.build(story)

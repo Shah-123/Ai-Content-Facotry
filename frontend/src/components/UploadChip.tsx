@@ -56,7 +56,7 @@ export function UploadChip({
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-medium truncate text-base-100">{displayName}</div>
-          <div className="text-[11px] text-base-500 truncate">
+          <div className="text-xs text-base-500 truncate">
             {isError && errorMessage}
             {isUploading && 'Parsing & extracting evidence...'}
             {status === 'ready' && result && (
@@ -89,7 +89,7 @@ export function UploadChip({
                 type="button"
                 onClick={() => onSourceModeChange(opt.id)}
                 title={opt.desc}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                   active
                     ? 'text-accent-400 bg-accent-500/10 border-accent-500/30'
                     : 'text-base-400 hover:text-base-200 border-white/6 hover:bg-white/3'

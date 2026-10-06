@@ -119,9 +119,11 @@ def worker_node(payload: dict) -> dict:
     evidence = [EvidenceItem(**e) for e in payload.get("evidence", [])]
     job_id   = payload.get("_job_id", "")
 
-    _emit(job_id, "writer", "working",
-          f"Writing section {task.id + 1}/{len(plan.tasks)}: {task.title}",
-          {"section": task.id + 1, "total": len(plan.tasks)})
+    # No per-worker "started" event: fanout() dispatches every section at once,
+    # so N of them landed in the same instant and the feed rendered them as
+    # sequential progress that jumped straight to N/N. Sections announce
+    # themselves when they finish instead — that is the only staggered,
+    # truthful signal a parallel fanout has.
     logger.info(f"✍️ Writing Section {task.id + 1}/{len(plan.tasks)}: {task.title} "
                 f"(Tone: {plan.tone}, Evidence: {len(evidence)} items)")
 
@@ -254,16 +256,17 @@ def worker_node(payload: dict) -> dict:
             section_md += "."
 
         logger.info(f"✅ Completed: {word_count} words")
-        _emit(job_id, "writer", "working",
-              f"Completed section {task.id + 1}: {task.title} ({word_count} words)",
-              {"section": task.id + 1, "words": word_count})
+        _emit(job_id, "writer", "completed",
+              f"Section {task.id + 1}/{len(plan.tasks)} done: {task.title} ({word_count} words)",
+              {"section": task.id + 1, "total": len(plan.tasks), "words": word_count})
 
     except Exception as e:
         import traceback
         logger.error(f"Error in section {task.title}: {e}")
         traceback.print_exc()
         section_md = f"## {task.title}\n\n[Error generating content: {str(e)}]"
-        _emit(job_id, "writer", "error", f"Failed section {task.id + 1}: {str(e)}")
+        _emit(job_id, "writer", "error", f"Failed section {task.id + 1}: {str(e)}",
+              {"section": task.id + 1, "total": len(plan.tasks)})
 
     return {"sections": [_make_section(task.id, section_md)]}
 

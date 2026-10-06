@@ -88,7 +88,7 @@ export function PodcastPlayer({ currentJob }: PodcastPlayerProps) {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <h2 className="text-2xl font-bold text-base-50 tracking-tight">Podcast Generation</h2>
-            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/25 px-2.5 py-1 rounded-full">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/25 px-2.5 py-1 rounded-full">
               <CheckCircle2 className="w-3 h-3" />
               Ready
             </span>
@@ -191,7 +191,7 @@ export function PodcastPlayer({ currentJob }: PodcastPlayerProps) {
             </div>
 
             {/* Time labels */}
-            <div className="flex justify-between text-[11px] font-mono text-base-500 mt-2 tabular-nums">
+            <div className="flex justify-between text-xs font-mono text-base-500 mt-2 tabular-nums">
               <span>{formatTime(currentTime)}</span>
               <span>{formatTime(duration)}</span>
             </div>
@@ -211,7 +211,7 @@ export function PodcastPlayer({ currentJob }: PodcastPlayerProps) {
         </div>
 
         {/* Host label */}
-        <p className="text-[11px] text-base-600 mt-5 truncate">{hostLabel}</p>
+        <p className="text-xs text-base-600 mt-5 truncate">{hostLabel}</p>
       </div>
 
       {/* ── Download button — inherits btn-primary which already themes ── */}

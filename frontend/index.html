@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a0a0c" />
-    <meta name="color-scheme" content="dark" />
+    <!-- Both, because useTheme can switch either way at runtime. Pinning this
+         to "dark" left the browser's own UI - scrollbars, form controls,
+         autofill - rendering dark over the light palette. -->
+    <meta name="color-scheme" content="dark light" />
     <title>AI Content Factory</title>
     <meta name="description" content="Multi-agent AI content generation platform powered by LangGraph. Generate blogs, podcasts, videos and social media content." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
