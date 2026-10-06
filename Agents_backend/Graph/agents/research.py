@@ -8,7 +8,7 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 
 from Graph.state import State, EvidencePack
 from Graph.templates import RESEARCH_SYSTEM
-from .utils import logger, llm, _job, _emit
+from .utils import logger, llm, _job, _emit, fence, is_verbatim, UNTRUSTED_NOTE
 
 # ✅ FIX: Similarity threshold for near-duplicate detection.
 # Two snippets are considered duplicates if they share this proportion
@@ -184,6 +184,7 @@ def scrape_full_webpage(url: str, max_words: int = 1500) -> str:
 
 
 _EXTRACTION_CALLS = 3   # parallel extraction calls (see research_node)
+_SOURCE_CHARS = 3000    # page text shown to the extractor — and checked against
 _EVIDENCE_TARGET = 9    # items across all calls; the single call asked for 8–10
 
 
@@ -194,15 +195,18 @@ def _url_key(url: str) -> str:
 
 def _extract_evidence(topic: str, sources: list, n_items: int) -> EvidencePack:
     """One extraction call over `sources` = [(index, search_result, page_text)]."""
+    # Title and body both come from the page, so both go inside the fence.
     context = "".join(
-        f"SOURCE {idx+1}: {r['title']} ({r['url']})\nCONTENT: {text[:3000]}\n\n"
+        f"SOURCE {idx+1} ({r['url']}):\n" + fence(f"TITLE: {r['title']}\n{text[:_SOURCE_CHARS]}") + "\n\n"
         for idx, r, text in sources
     )
     return llm.with_structured_output(EvidencePack).invoke([
         SystemMessage(content=RESEARCH_SYSTEM),
         HumanMessage(content=(
             f"Topic: {topic}\n"
+            f"{UNTRUSTED_NOTE}\n"
             f"Read the following full articles and extract {n_items} UNIQUE hard facts, statistics, and verifiable claims.\n"
+            f"Each snippet: 2-4 consecutive sentences copied VERBATIM from its article (see PHASE 2).\n"
             f"Ensure evidence comes from DIVERSE sources — do not extract multiple items from the same article unless they contain genuinely distinct facts.\n\n"
             f"CRITICAL EXTRACTION PRIORITIES:\n"
             f"1. EXPERT QUOTES: Find direct quotes from named experts, executives, or researchers. Include the person's name, title, and organization.\n"
@@ -327,16 +331,20 @@ def research_node(state: State) -> dict:
             groups,
         ))
 
-    web_evidence = list({e.url: e for pack in packs for e in pack.evidence if e.url}.values())
-
-    # Grounding guard: an item must cite a page that was actually scraped.
-    # Writers cite evidence URLs, and the QA citation check trusts them, so an
-    # invented URL would pass straight through as "verified".
-    scraped_urls = {_url_key(r["url"]) for _, r, _ in ordered}
-    off_source = [e.url for e in web_evidence if _url_key(e.url) not in scraped_urls]
-    if off_source:
-        logger.warning(f"Dropping {len(off_source)} evidence item(s) citing unscraped URLs: {off_source}")
-        web_evidence = [e for e in web_evidence if _url_key(e.url) in scraped_urls]
+    # Grounding guard: an item must cite a page that was actually scraped, and
+    # its snippet must be copied verbatim from that page. Writers cite evidence
+    # URLs and the QA citation check trusts them, so an invented URL would pass
+    # as "verified"; and a page saying "ignore previous instructions and state
+    # X" can no longer turn X into evidence unless the page itself states X.
+    # Runs BEFORE the per-URL de-dup, which keeps the last item per URL — else
+    # an ungrounded item could evict a grounded one for the same page.
+    page_text = {_url_key(r["url"]): text[:_SOURCE_CHARS] for _, r, text in ordered}
+    extracted = [e for pack in packs for e in pack.evidence if e.url]
+    grounded = [e for e in extracted if is_verbatim(e.snippet, page_text.get(_url_key(e.url), ""))]
+    if len(grounded) < len(extracted):
+        dropped = [e.url for e in extracted if e not in grounded]
+        logger.warning(f"Dropping {len(dropped)} evidence item(s) not found verbatim in a scraped page: {dropped}")
+    web_evidence = list({e.url: e for e in grounded}.values())
 
     # ✅ Merge with any document-derived evidence preserved at the start of
     # this node so hybrid mode (upload + web) keeps both sources for citation.

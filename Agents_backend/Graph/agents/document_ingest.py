@@ -33,7 +33,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from Graph.state import EvidenceItem, EvidencePack, State
 from Graph.templates import RESEARCH_SYSTEM
 
-from .utils import _emit, _job, llm, logger
+from .utils import _emit, _job, llm, logger, fence, is_verbatim, UNTRUSTED_NOTE
 
 
 # ---------------------------------------------------------------------------
@@ -256,11 +256,13 @@ def _extract_one_chunk(chunk: Chunk, filename: str, topic_hint: str) -> List[Evi
 
     prompt = (
         f"Source document: {filename} ({span})\n"
-        f"Working topic: {topic_hint or 'N/A'}\n\n"
+        f"Working topic: {topic_hint or 'N/A'}\n"
+        f"{UNTRUSTED_NOTE}\n\n"
         f"Read the following excerpt and extract 3-6 hard, verifiable facts, "
         f"statistics, or specific claims that a writer could cite verbatim. "
-        f"Each fact must be self-contained and quotable — no opinions or filler.\n\n"
-        f"EXCERPT:\n{chunk.text}"
+        f"Each snippet: 2-4 consecutive sentences copied VERBATIM from the "
+        f"excerpt (see PHASE 2) — no opinions or filler.\n\n"
+        f"EXCERPT:\n{fence(chunk.text)}"
     )
 
     try:
@@ -277,6 +279,12 @@ def _extract_one_chunk(chunk: Chunk, filename: str, topic_hint: str) -> List[Evi
     cite_url = f"file://{filename}#p{chunk.page_start}"
     items: List[EvidenceItem] = []
     for ev in pack.evidence:
+        # Same grounding rule as web research: only text the document itself
+        # contains becomes evidence, so an instruction planted in an uploaded
+        # file can't mint new "facts".
+        if not is_verbatim(ev.snippet, chunk.text):
+            logger.warning(f"Dropping doc evidence not found verbatim in {filename} {span}: {ev.snippet[:80]!r}")
+            continue
         items.append(
             EvidenceItem(
                 title=ev.title or f"{filename} ({span})",

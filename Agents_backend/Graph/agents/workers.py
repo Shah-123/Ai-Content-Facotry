@@ -4,7 +4,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from Graph.state import State, Plan, Task, EvidenceItem
 from Graph.templates import WORKER_SYSTEM, SEO_METADATA_SYSTEM
-from .utils import logger, llm_quality, llm, get_llm, _job, _emit
+from .utils import logger, llm_quality, llm, get_llm, _job, _emit, fence, UNTRUSTED_NOTE
 
 
 def _make_section(task_id: int, content: str) -> tuple:
@@ -129,10 +129,11 @@ def worker_node(payload: dict) -> dict:
 
     try:
         bullets_text   = "\n- " + "\n- ".join(task.bullets)
-        evidence_text  = "\n".join(
+        # Snippets are verbatim page text, so they are fenced as untrusted.
+        evidence_text  = UNTRUSTED_NOTE + "\n" + fence("\n".join(
             f"- [{e.title}]({e.url}) ({e.published_at or 'Unknown Date'})\n  Content: {e.snippet[:300]}"
             for e in evidence[:15]
-        )
+        ))
 
         section_keywords = task.tags[:3]
         keywords_str     = ", ".join(section_keywords) if section_keywords else "general topic"

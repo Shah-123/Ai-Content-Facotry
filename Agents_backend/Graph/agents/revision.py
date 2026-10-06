@@ -15,7 +15,7 @@ After 2 failed revisions, the pipeline proceeds with the DRAFT flag.
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from Graph.state import State
-from .utils import logger, _job, _emit
+from .utils import logger, _job, _emit, fence, UNTRUSTED_NOTE
 
 # Maximum number of revision attempts before giving up and proceeding with DRAFT.
 MAX_REVISIONS = 2
@@ -104,10 +104,10 @@ def revision_node(state: State) -> dict:
         return {"revision_count": revision_num}
 
     # Build evidence context — full snippets so the revision agent can find real facts
-    evidence_text = "\n".join(
+    evidence_text = UNTRUSTED_NOTE + "\n" + fence("\n".join(
         f"- [{e.title}]({e.url}): {e.snippet[:500]}"
         for e in evidence
-    ) if evidence else "No external evidence available — remove any unsupported claims."
+    )) if evidence else "No external evidence available — remove any unsupported claims."
 
     from .utils import llm_quality as revision_llm
     topic = state.get("topic", "Unknown")

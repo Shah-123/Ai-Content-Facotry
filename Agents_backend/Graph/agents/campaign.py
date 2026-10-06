@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from Graph.state import State
-from .utils import logger, llm, _job, _emit
+from .utils import logger, llm, _job, _emit, fence, UNTRUSTED_NOTE
 
 # ✅ FIX #10: Summarize the full blog into a structured brief BEFORE passing
 # to campaign agents. Previously blog_post[:4000] was used, which for a
@@ -47,9 +47,9 @@ def _build_campaign_brief(blog_post: str, topic: str, evidence: list) -> str:
     # Safety cap at 100k chars (~15k words) — well beyond any normal blog
     safe_blog = blog_post[:100_000]
 
-    key_stats = "\n".join(
+    key_stats = UNTRUSTED_NOTE + "\n" + fence("\n".join(
         [f"- {e.snippet[:120]}... ({e.url})" for e in evidence[:5]]
-    )
+    ))
 
     response = llm.invoke([
         SystemMessage(content=CAMPAIGN_BRIEF_SYSTEM),

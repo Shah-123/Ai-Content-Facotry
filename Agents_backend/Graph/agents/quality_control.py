@@ -13,7 +13,7 @@ from Graph.structured_data import QAReport, QAIssue
 # in the graph, so by the time qa_agent_node runs, fixes are already applied.
 from Graph.Fixes import apply_all_fixes
 
-from .utils import logger, llm_quality, _job, _emit, truncate_for_eval
+from .utils import logger, llm_quality, _job, _emit, truncate_for_eval, fence, UNTRUSTED_NOTE
 
 QA_AGENT_SYSTEM = """You are an elite Quality Assurance (QA) Editor for a top-tier publishing platform.
 Your job is to read the provided blog post and conduct a rigorous final audit before publication.
@@ -167,10 +167,10 @@ def qa_agent_node(state: State) -> dict:
     # --- 2. LLM QA AUDIT ---
     checker = llm_quality.with_structured_output(QAReport)
 
-    evidence_summary = "\n".join([
+    evidence_summary = UNTRUSTED_NOTE + "\n" + fence("\n".join([
         f"- {e.title} ({e.url})\n  Content: {e.snippet[:500]}..."
         for e in evidence[:15]
-    ])
+    ]))
 
     # Include revision context so QA doesn't re-flag already-addressed issues
     revision_count = state.get("revision_count", 0)
