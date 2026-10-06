@@ -359,8 +359,8 @@ export default function App() {
                   {/* OpenAI only: the agent layer builds a ChatOpenAI client
                       (Graph/agents/utils.py → get_llm), so a Claude or Gemini
                       model id here would be sent to the OpenAI API and fail.
-                      Gemini is still used for podcast/TTS audio, which is wired
-                      separately and not affected by this selector. */}
+                      Gemini is still used for the video voiceover (TTS), which is
+                      wired separately and not affected by this selector. */}
                   <optgroup label="OpenAI Models" className="bg-base-900 text-base-100">
                     <option value="gpt-5-mini">GPT-5 Mini (Default - Fast & High Quality)</option>
                     <option value="gpt-4o-mini">GPT-4o-mini (Fast & Cheap)</option>

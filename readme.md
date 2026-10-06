@@ -5,7 +5,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Orchestration-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend_API-green.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React_19-TypeScript_&_Vite-blue.svg?logo=react&logoColor=white)](https://react.dev/)
-[![Gemini](https://img.shields.io/badge/Gemini_2.5_Flash-Native_Audio-purple.svg)](https://deepmind.google/technologies/gemini/)
+[![Gemini](https://img.shields.io/badge/Gemini_2.5_Flash-Video_TTS-purple.svg)](https://deepmind.google/technologies/gemini/)
 [![DeepEval](https://img.shields.io/badge/DeepEval-G--Eval_Metrics-red.svg)](https://github.com/confident-ai/deepeval)
 [![License](https://img.shields.io/badge/License-Apache_2.0-lightgrey.svg)](LICENSE)
 
@@ -27,7 +27,7 @@ A stateful, multi-agent AI system for automated research, content synthesis, mul
 4. **Human-in-the-Loop (HITL) Outline Control:** Pauses the writing process to present a draft outline plan to the user. The user can directly modify titles, goals, word counts, and bullet points via the UI, or write natural language feedback to request the LLM to automatically regenerate the plan.
 5. **Parallelized Fan-Out Generation:** Speeds up content generation by writing body sections in parallel. Individual Worker agents are assigned specific sections, receiving only the evidence records matching their topic to prevent redundant text or source-stuffing.
 6. **Multi-Modal Generation Studio:**
-   - **Gemini Podcast Studio:** Synthesizes conversational, solo podcasts using Gemini 2.5 Flash's native audio capabilities, maintaining natural human pacing and speech elements.
+   - **Podcast Studio:** Writes a two-host dialogue script and voices each turn with OpenAI TTS (`tts-1-hd`), one distinct voice per host.
    - **Video Generator:** Generates text-to-speech voiceovers, fetches stock B-roll clips from the Pexels API, matches them to the script, and renders videos with synchronized subtitles using MoviePy.
    - **SEO Keyword Optimizer:** Strategically integrates target keywords into headers, body paragraphs, and meta descriptions.
 7. **Academic Evaluation (LLM-as-Judge):** Grades content against academic standards across four dimensions: Coherence, Relevance, Accuracy & Grounding, and Tone Alignment, using both in-house scoring and official [DeepEval](https://github.com/confident-ai/deepeval) GEval metrics.
@@ -83,7 +83,7 @@ graph TD
     P --> L{Asset toggles}
     L -->|campaign| M(Campaign Generator)
     L -->|video| N(Video Synthesis)
-    L -->|podcast| O(Gemini Podcast Studio)
+    L -->|podcast| O(Podcast Studio)
     L -->|none enabled| Z
 
     M --> Z([END])
@@ -140,9 +140,9 @@ which, and `None` is a deliberate design choice rather than a missing feature.
 | **Quality Control** | `gpt-5-mini` + deterministic check | [quality_control.py](Agents_backend/Graph/agents/quality_control.py) | Audits the draft against evidence for hallucinations and structure. A **non-LLM citation verifier** parses every hyperlink and checks it against the research evidence by URL and domain; any unmatched link forces `NEEDS_REVISION` and caps the score at 6.0 regardless of the model's opinion. |
 | **Revision** | `gpt-5-mini` | [revision.py](Agents_backend/Graph/agents/revision.py) | Surgically rewrites only the sections carrying critical issues, falling back to a full-article edit. Bounded at 2 attempts; output shorter than 60% of the original is rejected. |
 | **SEO Optimizer** | `gpt-5-mini` + deterministic analysis | [keyword_optimizer.py](Agents_backend/Graph/keyword_optimizer.py) | Keyword density and placement are computed in Python; the model is used only to weave under-represented keywords back into the weakest passages. |
-| **Image Planner** | `gpt-5-mini` → DALL·E / Gemini / Flux | [multimedia.py](Agents_backend/Graph/agents/multimedia.py) | Plans placements and prompts, then generates through a three-provider fallback chain (OpenAI → Google Gemini → Pollinations). |
+| **Image Planner** | `gpt-5-mini` → DALL·E / Flux | [multimedia.py](Agents_backend/Graph/agents/multimedia.py) | Plans placements and prompts, then generates through a two-provider fallback chain (OpenAI → Pollinations). |
 | **Campaign Gen** | `gpt-5-mini` | [campaign.py](Agents_backend/Graph/agents/campaign.py) | Summarises the **full** article into a structured brief, then writes a LinkedIn post and an X/Twitter post in parallel. *Currently these two channels only* — the state carries fields for email, landing page, Facebook and YouTube, but they are not generated. |
-| **Podcast Studio** | `gemini-2.5-flash` | [podcast_studio.py](Agents_backend/Graph/podcast_studio.py) | Generates a single-speaker audio podcast using Gemini's native audio output. |
+| **Podcast Studio** | `gpt-5-mini` + OpenAI TTS | [podcast_studio.py](Agents_backend/Graph/podcast_studio.py) | Writes a two-host dialogue script, then voices each turn with `tts-1-hd` (a distinct voice per host) and merges them into one MP3. |
 | **Video Gen** | `gpt-5-mini` + Gemini TTS + Whisper | [video.py](Agents_backend/Graph/agents/video.py) | Scripts the voiceover, synthesises speech via Gemini TTS (with backoff), derives word-level timings with Whisper for karaoke captions, pulls portrait B-roll from Pexels, and composites a 9:16 MP4 with MoviePy. |
 | **Academic Judge** | `LLM_JUDGE_MODEL` (defaults to `gpt-5-mini`) | [evaluation.py](Agents_backend/Graph/agents/evaluation.py) | In-house G-Eval scorecard (1–5) runs inside the graph; the weighted overall is computed in Python, not by the model. The official `deepeval` G-Eval runs **on demand** via its own endpoint, not as a graph node. |
 
@@ -303,7 +303,7 @@ OPENAI_API_KEY=sk-...
 # Tavily Scraper Key — Used for Web Research
 TAVILY_API_KEY=tvly-...
 
-# Google Cloud API Key — Used for Gemini Native Audio TTS and Video TTS
+# Google Cloud API Key — Used for the video voiceover (Gemini TTS)
 # Note: Set GOOGLE_API_KEY; do not use GEMINI_API_KEY.
 GOOGLE_API_KEY=AIzaSy...
 
@@ -416,7 +416,6 @@ blogs/quantum_computing_20260521_103000/
 * **No Rate Limiting:** No endpoint is rate limited. Because `POST /api/jobs` triggers real spend on OpenAI, Tavily and Google APIs, an instance left reachable without `API_KEY` set can be driven into an unbounded bill by anyone who finds it. Set `API_KEY`, keep the deployment on `localhost`, or place a reverse proxy in front of it.
 
 * **Evaluation Methodology:** The reported quality scores were produced with the same model acting as both writer and judge (`gpt-5-mini`), a known source of self-preference bias in LLM-as-a-judge evaluation. The judge is configured separately via `LLM_QUALITY_MODEL`, so an independent-judge run needs no code change. The published figures also come from three topics with one run each and no baseline comparison arm, so they characterise the system's own behaviour rather than demonstrating superiority over a simpler approach. No human annotation of factual accuracy was performed.
-* **Single-Speaker Audio:** The Gemini Podcast studio is set to a single-speaker voice (`Aoede`). Future updates could add two-speaker dialogue scripts using two distinct Gemini audio voices.
 * **Authentication:** Access control is a single shared secret, not per-user auth. Setting `API_KEY` in `.env` makes every REST route and the WebSocket require it (`X-API-Key` header, or `?api_key=` for browser-initiated requests such as `<img>` and downloads); leaving it unset keeps the API open, which is only appropriate on `localhost`. CORS defaults to the local dev origins and is configurable via `ALLOWED_ORIGINS`. A public deployment needs real per-user authentication (OAuth2) and per-user job ownership — currently any authenticated caller can read and delete every job.
 * **Single-Process Concurrency:** Jobs run in background threads, and HITL approval blocks one of those threads for up to 20 minutes. The approval events are held in an in-process dictionary, so the API must run as a single worker; a multi-worker or multi-replica deployment needs an external task queue and a shared store. The SqliteSaver/PostgresSaver checkpointer is what makes crash recovery possible without one.
 

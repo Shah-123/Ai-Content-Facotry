@@ -703,11 +703,11 @@ def run_app(
     # -----------------------------------------------------------------------
     if not api_mode:
         print("\n💰 Cost-Saving Options (Press Enter for Yes):")
-        generate_images   = input("Generate Images (Gemini)? [Y/n]: ").strip().lower() != "n"
+        generate_images   = input("Generate Images? [Y/n]: ").strip().lower() != "n"
         generate_qa       = input("Run QA fact-check + revision loop? [Y/n]: ").strip().lower() != "n"
         generate_campaign = input("Generate Social Media Campaign? [Y/n]: ").strip().lower() != "n"
         generate_video    = input("Generate Short Video (Voiceover + Captions + Pexels)? [Y/n]: ").strip().lower() != "n"
-        generate_podcast  = input("Generate Audio Podcast (Gemini)? [Y/n]: ").strip().lower() != "n"
+        generate_podcast  = input("Generate Audio Podcast? [Y/n]: ").strip().lower() != "n"
     else:
         generate_images   = True  # always generate images in API mode
         generate_qa       = True

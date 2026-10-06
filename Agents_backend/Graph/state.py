@@ -188,7 +188,7 @@ class State(TypedDict, total=False):
 
     # --- Video & Audio Outputs ---
     video_path: Optional[str]          # Path to the finalized MP4 video
-    podcast_audio_path: Optional[str]  # Path to the generated Gemini podcast audio
+    podcast_audio_path: Optional[str]  # Path to the generated podcast audio (OpenAI TTS)
     whisper_model_size: Optional[str]  # Optional Whisper model size configuration
 
     # --- Cost Saving Flags ---

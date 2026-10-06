@@ -119,7 +119,7 @@ const HERO_FEATURES = [
   {
     icon: Podcast,
     title: 'Podcast Studio',
-    desc: 'Gemini-powered conversational audio with custom voice synthesis.',
+    desc: 'Two-host conversational audio voiced with OpenAI text-to-speech.',
     gradient: 'from-emerald-500/20 to-teal-600/10',
     sampleTopic: 'The future of generative voice acting and audio design',
     sampleTone: 'educational',
