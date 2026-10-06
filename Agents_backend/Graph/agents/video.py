@@ -47,19 +47,9 @@ from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
 
 from langchain_core.messages import SystemMessage, HumanMessage
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    try:
-        import google.genai as genai
-        from google.genai import types
-    except ImportError:
-        genai = None
-        types = None
 
 from Graph.state import State
-from .utils import logger, llm, _job, _emit
+from .utils import logger, llm, _job, _emit, _REQUEST_TIMEOUT
 
 
 # ============================================================================
@@ -267,7 +257,7 @@ def create_synthetic_background_clip(duration: float, output_path: str) -> Optio
 
 
 # ============================================================================
-# TTS — Gemini
+# TTS — OpenAI
 # ============================================================================
 
 def save_pcm_as_wav(pcm_bytes: bytes, output_path: str):
@@ -279,49 +269,36 @@ def save_pcm_as_wav(pcm_bytes: bytes, output_path: str):
         wf.writeframes(pcm_bytes)
 
 
-def generate_tts_voiceover(text: str, voice: str = "Puck") -> Optional[str]:
+def generate_tts_voiceover(text: str, voice: str = "nova") -> Optional[str]:
     """
-    Generates speech via Gemini TTS with exponential-backoff retry.
-    Returns path to a temporary .wav file, or None on failure.
+    Generates speech via OpenAI TTS (tts-1-hd, as the podcast uses) with
+    exponential-backoff retry. Returns path to a temporary .wav file, or None.
     """
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        logger.error("GOOGLE_API_KEY not set.")
+    if not os.getenv("OPENAI_API_KEY"):
+        logger.error("OPENAI_API_KEY not set.")
         return None
 
-    client = genai.Client(api_key=api_key)
+    from openai import OpenAI
+    # The loop below owns retries and backoff, so the SDK's own are off.
+    client = OpenAI(timeout=_REQUEST_TIMEOUT, max_retries=0)
 
     for attempt in range(1, _TTS_MAX_ATTEMPTS + 1):
         try:
             logger.info(f"   🔊 TTS attempt {attempt}/{_TTS_MAX_ATTEMPTS} (voice: {voice})...")
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-tts",
-                contents=text,
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=types.SpeechConfig(
-                        voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                voice_name=voice
-                            )
-                        )
-                    ),
-                ),
+            response = client.audio.speech.create(
+                model="tts-1-hd",
+                voice=voice,
+                input=text,
+                response_format="pcm",  # 24 kHz, 16-bit mono — what save_pcm_as_wav writes
             )
-            audio_bytes = None
-            for part in response.candidates[0].content.parts:
-                if part.inline_data:
-                    audio_bytes = part.inline_data.data
-                    break
-
-            if audio_bytes:
+            if response.content:
                 fd, tmp = tempfile.mkstemp(suffix=".wav")
                 os.close(fd)
-                save_pcm_as_wav(audio_bytes, tmp)
+                save_pcm_as_wav(response.content, tmp)
                 logger.info(f"   ✅ TTS succeeded on attempt {attempt}.")
                 return tmp
 
-            logger.error("Gemini TTS: response had no audio data.")
+            logger.error("OpenAI TTS: response had no audio data.")
             return None
 
         except Exception as e:
@@ -984,7 +961,7 @@ def video_generator_node(state: State) -> dict:
     # 3. TTS audio
     # ------------------------------------------------------------------
     _emit(_job(state), "video", "working", "Generating voiceover audio...")
-    audio_path = generate_tts_voiceover(script, voice="Puck")
+    audio_path = generate_tts_voiceover(script)
     if not audio_path:
         logger.error("TTS failed. Aborting video generation.")
         _emit(_job(state), "video", "error", "Audio generation failed.")

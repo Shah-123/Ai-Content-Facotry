@@ -31,8 +31,7 @@ COPY requirements.txt /app/
 
 # Install python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir google-genai
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy backend codebase
 COPY Agents_backend /app/Agents_backend

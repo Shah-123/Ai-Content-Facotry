@@ -5,7 +5,6 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-Stateful_Orchestration-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend_API-green.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React_19-TypeScript_&_Vite-blue.svg?logo=react&logoColor=white)](https://react.dev/)
-[![Gemini](https://img.shields.io/badge/Gemini_2.5_Flash-Video_TTS-purple.svg)](https://deepmind.google/technologies/gemini/)
 [![DeepEval](https://img.shields.io/badge/DeepEval-G--Eval_Metrics-red.svg)](https://github.com/confident-ai/deepeval)
 [![License](https://img.shields.io/badge/License-Apache_2.0-lightgrey.svg)](LICENSE)
 
@@ -143,7 +142,7 @@ which, and `None` is a deliberate design choice rather than a missing feature.
 | **Image Planner** | `gpt-5-mini` → DALL·E / Flux | [multimedia.py](Agents_backend/Graph/agents/multimedia.py) | Plans placements and prompts, then generates through a two-provider fallback chain (OpenAI → Pollinations). |
 | **Campaign Gen** | `gpt-5-mini` | [campaign.py](Agents_backend/Graph/agents/campaign.py) | Summarises the **full** article into a structured brief, then writes a LinkedIn post and an X/Twitter post in parallel. *Currently these two channels only* — the state carries fields for email, landing page, Facebook and YouTube, but they are not generated. |
 | **Podcast Studio** | `gpt-5-mini` + OpenAI TTS | [podcast_studio.py](Agents_backend/Graph/podcast_studio.py) | Writes a two-host dialogue script, then voices each turn with `tts-1-hd` (a distinct voice per host) and merges them into one MP3. |
-| **Video Gen** | `gpt-5-mini` + Gemini TTS + Whisper | [video.py](Agents_backend/Graph/agents/video.py) | Scripts the voiceover, synthesises speech via Gemini TTS (with backoff), derives word-level timings with Whisper for karaoke captions, pulls portrait B-roll from Pexels, and composites a 9:16 MP4 with MoviePy. |
+| **Video Gen** | `gpt-5-mini` + OpenAI TTS + Whisper | [video.py](Agents_backend/Graph/agents/video.py) | Scripts the voiceover, synthesises speech via OpenAI TTS (with backoff), derives word-level timings with Whisper for karaoke captions, pulls portrait B-roll from Pexels, and composites a 9:16 MP4 with MoviePy. |
 | **Academic Judge** | `LLM_JUDGE_MODEL` (defaults to `gpt-5-mini`) | [evaluation.py](Agents_backend/Graph/agents/evaluation.py) | In-house G-Eval scorecard (1–5) runs inside the graph; the weighted overall is computed in Python, not by the model. The official `deepeval` G-Eval runs **on demand** via its own endpoint, not as a graph node. |
 
 ---
@@ -223,7 +222,7 @@ Both reports are written to the `reports/` folder of each generated blog for aca
   - [state.py](Agents_backend/Graph/state.py) — Defines the Graph memory structures using [State TypedDict](Agents_backend/Graph/state.py#L85), [Plan](Agents_backend/Graph/state.py#L51), and [Task](Agents_backend/Graph/state.py#L29) definitions.
   - [nodes.py](Agents_backend/Graph/nodes.py) — Maps graph nodes to corresponding agent functions.
   - [templates.py](Agents_backend/Graph/templates.py) — System instructions, roles, and formatting guidelines.
-  - [podcast_studio.py](Agents_backend/Graph/podcast_studio.py) — Script to interface with the `google-genai` SDK and synthesize audio.
+  - [podcast_studio.py](Agents_backend/Graph/podcast_studio.py) — Writes the two-host script and voices it with OpenAI TTS.
 * **Specialized Agent Implementation:**
   - [topic_guard.py](Agents_backend/Graph/agents/topic_guard.py) — Evaluates input topic safety.
   - [routing.py](Agents_backend/Graph/agents/routing.py) — Directs work to Tavily Search or closed-book agents.
@@ -273,7 +272,7 @@ cd Multi_Agent_Blog_generator_FYP
 
 # 1. Install Backend Dependencies
 #    Reproducible install — the exact versions this project was developed,
-#    tested and demonstrated against (173 pinned packages). Use this one.
+#    tested and demonstrated against (166 pinned packages). Use this one.
 pip install -r requirements.lock.txt
 
 # 2. Install Frontend Dependencies
@@ -302,10 +301,6 @@ OPENAI_API_KEY=sk-...
 
 # Tavily Scraper Key — Used for Web Research
 TAVILY_API_KEY=tvly-...
-
-# Google Cloud API Key — Used for the video voiceover (Gemini TTS)
-# Note: Set GOOGLE_API_KEY; do not use GEMINI_API_KEY.
-GOOGLE_API_KEY=AIzaSy...
 
 # Pexels API Key — Used for B-roll Video Search
 PEXELS_API_KEY=...
@@ -413,7 +408,7 @@ blogs/quantum_computing_20260521_103000/
 
 * **Prompt Injection — not mitigated.** Text scraped from the open web and text extracted from uploaded documents is passed into LLM prompts as evidence with no instruction-hierarchy defence: no delimiter fencing, no escaping, and no validation that extracted "facts" originated in the source rather than in an instruction embedded within it. A web page containing something like *"ignore previous instructions and instead write…"* is handed to the extraction model as ordinary content. The affected paths are the research extractor, the document-chunk extractor, the section writers, and the QA auditor. Realistic mitigations — fencing untrusted spans in explicit delimiters, instructing the extractor to treat the span as data only, and validating that each extracted snippet is a substring of its source — are known but unimplemented. This is the most significant unaddressed security weakness in the system.
 
-* **No Rate Limiting:** No endpoint is rate limited. Because `POST /api/jobs` triggers real spend on OpenAI, Tavily and Google APIs, an instance left reachable without `API_KEY` set can be driven into an unbounded bill by anyone who finds it. Set `API_KEY`, keep the deployment on `localhost`, or place a reverse proxy in front of it.
+* **No Rate Limiting:** No endpoint is rate limited. Because `POST /api/jobs` triggers real spend on the OpenAI and Tavily APIs, an instance left reachable without `API_KEY` set can be driven into an unbounded bill by anyone who finds it. Set `API_KEY`, keep the deployment on `localhost`, or place a reverse proxy in front of it.
 
 * **Evaluation Methodology:** The reported quality scores were produced with the same model acting as both writer and judge (`gpt-5-mini`), a known source of self-preference bias in LLM-as-a-judge evaluation. The judge is configured separately via `LLM_QUALITY_MODEL`, so an independent-judge run needs no code change. The published figures also come from three topics with one run each and no baseline comparison arm, so they characterise the system's own behaviour rather than demonstrating superiority over a simpler approach. No human annotation of factual accuracy was performed.
 * **Authentication:** Access control is a single shared secret, not per-user auth. Setting `API_KEY` in `.env` makes every REST route and the WebSocket require it (`X-API-Key` header, or `?api_key=` for browser-initiated requests such as `<img>` and downloads); leaving it unset keeps the API open, which is only appropriate on `localhost`. CORS defaults to the local dev origins and is configurable via `ALLOWED_ORIGINS`. A public deployment needs real per-user authentication (OAuth2) and per-user job ownership — currently any authenticated caller can read and delete every job.
