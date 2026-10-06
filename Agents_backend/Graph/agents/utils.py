@@ -94,9 +94,10 @@ def get_llm(state: dict = None, temperature: float = 0.0) -> ChatOpenAI:
                 f"Ignoring unsupported model '{requested}' — get_llm only builds "
                 f"OpenAI clients. Falling back to '{model_name}'."
             )
+    # Section writers, keyword weaving, video script, plan edits — all generation.
     return ChatOpenAI(model=model_name, temperature=temperature,
                       timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
-                      callbacks=[_usage_cb])
+                      callbacks=[_usage_cb], **_effort(model_name, _WRITER_EFFORT))
 
 _FAST_MODEL = os.getenv("LLM_FAST_MODEL", "gpt-5-mini")
 _QUALITY_MODEL = os.getenv("LLM_QUALITY_MODEL", "gpt-5-mini")
@@ -136,6 +137,35 @@ _REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "180"))
 _MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
 # ---------------------------------------------------------------------------
+# REASONING EFFORT
+# ---------------------------------------------------------------------------
+# gpt-5-mini reasons before it answers — at "medium" effort unless told
+# otherwise — and those hidden tokens were most of the wait. Measured on one
+# router call and one 400-word section (2026-10-06, n=1 per row):
+#
+#     effort     router   output / reasoning tokens   section   output / reasoning
+#     default     8.3s        685 / 512                14.9s     1,847 / 1,280
+#     low         5.0s        359 / 192                 8.9s       939 /   320
+#     minimal     2.2s         98 /   0                 8.7s       654 /     0
+#
+# Generation and extraction run at "low". The QA auditor, the reviser and the
+# judge keep the API default: the first two hunt hallucinations, and moving
+# the judge would make new scores incomparable with every score already
+# reported. Set a variable to "medium" to restore the default for an A/B run,
+# or "minimal" to go further.
+#
+# Only reasoning models accept the parameter — gpt-4o-mini answers 400
+# "Unrecognized request argument" — so it is sent to those alone.
+_REASONING_MODELS = ("gpt-5", "o1", "o3", "o4")
+_FAST_EFFORT = os.getenv("LLM_FAST_REASONING_EFFORT", "low")
+_WRITER_EFFORT = os.getenv("LLM_WRITER_REASONING_EFFORT", "low")
+
+
+def _effort(model: str, effort: str) -> dict:
+    """`reasoning_effort` for ChatOpenAI, or nothing for a model that rejects it."""
+    return {"reasoning_effort": effort} if effort and model.startswith(_REASONING_MODELS) else {}
+
+# ---------------------------------------------------------------------------
 # A NOTE ON temperature
 # ---------------------------------------------------------------------------
 # The temperature arguments below are NOT honoured by the default model.
@@ -156,7 +186,7 @@ _MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 # so the finding is not silently rediscovered.
 llm_fast = ChatOpenAI(model=_FAST_MODEL, temperature=0,
                       timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
-                      callbacks=[_usage_cb])
+                      callbacks=[_usage_cb], **_effort(_FAST_MODEL, _FAST_EFFORT))
 llm_quality = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.1,
                          timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
                       callbacks=[_usage_cb])
@@ -167,7 +197,7 @@ llm_judge = ChatOpenAI(model=_JUDGE_MODEL, temperature=0,
 # instead of converging on the same headings for the same topic.
 llm_planner = ChatOpenAI(model=_QUALITY_MODEL, temperature=0.7,
                          timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES,
-                      callbacks=[_usage_cb])
+                      callbacks=[_usage_cb], **_effort(_QUALITY_MODEL, _WRITER_EFFORT))
 
 # Backward compat alias
 llm = llm_fast
