@@ -104,6 +104,32 @@ class TestRequestTimeoutsAreConfigured:
         )
 
 
+class TestReasoningEffort:
+    """Generation runs at reduced reasoning effort; auditing and judging do not.
+
+    gpt-4o-mini rejects the parameter with a 400, and the model selector lets a
+    user pick it, so the effort must follow the model rather than the role.
+    """
+
+    def test_writers_get_the_effort_on_a_reasoning_model(self):
+        from Graph.agents.utils import get_llm, _WRITER_EFFORT
+
+        assert get_llm({"selected_model": "gpt-5-mini"}).reasoning_effort == _WRITER_EFFORT
+
+    def test_non_reasoning_model_is_never_sent_the_effort(self):
+        from Graph.agents.utils import get_llm
+
+        assert get_llm({"selected_model": "gpt-4o-mini"}).reasoning_effort is None
+
+    def test_auditor_reviser_and_judge_keep_the_api_default(self):
+        """Lowering these would trade hallucination-catching, and comparability
+        with every score already reported, for speed."""
+        from Graph.agents import utils
+
+        assert utils.llm_quality.reasoning_effort is None
+        assert utils.llm_judge.reasoning_effort is None
+
+
 class TestUsageAccounting:
     """Token/cost accounting must be accurate, thread-safe, and never fatal.
 
