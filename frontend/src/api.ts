@@ -11,9 +11,14 @@ export const withApiKey = (url: string): string =>
   API_KEY ? `${url}${url.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(API_KEY)}` : url;
 
 // ── Signed-in user ─────────────────────────────────────────────────────────
-// The token is an HMAC-signed blob minted by Agents_backend/api/users.py and
-// kept in localStorage so a refresh doesn't sign the user out.
-const TOKEN_KEY = 'auth-token';
+// The session is an HttpOnly cookie set by Agents_backend/api/users.py on
+// login: page scripts can't read it, and the browser sends it on its own with
+// <img>/<video> src, export downloads and the progress WebSocket — none of
+// which can carry an Authorization header.
+//
+// Earlier builds kept a bearer token in localStorage. It is still a live
+// credential for up to a week, so drop it.
+try { localStorage.removeItem('auth-token'); } catch { /* storage blocked */ }
 
 export interface AuthUser {
   id: string;
@@ -23,24 +28,27 @@ export interface AuthUser {
 }
 
 export const auth = {
-  get token(): string { return localStorage.getItem(TOKEN_KEY) || ''; },
-  set token(value: string) {
-    if (value) localStorage.setItem(TOKEN_KEY, value);
-    else localStorage.removeItem(TOKEN_KEY);
-  },
   /** Whoever the last successful auth call resolved to. Set by APIClient so
    *  components (the TopNav avatar) can read it without a second round-trip. */
   user: null as AuthUser | null,
-  /** Drop the token and start over at the login screen. */
-  signOut() { this.token = ''; this.user = null; window.location.reload(); },
+  /** Clear the session cookie server-side and start over at the login screen. */
+  async signOut() {
+    await apiFetch(`${API_BASE_URL}/api/auth/logout`, { method: 'POST' }).catch(() => undefined);
+    this.user = null;
+    window.location.reload();
+  },
 };
 
-/** fetch() with the API key and bearer token attached when present. */
+/** fetch() with the session cookie and, when configured, the API key.
+ *  X-Requested-With is the backend's CSRF check for cookie-authed writes: a
+ *  foreign page can't add a custom header without passing CORS. */
 const apiFetch = (url: string, init: RequestInit = {}): Promise<Response> => {
-  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+  const headers: Record<string, string> = {
+    'X-Requested-With': 'fetch',
+    ...(init.headers as Record<string, string>),
+  };
   if (API_KEY) headers['X-API-Key'] = API_KEY;
-  if (auth.token) headers['Authorization'] = `Bearer ${auth.token}`;
-  return fetch(url, { ...init, headers });
+  return fetch(url, { ...init, headers, credentials: 'include' });
 };
 
 export type SourceMode = 'closed_book' | 'hybrid' | 'auto_topic';
@@ -168,8 +176,7 @@ export class APIClient {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.detail || 'Something went wrong. Try again.');
-    auth.token = data.token;
-    auth.user = data.user;
+    auth.user = data.user;   // the session itself arrived as a cookie
     return data.user;
   }
 
@@ -183,12 +190,8 @@ export class APIClient {
 
   /** The signed-in user, or null when the token is missing/expired/invalid. */
   static async me(): Promise<AuthUser | null> {
-    if (!auth.token) return null;
     const res = await apiFetch(`${API_BASE_URL}/api/auth/me`);
-    if (!res.ok) {
-      if (res.status === 401) auth.token = '';   // stale token, clear it
-      return null;
-    }
+    if (!res.ok) return null;   // no session cookie, or it expired
     auth.user = await res.json();
     return auth.user;
   }

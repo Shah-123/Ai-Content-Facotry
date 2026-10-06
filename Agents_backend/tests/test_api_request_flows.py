@@ -28,6 +28,11 @@ def client(tmp_path, monkeypatch):
     # but the tables live in the real file, so recreate them in the temp one.
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test_jobs.db")
     db.init_db()
+    # Pin the token-signing secret: it falls back to API_KEY, so tests that
+    # set API_KEY would otherwise invalidate the session minted below.
+    monkeypatch.setenv("AUTH_SECRET", "test-auth-secret")
+    from api import users
+    users.init_users()
 
     import api.routes.jobs as jobs_routes
 
@@ -37,6 +42,11 @@ def client(tmp_path, monkeypatch):
     from api.main import app
 
     with TestClient(app) as c:
+        # Every jobs route requires a signed-in owner; sign one up and send its
+        # bearer token by default. Ownership tests build their own clients.
+        signup = c.post("/api/auth/signup", json={"email": "owner@example.test", "password": "test-password-1"})
+        c.headers["Authorization"] = f"Bearer {signup.json()['token']}"
+        c.user_id = signup.json()["user"]["id"]  # type: ignore[attr-defined]
         c.dispatched = dispatched  # type: ignore[attr-defined]
         yield c
 
@@ -302,20 +312,20 @@ class TestSaveEditedArticle:
     """PUT /api/jobs/{id}/blog must update BOTH copies of the article: the job
     row (UI, /blog, exports) and the Markdown file (manual tasks)."""
 
-    def _finished_job(self, tmp_path, status="completed"):
+    def _finished_job(self, client, tmp_path, status="completed"):
         import db
 
         folder = tmp_path / "blog"
         (folder / "content").mkdir(parents=True)
         md = folder / "content" / "edit_me.md"
         md.write_text("# Old\n\nold text", encoding="utf-8")
-        job = db.create_job(topic="Edit me")
+        job = db.create_job(topic="Edit me", owner_id=client.user_id)
         db.update_job(job["id"], status=status, blog_folder=str(folder),
                       final_content="# Old\n\nold text")
         return job["id"], md
 
     def test_save_updates_the_row_the_file_and_the_exports(self, client, tmp_path):
-        job_id, md = self._finished_job(tmp_path)
+        job_id, md = self._finished_job(client, tmp_path)
 
         r = client.put(f"/api/jobs/{job_id}/blog", json={"content": "# New\n\nedited words here"})
 
@@ -328,7 +338,7 @@ class TestSaveEditedArticle:
 
     def test_refuses_while_the_job_is_running(self, client, tmp_path):
         """The pipeline or a manual task would overwrite the edit when it finishes."""
-        job_id, md = self._finished_job(tmp_path, status="running")
+        job_id, md = self._finished_job(client, tmp_path, status="running")
 
         r = client.put(f"/api/jobs/{job_id}/blog", json={"content": "edited"})
 
@@ -337,5 +347,107 @@ class TestSaveEditedArticle:
 
     def test_unknown_job_is_404_and_empty_content_is_rejected(self, client, tmp_path):
         assert client.put("/api/jobs/nope/blog", json={"content": "x"}).status_code == 404
-        job_id, _ = self._finished_job(tmp_path)
+        job_id, _ = self._finished_job(client, tmp_path)
         assert client.put(f"/api/jobs/{job_id}/blog", json={"content": ""}).status_code == 422
+
+
+class TestJobOwnership:
+    """Each account sees and touches only its own jobs (Known Limitation removed:
+    'any authenticated caller can read and delete every job')."""
+
+    def _second_user(self, client) -> dict:
+        r = client.post("/api/auth/signup", json={"email": "intruder@example.test", "password": "test-password-2"},
+                        headers={"Authorization": ""})
+        return {"Authorization": f"Bearer {r.json()['token']}"}
+
+    def _owned_job(self, client, monkeypatch, tmp_path) -> str:
+        import db
+        _stub_topic_guard(monkeypatch)
+        job_id = client.post("/api/jobs", json={"topic": "Private job"}).json()["id"]
+        folder = tmp_path / "private"
+        (folder / "content").mkdir(parents=True)
+        (folder / "content" / "a.md").write_text("private text", encoding="utf-8")
+        db.update_job(job_id, status="completed", blog_folder=str(folder), final_content="private text")
+        return job_id
+
+    def test_another_account_cannot_see_or_touch_the_job(self, client, monkeypatch, tmp_path):
+        job_id = self._owned_job(client, monkeypatch, tmp_path)
+        other = self._second_user(client)
+
+        assert client.get("/api/jobs", headers=other).json() == []
+        for method, path, body in [
+            ("get", f"/api/jobs/{job_id}", None),
+            ("get", f"/api/jobs/{job_id}/blog", None),
+            ("put", f"/api/jobs/{job_id}/blog", {"content": "overwritten"}),
+            ("get", f"/api/jobs/{job_id}/export/html", None),
+            ("get", f"/api/files/{job_id}/content/a.md", None),
+            ("post", f"/api/jobs/{job_id}/generate-video", None),
+            ("get", f"/api/jobs/{job_id}/approve-plan", None),
+            ("delete", f"/api/jobs/{job_id}", None),
+        ]:
+            r = client.request(method.upper(), path, json=body, headers=other)
+            assert r.status_code == 404, f"{method.upper()} {path} -> {r.status_code}"
+
+        # The owner still has it, untouched.
+        assert [j["id"] for j in client.get("/api/jobs").json()] == [job_id]
+        assert client.get(f"/api/jobs/{job_id}/blog").json()["content"] == "private text"
+
+    def test_signed_out_requests_are_refused(self, client):
+        anonymous = {"Authorization": ""}
+        client.cookies.clear()
+        assert client.get("/api/jobs", headers=anonymous).status_code == 401
+        assert client.get("/api/jobs/anything", headers=anonymous).status_code == 401
+
+    def test_the_session_cookie_alone_authenticates_with_a_csrf_header(self, client, monkeypatch, tmp_path):
+        """<img>, downloads and the WebSocket carry only the cookie."""
+        job_id = self._owned_job(client, monkeypatch, tmp_path)
+        del client.headers["Authorization"]          # cookie from signup only
+
+        assert client.get(f"/api/files/{job_id}/content/a.md").text == "private text"
+        # State change via cookie without X-Requested-With: refused (CSRF).
+        assert client.put(f"/api/jobs/{job_id}/blog", json={"content": "x"}).status_code == 403
+        r = client.put(f"/api/jobs/{job_id}/blog", json={"content": "edited"},
+                       headers={"X-Requested-With": "fetch"})
+        assert r.status_code == 200
+
+    def test_logout_clears_the_cookie(self, client):
+        del client.headers["Authorization"]
+        assert client.get("/api/jobs").status_code == 200
+        client.post("/api/auth/logout", headers={"X-Requested-With": "fetch"})
+        assert client.get("/api/jobs").status_code == 401
+
+    def test_ownerless_jobs_go_to_the_only_account_and_never_to_a_second(self, client):
+        import db
+        from api import users
+
+        legacy = db.create_job(topic="Before accounts existed")["id"]
+        assert users.claim_ownerless_jobs() == 1
+        assert db.get_job(legacy)["owner_id"] == client.user_id
+
+        self._second_user(client)
+        orphan = db.create_job(topic="Another ownerless job")["id"]
+        assert users.claim_ownerless_jobs() == 0         # two accounts: no guessing
+        assert db.get_job(orphan)["owner_id"] is None
+
+
+class TestWebSocketOwnership:
+    def test_only_the_owner_from_an_allowed_origin_can_subscribe(self, client):
+        import db
+        import event_bus
+        from starlette.websockets import WebSocketDisconnect
+
+        job_id = db.create_job(topic="ws private", owner_id=client.user_id)["id"]
+        other = client.post("/api/auth/signup", json={"email": "ws-intruder@example.test", "password": "test-password-3"},
+                            headers={"Authorization": ""}).json()["token"]
+
+        for headers in ({"Authorization": f"Bearer {other}"},            # not the owner
+                        {"Origin": "http://evil.localhost:5000"}):     # foreign page
+            with pytest.raises(WebSocketDisconnect):
+                with client.websocket_connect(f"/ws/{job_id}", headers=headers) as ws:
+                    ws.receive_json()
+            assert event_bus._subscribers.get(job_id, []) == []
+
+        with client.websocket_connect(f"/ws/{job_id}", headers={"Origin": "http://localhost:3000"}) as ws:
+            event_bus.emit(job_id, "router", "started", "owner sees this")
+            assert ws.receive_json()["message"] == "owner sees this"
+        event_bus.clear_job(job_id)

@@ -2,7 +2,8 @@ import asyncio
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import event_bus as events
-from api.auth import api_key_is_valid
+from api.auth import allowed_origins, api_key_is_valid
+from api.users import current_user, owns_job
 
 logger = logging.getLogger("api.routes.websocket")
 router = APIRouter(prefix="/ws", tags=["websocket"])
@@ -18,6 +19,18 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str, api_key: str | N
     """
     if not api_key_is_valid(api_key):
         await websocket.close(code=1008)  # policy violation
+        return
+    # WebSocket handshakes skip CORS, and the session cookie rides along on any
+    # same-site page — so check Origin here, or another app on localhost could
+    # open this socket as the signed-in user and read their job's events.
+    origin = websocket.headers.get("origin")
+    origins = allowed_origins()
+    if origin and "*" not in origins and origin not in origins:
+        await websocket.close(code=1008)
+        return
+    user = await asyncio.to_thread(current_user, websocket)
+    if not user or not await asyncio.to_thread(owns_job, user, job_id):
+        await websocket.close(code=1008)
         return
     await websocket.accept()
     queue = events.subscribe(job_id)

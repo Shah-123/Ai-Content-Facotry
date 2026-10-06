@@ -30,15 +30,20 @@ import time
 import uuid
 from datetime import datetime, UTC
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
-from db import get_db, _format_sql
+from db import get_db, get_job, _format_sql
 
 logger = logging.getLogger("api.users")
 router = APIRouter(tags=["auth"])
 
 TOKEN_TTL_SECONDS = 7 * 24 * 3600
+# The browser's session. <img>, <video>, export downloads and the progress
+# WebSocket can't send an Authorization header, but they do send cookies.
+# Cookies ignore ports, so every app on localhost shares one namespace: a
+# project-specific name avoids clashing with another local app's "session".
+SESSION_COOKIE = "acf_session"
 MIN_PASSWORD_LENGTH = 8
 # Good enough to catch typos and reject junk; real validation is "can they
 # receive mail", which this app never tests.
@@ -59,6 +64,25 @@ def init_users():
     with get_db() as conn:
         conn.execute(_format_sql(_CREATE_USERS))
         conn.commit()
+    claim_ownerless_jobs()
+
+
+def claim_ownerless_jobs() -> int:
+    """Give jobs that predate accounts (owner_id NULL) to the account, while
+    there is exactly one. Runs at startup and after each signup; once a second
+    account exists it does nothing, so nobody can inherit someone else's jobs."""
+    with get_db() as conn:
+        users = conn.execute(_format_sql("SELECT id FROM users")).fetchall()
+        if len(users) != 1:
+            return 0
+        cursor = conn.execute(
+            _format_sql("UPDATE web_jobs SET owner_id = ? WHERE owner_id IS NULL"),
+            (users[0]["id"],),
+        )
+        conn.commit()
+    if cursor.rowcount:
+        logger.info(f"Assigned {cursor.rowcount} ownerless job(s) to the only account.")
+    return cursor.rowcount
 
 
 # ============================================================================
@@ -124,12 +148,60 @@ def user_id_from_token(token: str | None) -> str | None:
     return data.get("sub")
 
 
-def current_user(request: Request) -> dict | None:
-    """Resolve the caller from `Authorization: Bearer ...`, or None."""
+def _bearer(request) -> str | None:
     header = request.headers.get("Authorization", "")
-    token = header[7:].strip() if header.lower().startswith("bearer ") else None
-    user_id = user_id_from_token(token)
+    return header[7:].strip() if header.lower().startswith("bearer ") else None
+
+
+def current_user(request: Request) -> dict | None:
+    """Resolve the caller from `Authorization: Bearer ...` (API clients) or the
+    session cookie (the browser), or None. Works for HTTP and WebSocket."""
+    user_id = user_id_from_token(_bearer(request) or request.cookies.get(SESSION_COOKIE))
     return get_user_by_id(user_id) if user_id else None
+
+
+def require_user(request: Request) -> dict:
+    """FastAPI dependency: the signed-in user, or 401.
+
+    CSRF: a cookie rides along on any same-site request, so a cookie-authed
+    request that changes state must also carry `X-Requested-With`. Browsers
+    only send a custom header cross-origin after a CORS preflight, which a
+    foreign origin fails. Bearer tokens are never sent automatically, so they
+    need no such check.
+    """
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not signed in.")
+    if (not _bearer(request) and request.method not in ("GET", "HEAD", "OPTIONS")
+            and not request.headers.get("X-Requested-With")):
+        raise HTTPException(status_code=403, detail="Missing X-Requested-With header.")
+    return user
+
+
+def owns_job(user: dict, job_id: str) -> bool:
+    job = get_job(job_id)
+    return bool(job) and job.get("owner_id") == user["id"]
+
+
+def require_job_owner(request: Request) -> dict:
+    """Router-wide guard for the jobs router: signed in, and any `{job_id}` in
+    the path must belong to the caller. Someone else's job answers 404, the
+    same as a missing one, so job ids can't be probed. Attached once in
+    api/main.py, so every current and future job route is covered."""
+    user = require_user(request)
+    job_id = request.path_params.get("job_id")
+    if job_id is not None and not owns_job(user, job_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return user
+
+
+def _set_session_cookie(response: Response, request: Request, token: str) -> None:
+    # HttpOnly: page scripts can't read it. Lax: not sent on cross-site
+    # subrequests or POSTs. Secure whenever the API itself is served over HTTPS.
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=TOKEN_TTL_SECONDS, httponly=True,
+        samesite="lax", secure=request.url.scheme == "https", path="/",
+    )
 
 
 # ============================================================================
@@ -210,23 +282,36 @@ def _validate(email: str, password: str) -> None:
 
 
 @router.post("/api/auth/signup", status_code=status.HTTP_201_CREATED)
-async def signup(req: SignupRequest):
+async def signup(req: SignupRequest, request: Request, response: Response):
     _validate(req.email, req.password)
     if get_user_by_email(req.email):
         raise HTTPException(status_code=409, detail="That email is already registered.")
     user = create_user(req.email, req.password, req.name)
     logger.info(f"New account: {user['email']}")
-    return {"token": make_token(user["id"]), "user": user}
+    claim_ownerless_jobs()   # a first account on an existing install inherits its jobs
+    token = make_token(user["id"])
+    _set_session_cookie(response, request, token)
+    return {"token": token, "user": user}
 
 
 @router.post("/api/auth/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request, response: Response):
     user = get_user_by_email(req.email)
     # Same message either way: a distinct "no such account" would tell an
     # attacker which emails are registered.
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
-    return {"token": make_token(user["id"]), "user": _public(user)}
+    token = make_token(user["id"])
+    _set_session_cookie(response, request, token)
+    return {"token": token, "user": _public(user)}
+
+
+@router.post("/api/auth/logout")
+async def logout(response: Response):
+    """Drop the session cookie. The token itself stays valid until it expires
+    (stateless — see the module docstring); this only signs the browser out."""
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"status": "signed out"}
 
 
 @router.get("/api/auth/me")

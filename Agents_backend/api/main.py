@@ -52,16 +52,17 @@ app = FastAPI(title="AI Content Factory API", version="1.0.0", lifespan=lifespan
 # CORS: defaults to the Vite dev server origins. Set ALLOWED_ORIGINS to a
 # comma-separated list to override, or to "*" to restore the old open policy.
 # Previously hardcoded to ["*"], which let any page on any origin drive this API.
-_origins_env = (os.getenv("ALLOWED_ORIGINS") or "").strip()
-_allowed_origins = (
-    [o.strip() for o in _origins_env.split(",") if o.strip()]
-    if _origins_env
-    else ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000"]
-)
+from api.auth import allowed_origins
+
+_allowed_origins = allowed_origins()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    # The session cookie needs credentialed CORS — but never with "*", which
+    # would let ANY website make signed-in requests as the visitor. With "*"
+    # the browser simply won't send the cookie cross-origin.
+    allow_credentials="*" not in _allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -76,13 +77,16 @@ async def global_exception_handler(request, exc):
 
 # Include all the sub-routers first so API routes take precedence.
 # `require_api_key` is a no-op unless API_KEY is set in .env — see api/auth.py.
-# The WebSocket router checks the key itself (browsers can't set WS headers).
+# `require_job_owner` scopes every jobs route to the signed-in account: any
+# {job_id} that isn't theirs is a 404. The WebSocket router checks both itself
+# (browsers can't set WS headers).
 from api.auth import require_api_key
+from api.users import require_job_owner, require_user
 
 app.include_router(auth_router, dependencies=[Depends(require_api_key)])
-app.include_router(uploads_router, dependencies=[Depends(require_api_key)])
+app.include_router(uploads_router, dependencies=[Depends(require_api_key), Depends(require_user)])
 app.include_router(websocket_router)
-app.include_router(jobs_router, dependencies=[Depends(require_api_key)])
+app.include_router(jobs_router, dependencies=[Depends(require_api_key), Depends(require_job_owner)])
 
 # ── serve static frontend ──────────────────────────────────────────────────
 _FRONTEND = _BACKEND_DIR.parent / "frontend"

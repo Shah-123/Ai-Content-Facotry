@@ -21,10 +21,24 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "ws.db")
     db.init_db()
+    # Pin the token-signing secret: it falls back to API_KEY, so tests that
+    # set API_KEY would otherwise invalidate the session minted below.
+    monkeypatch.setenv("AUTH_SECRET", "test-auth-secret")
+    from api import users
+    users.init_users()
     from api.main import app
 
     with TestClient(app) as c:
+        # The socket only opens for a signed-in owner of the job.
+        signup = c.post("/api/auth/signup", json={"email": "ws@example.test", "password": "test-password-1"})
+        c.headers["Authorization"] = f"Bearer {signup.json()['token']}"
+        c.user_id = signup.json()["user"]["id"]
         yield c
+
+
+def _owned_job(client) -> str:
+    import db
+    return db.create_job(topic="websocket test", owner_id=client.user_id)["id"]
 
 
 def test_subscription_is_released_on_close(client):
@@ -38,7 +52,7 @@ def test_subscription_is_released_on_close(client):
     """
     import event_bus
 
-    job = "ws-lifecycle-job"
+    job = _owned_job(client)
     assert job not in event_bus._subscribers
 
     with client.websocket_connect(f"/ws/{job}") as ws:
@@ -128,7 +142,7 @@ def test_replayed_history_does_not_close_the_socket(client):
     """
     import event_bus
 
-    job = "ws-replay-job"
+    job = _owned_job(client)
     event_bus.emit(job, "router", "started", "first")
     event_bus.emit(job, "system", "completed", "done")
 
@@ -147,7 +161,7 @@ def test_live_terminal_event_closes_the_stream(client):
     import event_bus
     from starlette.websockets import WebSocketDisconnect
 
-    job = "ws-terminal-job"
+    job = _owned_job(client)
     with client.websocket_connect(f"/ws/{job}") as ws:
         event_bus.emit(job, "system", "completed", "finished")
         assert ws.receive_json()["message"] == "finished"
