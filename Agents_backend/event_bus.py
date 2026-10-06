@@ -52,7 +52,8 @@ _main_loop: Optional[asyncio.AbstractEventLoop] = None
 # Per-job file locks to prevent concurrent read/write on .jsonl files
 _file_locks: Dict[str, threading.Lock] = {}
 
-_DATA_DIR = Path(__file__).parent / "data" / "events"
+# EVENTS_DIR overrides the folder (the test suite points it at a temp dir).
+_DATA_DIR = Path(os.getenv("EVENTS_DIR") or Path(__file__).parent / "data" / "events")
 _DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Active manual tasks currently running in the process

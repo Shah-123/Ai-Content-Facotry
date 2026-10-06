@@ -25,6 +25,17 @@ API_KEY_HEADER = "X-API-Key"
 _api_key_header = APIKeyHeader(name=API_KEY_HEADER, auto_error=False)
 
 
+def allowed_origins() -> list[str]:
+    """Browser origins allowed to call the API (CORS) and open its WebSocket.
+
+    ALLOWED_ORIGINS is a comma-separated list; "*" allows any origin.
+    """
+    raw = (os.getenv("ALLOWED_ORIGINS") or "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000"]
+
+
 def _expected_key() -> str:
     return (os.getenv("API_KEY") or "").strip()
 

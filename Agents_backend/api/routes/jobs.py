@@ -6,7 +6,7 @@ import asyncio
 import tempfile
 import threading
 from pathlib import Path
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 
 from db import create_job, get_job, update_job, delete_job
@@ -14,13 +14,15 @@ from api.schemas import CreateJobRequest, RevisePlanRequest, SaveBlogRequest, Up
 from api.state import _worker_approval_events, _plan_revisions, _direct_plan_updates
 from api.utils import get_job_healed, list_jobs_healed
 from api.background import _run_pipeline, _run_manual_task, _ensure_pipeline_running
+from api.users import require_job_owner
 
 logger = logging.getLogger("api.routes.jobs")
 router = APIRouter(tags=["jobs"])
 
 
 @router.post("/api/jobs")
-async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTasks):
+async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTasks,
+                         user: dict = Depends(require_job_owner)):
     """Start a blog generation job."""
     # ── Pre-flight Topic Guard ────────────────────────────────────────────
     # Reject unsafe / nonsensical topics BEFORE creating a job or burning
@@ -44,7 +46,8 @@ async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTask
         )
 
     generation_config = req.model_dump(exclude={"topic"}, mode="json")
-    job = await asyncio.to_thread(create_job, topic=req.topic, config=generation_config)
+    job = await asyncio.to_thread(create_job, topic=req.topic, config=generation_config,
+                                  owner_id=user["id"])
     job_id = job["id"]
 
     # Create threading.Event for HITL synchronisation with the worker thread
@@ -62,9 +65,9 @@ async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTask
 
 
 @router.get("/api/jobs")
-async def list_all_jobs():
-    """Return all jobs, newest-first."""
-    return await asyncio.to_thread(list_jobs_healed)
+async def list_all_jobs(user: dict = Depends(require_job_owner)):
+    """Return the caller's jobs, newest-first."""
+    return await asyncio.to_thread(list_jobs_healed, owner_id=user["id"])
 
 
 @router.get("/api/jobs/{job_id}")

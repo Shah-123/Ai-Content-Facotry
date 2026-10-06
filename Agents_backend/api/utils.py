@@ -127,7 +127,7 @@ def get_job_healed(job_id: str) -> Optional[dict]:
     return job
 
 
-def list_jobs_healed(limit: int = 50) -> list[dict]:
+def list_jobs_healed(limit: int = 50, owner_id: str | None = None) -> list[dict]:
     """Retrieve jobs list and run self-healing verification on their files."""
-    jobs = list_jobs(limit)
+    jobs = list_jobs(limit, owner_id)
     return [_verify_and_clean_job_files(j) for j in jobs]

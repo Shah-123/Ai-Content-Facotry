@@ -19,6 +19,21 @@ from unittest.mock import MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # ===========================================================================
+# 1b. Never touch the real data/ folder.
+#
+#    db.py migrates DB_PATH and api/users.py assigns ownerless jobs AT IMPORT
+#    TIME, and the event bus appends to data/events/. Before these overrides,
+#    simply running the suite migrated the developer's real web_jobs.db and
+#    left test event logs beside real ones. Fixtures still swap in their own
+#    per-test files on top of this.
+# ===========================================================================
+import tempfile
+
+_TEST_DATA = tempfile.mkdtemp(prefix="acf-tests-")
+os.environ["WEB_JOBS_DB"] = os.path.join(_TEST_DATA, "web_jobs.db")
+os.environ["EVENTS_DIR"] = os.path.join(_TEST_DATA, "events")
+
+# ===========================================================================
 # 2. API keys.
 #
 #    The golden harness makes REAL API calls, so it needs the real keys from

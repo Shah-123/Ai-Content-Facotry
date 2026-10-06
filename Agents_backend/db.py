@@ -13,10 +13,12 @@ from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any, Optional
 
-# Database lives in a data/ subdirectory to avoid uvicorn reload loops
+# Database lives in a data/ subdirectory to avoid uvicorn reload loops.
+# WEB_JOBS_DB overrides the file — the test suite points it at a temp file,
+# because init_db() below migrates whatever DB_PATH names at import time.
 _DATA_DIR = Path(__file__).parent / "data"
 _DATA_DIR.mkdir(exist_ok=True)
-DB_PATH = _DATA_DIR / "web_jobs.db"
+DB_PATH = Path(os.getenv("WEB_JOBS_DB") or _DATA_DIR / "web_jobs.db")
 
 
 # ============================================================================
@@ -56,7 +58,8 @@ CREATE TABLE IF NOT EXISTS web_jobs (
     image_size           TEXT DEFAULT '1024x1024',
     image_quality        TEXT DEFAULT 'standard',
     image_style          TEXT DEFAULT 'vivid',
-    config_json          TEXT DEFAULT '{}'
+    config_json          TEXT DEFAULT '{}',
+    owner_id             TEXT
 );
 """
 
@@ -140,7 +143,7 @@ def init_db():
                     except Exception as e:
                         print(f"   [Error] Migration failed: {e}")
 
-                for col in ("image_model", "image_size", "image_quality", "image_style", "config_json"):
+                for col in ("image_model", "image_size", "image_quality", "image_style", "config_json", "owner_id"):
                     if col not in columns:
                         try:
                             conn.execute(_format_sql(f"ALTER TABLE web_jobs ADD COLUMN {col} TEXT"))
@@ -149,6 +152,7 @@ def init_db():
                             print(f"   [Error] Migration of {col} failed: {e}")
             else:
                 conn.execute("ALTER TABLE web_jobs ADD COLUMN IF NOT EXISTS config_json TEXT DEFAULT '{}'")
+                conn.execute("ALTER TABLE web_jobs ADD COLUMN IF NOT EXISTS owner_id TEXT")
                 conn.commit()
 
 
@@ -161,7 +165,8 @@ def create_job(topic: str, tone: str = "professional", sections: int = 3,
                generate_campaign: bool = False,
                image_model: str = "dall-e-3", image_size: str = "1024x1024",
                image_quality: str = "standard", image_style: str = "vivid",
-               config: Optional[dict[str, Any]] = None) -> dict:
+               config: Optional[dict[str, Any]] = None,
+               owner_id: Optional[str] = None) -> dict:
     """Insert a new job row and return the job dict."""
     job_id = str(uuid.uuid4())
     created_at = datetime.now(UTC).isoformat()
@@ -182,12 +187,12 @@ def create_job(topic: str, tone: str = "professional", sections: int = 3,
             _format_sql("""INSERT INTO web_jobs
                (id, topic, tone, sections, status, created_at,
                 generate_podcast, generate_video, generate_campaign,
-                image_model, image_size, image_quality, image_style, config_json)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""),
+                image_model, image_size, image_quality, image_style, config_json, owner_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""),
             (job_id, topic, job_config["tone"], job_config["sections"], "pending", created_at,
              int(job_config["generate_podcast"]), int(job_config["generate_video"]), int(job_config["generate_campaign"]),
              job_config["image_model"], job_config["image_size"], job_config["image_quality"], job_config["image_style"],
-             json.dumps(job_config))
+             json.dumps(job_config), owner_id)
         )
         conn.commit()
     return get_job(job_id)
@@ -203,12 +208,18 @@ def get_job(job_id: str) -> Optional[dict]:
     return _row_to_dict(row) if row else None
 
 
-def list_jobs(limit: int = 50) -> list[dict]:
-    """List jobs sorted newest-first."""
+def list_jobs(limit: int = 50, owner_id: Optional[str] = None) -> list[dict]:
+    """List jobs sorted newest-first — only `owner_id`'s jobs when given."""
     with get_db() as conn:
-        cursor = conn.execute(
-            _format_sql("SELECT * FROM web_jobs ORDER BY created_at DESC LIMIT ?"), (limit,)
-        )
+        if owner_id is None:
+            cursor = conn.execute(
+                _format_sql("SELECT * FROM web_jobs ORDER BY created_at DESC LIMIT ?"), (limit,)
+            )
+        else:
+            cursor = conn.execute(
+                _format_sql("SELECT * FROM web_jobs WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?"),
+                (owner_id, limit),
+            )
         rows = cursor.fetchall()
     return [_row_to_dict(r) for r in rows]
 
