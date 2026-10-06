@@ -90,3 +90,56 @@ def test_research_node_downgrades_when_every_search_returns_nothing():
     assert out["evidence"] == []
     assert out["mode"] == "closed_book"
     assert out["needs_research"] is False
+
+
+# ---------------------------------------------------------------------------
+# Evidence extraction — parallel calls + grounding guard
+# ---------------------------------------------------------------------------
+
+
+def test_extraction_splits_sources_across_parallel_calls_and_drops_unscraped_urls():
+    """Every source goes to exactly one call, the calls overlap in time, the
+    item target is shared out by source count, and an item citing a URL that
+    was never scraped is dropped."""
+    import re
+    import threading
+    import time
+
+    from Graph.state import EvidencePack
+
+    results = [{"title": f"T{i}", "url": f"https://site{i}.com/p", "snippet": f"alpha{i} bravo{i} charlie{i} delta{i} echo{i}",
+                "published_at": None, "source": f"site{i}.com"} for i in range(15)]
+    calls, lock = [], threading.Lock()
+
+    class FakeLLM:
+        def with_structured_output(self, _):
+            return self
+
+        def invoke(self, messages):
+            human = messages[1].content
+            urls = re.findall(r"\((https://site\d+\.com/p)\)", human)
+            asked = int(re.search(r"extract (\d+) UNIQUE", human).group(1))
+            with lock:
+                calls.append((time.perf_counter(), urls, asked))
+            time.sleep(0.3)
+            items = [_evidence(u) for u in urls[:asked]]
+            if "site0.com" in human:
+                items.append(_evidence("https://invented.example/never-scraped"))
+            return EvidencePack(evidence=items)
+
+    state = {"topic": "t", "mode": "hybrid", "queries": ["q"], "recency_days": 3650, "_job_id": ""}
+    with patch.object(research_mod, "_tavily_search", return_value=results), \
+         patch.object(research_mod, "scrape_full_webpage", return_value="page text " * 60), \
+         patch.object(research_mod, "llm", FakeLLM()):
+        start = time.perf_counter()
+        out = research_node(state)
+        elapsed = time.perf_counter() - start
+
+    assert len(calls) == 3
+    seen = [u for _, urls, _ in calls for u in urls]
+    assert sorted(seen) == sorted(r["url"] for r in results)       # each source exactly once
+    assert [asked for *_, asked in calls] == [3, 3, 3]             # 9 total, as before
+    assert elapsed < 0.6, f"extraction calls ran one after another ({elapsed:.2f}s)"
+    urls_out = [e.url for e in out["evidence"]]
+    assert "https://invented.example/never-scraped" not in urls_out
+    assert len(urls_out) == 9
