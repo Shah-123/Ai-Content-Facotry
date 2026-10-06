@@ -5,7 +5,7 @@ Sets up sys.path, environment variables, and sys.modules stubs so that
 test imports resolve correctly WITHOUT triggering any API calls or sys.exit().
 
 Strategy: stub out heavy optional dependencies that are not installed in the
-test environment (google-genai, moviepy, PIL, BS4, twikit) using MagicMock
+test environment (moviepy, PIL, BS4, twikit) using MagicMock
 objects BEFORE any project code is imported. This is the standard pattern for
 testing code that conditionally uses optional libraries.
 """
@@ -38,7 +38,6 @@ if os.getenv("RUN_GOLDEN_TESTS") == "1":
 # OPENAI_API_KEY is missing at import time, so one must always be present.
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy-key-for-unit-tests")
 os.environ.setdefault("TAVILY_API_KEY", "tvly-test-dummy-key")
-os.environ.setdefault("GOOGLE_API_KEY", "AIzaSy-test-dummy-key")
 os.environ.setdefault("PEXELS_API_KEY", "test-dummy-pexels-key")
 
 # ===========================================================================
@@ -54,15 +53,6 @@ def _mock_module(*names):
             key = ".".join(parts[:i])
             if key not in sys.modules:
                 sys.modules[key] = MagicMock()
-
-# google-genai (used by video.py, podcast_studio.py, multimedia.py)
-_mock_module(
-    "google",
-    "google.genai",
-    "google.genai.types",
-    "google.auth",
-    "google.auth.credentials",
-)
 
 # moviepy (used by video.py)
 _mock_module(

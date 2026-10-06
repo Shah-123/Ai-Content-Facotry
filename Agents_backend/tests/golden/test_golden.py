@@ -6,7 +6,7 @@ asserts the output meets documented quality bounds (QA score, evidence
 count, word count, etc.).
 
 These tests:
-  - Cost real API tokens (OpenAI + Tavily + optionally Gemini)
+  - Cost real API tokens (OpenAI + Tavily)
   - Take several minutes per topic to complete
   - Therefore skip by default — only run when explicitly enabled
 

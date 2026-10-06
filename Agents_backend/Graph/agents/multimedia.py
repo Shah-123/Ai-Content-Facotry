@@ -1,6 +1,5 @@
 import os
 import re
-import time
 import random
 import urllib.parse
 import urllib.request
@@ -113,41 +112,6 @@ def _generate_image_openai_dalle(prompt: str, model: str | None = "dall-e-3", si
     return None
 
 
-def _generate_image_bytes_google(prompt: str) -> Optional[bytes]:
-    """Generates image using Google GenAI (Gemini) with retries for rate limits."""
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        return None
-
-    try:
-        from google import genai
-        from google.genai import types
-        client = genai.Client(api_key=api_key)
-
-        for attempt in range(3):
-            try:
-                resp = client.models.generate_content(
-                    model="gemini-2.5-flash-image",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
-                )
-                if resp.candidates and resp.candidates[0].content.parts:
-                    for part in resp.candidates[0].content.parts:
-                        if part.inline_data:
-                            return part.inline_data.data
-                return None
-            except Exception as e:
-                err_str = str(e)
-                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                    wait_time = (2 ** attempt) + random.uniform(0, 1)
-                    time.sleep(wait_time)
-                    continue
-                break
-    except Exception as e:
-        logger.warning(f"Google Gemini image generation skipped: {e}")
-    return None
-
-
 def _generate_image_pollinations(prompt: str) -> Optional[bytes]:
     """
     Fallback AI image generator using Pollinations.ai (Free, zero API key required).
@@ -173,8 +137,7 @@ def _generate_image_multi_provider(prompt: str, model: str | None = "dall-e-3", 
     """
     Multi-provider AI image generation pipeline:
     1. Tries OpenAI DALL-E
-    2. Tries Google Gemini / Imagen
-    3. Falls back to Pollinations.ai (Free, zero API key needed)
+    2. Falls back to Pollinations.ai (Free, zero API key needed)
     """
     model = model or "dall-e-3"
     size = size or "1024x1024"
@@ -187,13 +150,7 @@ def _generate_image_multi_provider(prompt: str, model: str | None = "dall-e-3", 
         logger.info(f"  🎨 Image generated via OpenAI {model}")
         return image_bytes
 
-    # 2. Google Gemini
-    image_bytes = _generate_image_bytes_google(prompt)
-    if image_bytes:
-        logger.info("  🎨 Image generated via Google Gemini")
-        return image_bytes
-
-    # 3. Pollinations AI (Zero API Key Fallback)
+    # 2. Pollinations AI (Zero API Key Fallback)
     image_bytes = _generate_image_pollinations(prompt)
     if image_bytes:
         logger.info("  🎨 Image generated via Pollinations AI (Free Zero-Key Engine)")

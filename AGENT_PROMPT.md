@@ -125,7 +125,7 @@ Do not stop at "code generated." Stop at "verified."
 
 **Tests**
 
-- `tests/conftest.py` stubs heavy optional deps (`google.genai`, `moviepy`, `PIL`, …)
+- `tests/conftest.py` stubs heavy optional deps (`moviepy`, `PIL`, …)
   with `MagicMock` **before** project imports and injects dummy API keys. Adding a new
   heavy or network dependency means adding its stub there, or the whole suite breaks.
 - Unit tests must never touch the network. Golden tests (`tests/golden/`) self-skip
