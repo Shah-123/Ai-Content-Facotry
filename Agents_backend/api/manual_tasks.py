@@ -266,16 +266,56 @@ def _save_content(context: ManualTaskContext) -> dict[str, Any]:
         return {}
 
 
-def _read_blog_markdown(base_path: Path, meta: dict[str, Any]) -> str:
+def _blog_markdown_path(base_path: Path, meta: dict[str, Any]) -> Path:
     saved_path = meta.get("file_paths", {}).get("blog")
     if saved_path and Path(saved_path).exists():
-        return Path(saved_path).read_text(encoding="utf-8")
+        return Path(saved_path)
 
     content_files = list((base_path / "content").glob("*.md"))
     candidates = content_files or list(base_path.glob("*.md"))
     if not candidates:
         raise FileNotFoundError(f"Could not locate blog markdown file in {base_path}")
-    return candidates[0].read_text(encoding="utf-8")
+    return candidates[0]
+
+
+def _read_blog_markdown(base_path: Path, meta: dict[str, Any]) -> str:
+    return _blog_markdown_path(base_path, meta).read_text(encoding="utf-8")
+
+
+# The pipeline and every manual task write the article themselves when they
+# finish, so an edit saved while one is in flight would be silently overwritten.
+_BUSY_STATUSES = {"pending", "running", "awaiting_approval"}
+
+
+def save_edited_article(job_id: str, content: str) -> dict[str, Any]:
+    """Persist an article edited in the UI to BOTH copies the app reads.
+
+    The job row's `final_content` feeds the UI, GET /blog and the PDF/DOCX/HTML
+    exports; the Markdown file feeds every manual task (video, podcast, social,
+    images, QA, DeepEval). Updating only one left the two disagreeing.
+
+    Raises LookupError for an unknown job, RuntimeError when the job is busy or
+    has no article yet.
+    """
+    job = get_job_healed(job_id)
+    if not job:
+        raise LookupError(f"Job {job_id} not found")
+    if job.get("status") in _BUSY_STATUSES:
+        raise RuntimeError("This job is still running; save your edits once it finishes.")
+    if not job.get("final_content") or not job.get("blog_folder"):
+        raise RuntimeError("This job has no article to edit.")
+
+    base_path = Path(job["blog_folder"])
+    meta_path = base_path / "metadata" / "metadata.json"
+    meta = _read_json(meta_path) if meta_path.exists() else {}
+    if not isinstance(meta, dict):
+        meta = {}
+
+    word_count = len(content.split())
+    with _get_job_lock(job_id):
+        _blog_markdown_path(base_path, meta).write_text(content, encoding="utf-8")
+        update_job(job_id, final_content=content, word_count=word_count)
+    return {"word_count": word_count}
 
 
 def _read_plan(base_path: Path) -> Any:
