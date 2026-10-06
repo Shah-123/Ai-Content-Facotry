@@ -6,6 +6,8 @@ LLM calls are mocked so the suite runs offline.
 """
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 from unittest.mock import patch
 
@@ -104,8 +106,9 @@ def _fake_pack(snippets: list[str]) -> EvidencePack:
 
 def test_extract_evidence_uses_filename_as_source(monkeypatch):
     chunks = [
-        di.Chunk("page-one body", page_start=1, page_end=1),
-        di.Chunk("page-two body", page_start=2, page_end=2),
+        # Snippets must be verbatim from their chunk, so the chunk says it.
+        di.Chunk("page-one body: fact about the topic", page_start=1, page_end=1),
+        di.Chunk("page-two body: fact about the topic", page_start=2, page_end=2),
     ]
 
     # Mock the LLM extractor: each chunk yields exactly one EvidenceItem.
@@ -134,16 +137,17 @@ def test_extract_evidence_uses_filename_as_source(monkeypatch):
 
 def test_extract_evidence_truncates_long_documents(monkeypatch):
     many = [
-        di.Chunk(f"chunk {i}", page_start=i + 1, page_end=i + 1)
+        di.Chunk(f"chunk {i} reports unique fact {i}.", page_start=i + 1, page_end=i + 1)
         for i in range(di._MAX_CHUNKS + 5)
     ]
 
     class _Extractor:
         calls = 0
 
-        def invoke(self, _msgs):
+        def invoke(self, msgs):
             _Extractor.calls += 1
-            return _fake_pack([f"unique fact {_Extractor.calls}"])
+            # Quote the chunk this call was given (calls run in parallel).
+            return _fake_pack([re.search(r"unique fact \d+", msgs[1].content).group(0)])
 
     class _LLM:
         def with_structured_output(self, _schema):

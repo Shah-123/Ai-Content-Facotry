@@ -2,7 +2,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from Graph.state import State, Plan, Task
 from Graph.templates import ORCH_SYSTEM
-from .utils import logger, llm, llm_planner, _job, _emit
+from .utils import logger, llm, llm_planner, _job, _emit, fence, UNTRUSTED_NOTE
 
 # ✅ FIX #7: Named section constants (unchanged from before)
 FIXED_OPENING_SECTIONS = 2   # Section 1: Hook/Intro, Section 2: Context/Background
@@ -106,7 +106,8 @@ Target Tone: {target_tone}
 Target Keywords: {keywords_str}
 
 Evidence Context:
-{[e.model_dump() for e in evidence][:10]}
+{UNTRUSTED_NOTE}
+{fence(str([e.model_dump() for e in evidence][:10]))}
 
 Create a blog plan that:
 1. Maintains '{target_tone}' tone consistently throughout all sections

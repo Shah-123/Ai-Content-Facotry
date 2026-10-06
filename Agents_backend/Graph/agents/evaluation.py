@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from Graph.state import State
-from Graph.agents.utils import llm_judge, _JUDGE_MODEL, _job, _emit, truncate_for_eval
+from Graph.agents.utils import llm_judge, _JUDGE_MODEL, _job, _emit, truncate_for_eval, fence, UNTRUSTED_NOTE
 
 logger = logging.getLogger("blog_pipeline")
 
@@ -146,7 +146,8 @@ Topic: {topic}
 Target Tone: {target_tone}
 
 RESEARCH EVIDENCE PROVIDED TO THE WRITER:
-{formatted_evidence[:8000]}
+{UNTRUSTED_NOTE}
+{fence(formatted_evidence[:8000])}
 
 BLOG CONTENT UNDER EVALUATION:
 {graded_text}
