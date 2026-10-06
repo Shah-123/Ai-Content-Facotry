@@ -36,6 +36,12 @@ class RevisePlanRequest(BaseModel):
     feedback: str
 
 
+class SaveBlogRequest(BaseModel):
+    """An article edited in the Content view's Markdown editor."""
+
+    content: str = Field(min_length=1, max_length=1_000_000)
+
+
 class UpdatePlanRequest(BaseModel):
     """Accepts a directly-edited plan from the frontend outline editor."""
 

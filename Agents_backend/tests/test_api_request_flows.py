@@ -296,3 +296,46 @@ class TestUploadValidation:
 
     def test_upload_id_with_traversal_characters_is_rejected(self, client):
         assert client.get("/api/uploads/..%2F..%2Fetc").status_code in (400, 404)
+
+
+class TestSaveEditedArticle:
+    """PUT /api/jobs/{id}/blog must update BOTH copies of the article: the job
+    row (UI, /blog, exports) and the Markdown file (manual tasks)."""
+
+    def _finished_job(self, tmp_path, status="completed"):
+        import db
+
+        folder = tmp_path / "blog"
+        (folder / "content").mkdir(parents=True)
+        md = folder / "content" / "edit_me.md"
+        md.write_text("# Old\n\nold text", encoding="utf-8")
+        job = db.create_job(topic="Edit me")
+        db.update_job(job["id"], status=status, blog_folder=str(folder),
+                      final_content="# Old\n\nold text")
+        return job["id"], md
+
+    def test_save_updates_the_row_the_file_and_the_exports(self, client, tmp_path):
+        job_id, md = self._finished_job(tmp_path)
+
+        r = client.put(f"/api/jobs/{job_id}/blog", json={"content": "# New\n\nedited words here"})
+
+        assert r.status_code == 200
+        assert r.json() == {"word_count": 5}
+        assert client.get(f"/api/jobs/{job_id}/blog").json()["content"] == "# New\n\nedited words here"
+        assert md.read_text(encoding="utf-8") == "# New\n\nedited words here"   # manual tasks read this
+        html = client.get(f"/api/jobs/{job_id}/export/html").text
+        assert "edited words here" in html and "old text" not in html
+
+    def test_refuses_while_the_job_is_running(self, client, tmp_path):
+        """The pipeline or a manual task would overwrite the edit when it finishes."""
+        job_id, md = self._finished_job(tmp_path, status="running")
+
+        r = client.put(f"/api/jobs/{job_id}/blog", json={"content": "edited"})
+
+        assert r.status_code == 409
+        assert md.read_text(encoding="utf-8") == "# Old\n\nold text"
+
+    def test_unknown_job_is_404_and_empty_content_is_rejected(self, client, tmp_path):
+        assert client.put("/api/jobs/nope/blog", json={"content": "x"}).status_code == 404
+        job_id, _ = self._finished_job(tmp_path)
+        assert client.put(f"/api/jobs/{job_id}/blog", json={"content": ""}).status_code == 422

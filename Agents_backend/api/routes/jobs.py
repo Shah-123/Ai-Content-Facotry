@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 
 from db import create_job, get_job, update_job, delete_job
-from api.schemas import CreateJobRequest, RevisePlanRequest, UpdatePlanRequest
+from api.schemas import CreateJobRequest, RevisePlanRequest, SaveBlogRequest, UpdatePlanRequest
 from api.state import _worker_approval_events, _plan_revisions, _direct_plan_updates
 from api.utils import get_job_healed, list_jobs_healed
 from api.background import _run_pipeline, _run_manual_task, _ensure_pipeline_running
@@ -121,6 +121,19 @@ async def get_blog_content(job_id: str):
         except Exception:
             pass
     return {"content": content, "format": "markdown"}
+
+
+@router.put("/api/jobs/{job_id}/blog")
+async def save_blog_content(job_id: str, req: SaveBlogRequest):
+    """Save the article edited in the UI, so exports and manual tasks use it."""
+    from api.manual_tasks import save_edited_article
+
+    try:
+        return await asyncio.to_thread(save_edited_article, job_id, req.content)
+    except LookupError:
+        raise HTTPException(404, "Job not found")
+    except (RuntimeError, FileNotFoundError) as e:
+        raise HTTPException(409, str(e))
 
 
 @router.get("/api/jobs/{job_id}/export/html")

@@ -292,6 +292,19 @@ export class APIClient {
     if (!res.ok) throw new Error('Failed to update plan');
   }
 
+  /** Save the edited article so exports and re-run media tasks use it. */
+  static async saveBlog(id: string, content: string): Promise<void> {
+    const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/blog`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    if (!res.ok) {
+      const detail = (await res.json().catch(() => null))?.detail;
+      throw new Error(typeof detail === 'string' ? detail : 'Failed to save article');
+    }
+  }
+
   static async triggerImages(id: string): Promise<void> {
     const res = await apiFetch(`${API_BASE_URL}/api/jobs/${id}/generate-images`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to trigger images');

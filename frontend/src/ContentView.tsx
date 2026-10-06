@@ -4,7 +4,7 @@ import {
   CheckCircle2, Clock, Podcast, Film, Share2, Download,
   FileText, Settings, Image as ImageIcon,
   Copy, RefreshCw, Bot, Trash2,
-  Sparkles, Edit3, Zap, FileCode, Check, Printer, ExternalLink
+  Sparkles, Edit3, Zap, FileCode, Check, Printer, ExternalLink, Save
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -71,6 +71,13 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
     setEditedContent(currentJob?.final_content ?? '');
   }, [currentJob?.id, currentJob?.final_content]);
 
+  // PDF/DOCX/HTML exports and the media re-runs read the server copy, so an
+  // edit only reaches them once saved.
+  const [saving, setSaving] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const isDirty = editedContent !== (currentJob?.final_content ?? '');
+  useEffect(() => setSaveError(null), [currentJob?.id]);
+
   const { triggering, getCurrentRunEvents, getLastTaskError, handleTrigger, isTaskRunning } = useJobActions({
     currentJob,
     events,
@@ -117,6 +124,29 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
       </main>
     );
   }
+
+  const saveEdits = async (): Promise<boolean> => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await APIClient.saveBlog(currentJob.id, editedContent);
+      refreshJob();
+      return true;
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save article');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Server-side exports render the saved copy: save unsaved edits first, then
+  // start the download. With nothing unsaved the link behaves as before.
+  const exportSaved = (format: 'pdf' | 'docx' | 'html') => async (e: React.MouseEvent) => {
+    if (!isDirty) return;
+    e.preventDefault();
+    if (await saveEdits()) window.location.assign(APIClient.getExportUrl(currentJob.id, format));
+  };
 
   return (
     <main className="flex-1 p-6 md:p-10 flex flex-col relative overflow-y-auto w-full max-w-6xl mx-auto">
@@ -222,6 +252,21 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                         {isEditing ? 'Preview' : 'Edit'}
                       </button>
 
+                      {(isDirty || saving) && (
+                        <button
+                          onClick={saveEdits}
+                          disabled={saving}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                          title="Save your edits so exports and media re-runs use them"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                      )}
+                      {saveError && !isEditing && (
+                        <span className="text-xs font-semibold text-rose-400">{saveError}</span>
+                      )}
+
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(editedContent);
@@ -237,6 +282,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                       {/* PDF Export */}
                       <a
                         href={APIClient.getExportUrl(currentJob.id, 'pdf')}
+                        onClick={exportSaved('pdf')}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-500/10 text-rose-500 dark:text-rose-400 hover:bg-rose-500/20 border border-rose-500/25 transition-all shadow-sm cursor-pointer"
@@ -249,6 +295,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                       {/* DOCX Export */}
                       <a
                         href={APIClient.getExportUrl(currentJob.id, 'docx')}
+                        onClick={exportSaved('docx')}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-sky-500/10 text-sky-500 dark:text-sky-400 hover:bg-sky-500/20 border border-sky-500/25 transition-all shadow-sm cursor-pointer"
@@ -261,6 +308,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                       {/* HTML Export */}
                       <a
                         href={APIClient.getExportUrl(currentJob.id, 'html')}
+                        onClick={exportSaved('html')}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-500 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/25 transition-all shadow-sm cursor-pointer"
@@ -303,7 +351,13 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                       <div className="flex flex-col gap-3">
                         <div className="flex items-center justify-between text-xs text-slate-500 border-b pb-2">
                           <span className="font-semibold text-slate-700">Markdown Editor</span>
-                          <span>Edits apply to preview, copy, and export — not saved to the server</span>
+                          <span className={saveError ? 'text-rose-600' : undefined}>
+                            {saveError
+                              ? saveError
+                              : isDirty
+                                ? 'Unsaved changes — preview, copy and Markdown export use them now; Save for PDF/DOCX/HTML and media re-runs'
+                                : 'All changes saved'}
+                          </span>
                         </div>
                         <textarea
                           value={editedContent}
