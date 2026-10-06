@@ -46,8 +46,18 @@ os.environ.setdefault("PEXELS_API_KEY", "test-dummy-pexels-key")
 # ===========================================================================
 
 def _mock_module(*names):
-    """Register MagicMock stubs for each dotted module name and all parents."""
+    """Register MagicMock stubs for each dotted module name and all parents —
+    only when the package is NOT installed.
+
+    It used to stub unconditionally, skipping only modules already imported.
+    PIL was "already imported" solely because the google-genai package pulled
+    it in during startup, so the video tests that need real Pillow passed by
+    accident and broke the moment google-genai was uninstalled.
+    """
+    import importlib.util
     for name in names:
+        if importlib.util.find_spec(name.split(".")[0]) is not None:
+            continue  # the real package is available; use it
         parts = name.split(".")
         for i in range(1, len(parts) + 1):
             key = ".".join(parts[:i])
