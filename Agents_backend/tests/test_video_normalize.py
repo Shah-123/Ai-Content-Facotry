@@ -111,3 +111,52 @@ def test_gradient_png_is_transparent_above_the_ramp(tmp_path):
     assert alpha[cut].max() == 0                # ramp starts at zero
     assert 188 <= alpha[-1].min() <= 194        # 0.75 * 255
     assert np.all(np.diff(alpha[cut:, 0]) >= 0)  # monotonic
+
+
+def test_caption_track_switches_on_the_frame_grid(tmp_path):
+    """Every caption state must last a whole number of frames and the track must
+    span the full duration — at the image demuxer's default 25 fps, switches
+    drifted off the 30 fps output grid by up to a frame."""
+    from Graph.agents.video import _write_caption_track, _load_font, SHORTS_FPS
+
+    words = [{"word": "hello", "start": 0.5, "end": 0.9},
+             {"word": "world", "start": 1.0, "end": 1.6}]
+    chunks = [{"text": "hello world", "start": 0.5, "end": 1.6, "words": words}]
+    playlist = _write_caption_track(chunks, 2.0, tmp_path, _load_font(64), _load_font(64, True))
+
+    durations = [float(l.split()[1]) for l in open(playlist) if l.startswith("duration")]
+    frames = [d * SHORTS_FPS for d in durations]
+    assert all(abs(f - round(f)) < 1e-3 for f in frames)
+    assert round(sum(frames)) == 2.0 * SHORTS_FPS
+    # blank to 0.5 s → "hello" lit 0.5–0.9 → gap → "world" lit 1.0–1.6 → tail to end+0.05 → blank
+    assert [round(f) for f in frames] == [15, 13, 2, 19, 1, 10]
+    # blank, hello-lit, nothing-lit, world-lit: the repeated gap state is drawn once
+    assert len(list(tmp_path.glob("cap_*.png"))) == 4
+
+
+def test_composite_renders_a_portrait_short(tmp_path):
+    """End to end: mixed-orientation clips + audio + captions → one 1080x1920 MP4."""
+    from Graph.agents.video import composite_shorts_video, build_caption_chunks, HookCard
+
+    ff = imageio_ffmpeg.get_ffmpeg_exe()
+    clips = []
+    for i, size in enumerate(["1280x720", "720x1280"]):
+        clip = tmp_path / f"c{i}.mp4"
+        subprocess.run([ff, "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"testsrc2=s={size}:r=24:d=1.5",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(clip)],
+                       check=True, capture_output=True)
+        clips.append(str(clip))
+    audio = tmp_path / "a.wav"
+    subprocess.run([ff, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=4", str(audio)],
+                   check=True, capture_output=True)
+
+    out = tmp_path / "short.mp4"
+    chunks = build_caption_chunks([], 4.0, "a short caption that spans the clip")
+    ok = composite_shorts_video(clips, str(audio), 4.0, chunks,
+                                HookCard(headline="Hook", subline="Sub"), str(out))
+
+    assert ok
+    assert _probe(out) == (SHORTS_W, SHORTS_H)
+    info = subprocess.run([ff, "-hide_banner", "-i", str(out)], capture_output=True).stderr.decode()
+    assert "Duration: 00:00:04.0" in info   # footage looped to the audio length
+    assert "Audio: aac" in info
