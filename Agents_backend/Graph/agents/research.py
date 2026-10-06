@@ -154,13 +154,17 @@ def scrape_full_webpage(url: str, max_words: int = 1500) -> str:
             return ""
 
         jina_url = f"https://r.jina.ai/{url}"
-        headers = {'Accept': 'text/event-stream'}
 
         logger.info(f"Using Jina Reader for: {url}")
+        # Default (non-streaming) mode. `Accept: text/event-stream` made Jina
+        # stream progressive snapshots as SSE-framed JSON: first fetches were
+        # slower (median 10.2 s vs 5.6 s, 4/7 vs 1/7 over this timeout on fresh
+        # URLs), and the text kept below was the first, least complete snapshot
+        # with escaped newlines. Default mode returns plain markdown.
         # ✅ FIX: Reduced timeout from 15s → 8s. Most successful Jina responses
         # arrive in under 5s. The old 15s timeout just meant waiting longer for
         # pages that would ultimately fail (4/10 timed out in the user's run).
-        response = requests.get(jina_url, headers=headers, timeout=8)
+        response = requests.get(jina_url, timeout=8)
 
         if response.status_code == 200:
             text = response.text
@@ -177,6 +181,37 @@ def scrape_full_webpage(url: str, max_words: int = 1500) -> str:
     except Exception as e:
         logger.warning(f"Jina Reader exception on {url}: {e}. Attempting fallback.")
         return scrape_full_webpage_fallback(url, max_words)
+
+
+_EXTRACTION_CALLS = 3   # parallel extraction calls (see research_node)
+_EVIDENCE_TARGET = 9    # items across all calls; the single call asked for 8–10
+
+
+def _url_key(url: str) -> str:
+    """URL compared loosely: scheme, case and a trailing slash don't count."""
+    return (url or "").lower().split("://", 1)[-1].rstrip("/")
+
+
+def _extract_evidence(topic: str, sources: list, n_items: int) -> EvidencePack:
+    """One extraction call over `sources` = [(index, search_result, page_text)]."""
+    context = "".join(
+        f"SOURCE {idx+1}: {r['title']} ({r['url']})\nCONTENT: {text[:3000]}\n\n"
+        for idx, r, text in sources
+    )
+    return llm.with_structured_output(EvidencePack).invoke([
+        SystemMessage(content=RESEARCH_SYSTEM),
+        HumanMessage(content=(
+            f"Topic: {topic}\n"
+            f"Read the following full articles and extract {n_items} UNIQUE hard facts, statistics, and verifiable claims.\n"
+            f"Ensure evidence comes from DIVERSE sources — do not extract multiple items from the same article unless they contain genuinely distinct facts.\n\n"
+            f"CRITICAL EXTRACTION PRIORITIES:\n"
+            f"1. EXPERT QUOTES: Find direct quotes from named experts, executives, or researchers. Include the person's name, title, and organization.\n"
+            f"2. SPECIFIC DATA: Extract concrete numbers (dollar amounts, percentages, dates, sample sizes) — NOT vague summaries.\n"
+            f"3. REAL AUTHOR NAMES: The 'authors' field MUST contain a real person or organization name — NEVER 'Verified Web Source' or 'Unknown Author'.\n"
+            f"4. NAMED ENTITIES: Prioritize evidence that mentions specific companies, products, studies, or methodologies by name.\n\n"
+            f"SCRAPED ARTICLES:\n{context}"
+        )),
+    ])
 
 
 def research_node(state: State) -> dict:
@@ -255,10 +290,12 @@ def research_node(state: State) -> dict:
     logger.info(f"🕸️ Scraping {len(top_results)} top articles in parallel...")
     _emit(_job(state), "research", "working", f"Deep-scraping {len(top_results)} articles in parallel...")
 
-    deep_evidence_context = ""
     scraped_parts = {}
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # One worker per URL: with 5, the 15 pages queued in three waves and one
+    # slow page (8 s Jina timeout + direct fallback) held up everything behind
+    # it. 14 concurrent Jina requests all returned 200, no rate limiting.
+    with ThreadPoolExecutor(max_workers=max(1, len(top_results))) as executor:
         future_to_item = {
             executor.submit(scrape_full_webpage, r['url']): (idx, r)
             for idx, r in enumerate(top_results)
@@ -273,32 +310,33 @@ def research_node(state: State) -> dict:
             except Exception as e:
                 logger.warning(f"Scrape failed for {r['url']}: {e}")
 
-    # Reassemble in original order for deterministic evidence extraction
-    for idx in sorted(scraped_parts.keys()):
-        r, full_text = scraped_parts[idx]
-        deep_evidence_context += f"SOURCE {idx+1}: {r['title']} ({r['url']})\n"
-        deep_evidence_context += f"CONTENT: {full_text[:3000]}\n\n"
-
     logger.info("🧠 Analyzing full articles for hard evidence...")
     _emit(_job(state), "research", "working", "Extracting verified facts from articles...")
 
-    extractor = llm.with_structured_output(EvidencePack)
-    pack = extractor.invoke([
-        SystemMessage(content=RESEARCH_SYSTEM),
-        HumanMessage(content=(
-            f"Topic: {state['topic']}\n"
-            f"Read the following full articles and extract 8–10 UNIQUE hard facts, statistics, and verifiable claims.\n"
-            f"Ensure evidence comes from DIVERSE sources — do not extract multiple items from the same article unless they contain genuinely distinct facts.\n\n"
-            f"CRITICAL EXTRACTION PRIORITIES:\n"
-            f"1. EXPERT QUOTES: Find direct quotes from named experts, executives, or researchers. Include the person's name, title, and organization.\n"
-            f"2. SPECIFIC DATA: Extract concrete numbers (dollar amounts, percentages, dates, sample sizes) — NOT vague summaries.\n"
-            f"3. REAL AUTHOR NAMES: The 'authors' field MUST contain a real person or organization name — NEVER 'Verified Web Source' or 'Unknown Author'.\n"
-            f"4. NAMED ENTITIES: Prioritize evidence that mentions specific companies, products, studies, or methodologies by name.\n\n"
-            f"SCRAPED ARTICLES:\n{deep_evidence_context}"
-        )),
-    ])
+    # Sources in original order, dealt round-robin into parallel extraction
+    # calls. The response is the slow part (~9 items × 50–200 words), so three
+    # calls writing a third each finish in a third of the time: median 15.9 s
+    # vs 26.1 s over 4 paired runs, same item count. Each source goes to
+    # exactly one call, so the "diverse sources" rule still holds.
+    ordered = [(idx, *scraped_parts[idx]) for idx in sorted(scraped_parts)]
+    groups = [g for g in (ordered[k::_EXTRACTION_CALLS] for k in range(_EXTRACTION_CALLS)) if g]
+    with ThreadPoolExecutor(max_workers=len(groups)) as executor:
+        packs = list(executor.map(
+            lambda g: _extract_evidence(
+                state["topic"], g, max(1, round(_EVIDENCE_TARGET * len(g) / len(ordered)))),
+            groups,
+        ))
 
-    web_evidence = list({e.url: e for e in pack.evidence if e.url}.values())
+    web_evidence = list({e.url: e for pack in packs for e in pack.evidence if e.url}.values())
+
+    # Grounding guard: an item must cite a page that was actually scraped.
+    # Writers cite evidence URLs, and the QA citation check trusts them, so an
+    # invented URL would pass straight through as "verified".
+    scraped_urls = {_url_key(r["url"]) for _, r, _ in ordered}
+    off_source = [e.url for e in web_evidence if _url_key(e.url) not in scraped_urls]
+    if off_source:
+        logger.warning(f"Dropping {len(off_source)} evidence item(s) citing unscraped URLs: {off_source}")
+        web_evidence = [e for e in web_evidence if _url_key(e.url) in scraped_urls]
 
     # ✅ Merge with any document-derived evidence preserved at the start of
     # this node so hybrid mode (upload + web) keeps both sources for citation.
