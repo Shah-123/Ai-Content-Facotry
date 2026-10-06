@@ -2,6 +2,8 @@ import os
 import time
 import random
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -15,6 +17,9 @@ from Graph.agents.utils import logger, _job, _emit, llm_quality
 
 _TTS_MAX_ATTEMPTS = 3
 _TTS_BACKOFF_BASE = 2
+# ponytail: fixed cap, not tied to the account's rate-limit tier; a 429 falls
+# into the per-turn retry/backoff. Lower it if retries show up in the logs.
+_TTS_CONCURRENCY = 6
 
 # Voice assignments: distinct OpenAI voices for each host
 # nova = bright/energetic (Host A),  onyx = deep/warm (Host B)
@@ -221,51 +226,49 @@ Guidelines:
     import io
     import wave as wave_lib
 
-    audio_segments: list[bytes] = []   # raw PCM frames for each turn
+    turns = [(idx, turn) for idx, turn in enumerate(script.turns) if turn.text.strip()]
+    done = 0
+    done_lock = threading.Lock()
 
-    for idx, turn in enumerate(script.turns):
-        voice    = _VOICE_MAP.get(turn.speaker, "nova")
-        turn_txt = turn.text.strip()
-        if not turn_txt:
-            continue
-
-        logger.info(
-            f"🎙️ Synthesising turn {idx + 1}/{len(script.turns)} "
-            f"({turn.speaker} → voice: {voice})..."
-        )
-        # One TTS call per turn, ~6 minutes for a full episode. Without a
-        # per-turn event the UI sits on "Generating..." long enough to look
-        # hung, and users re-trigger a task that is still running fine.
-        _emit(_job(state), "podcast_generator", "working",
-              f"Synthesising audio... turn {idx + 1}/{len(script.turns)}",
-              {"progress": (idx + 1) / len(script.turns)})
-
-        success = False
+    def _synthesise(item) -> bytes | None:
+        """One turn → raw PCM, with retries. None if every attempt failed."""
+        nonlocal done
+        idx, turn = item
+        voice = _VOICE_MAP.get(turn.speaker, "nova")
+        logger.info(f"🎙️ Synthesising turn {idx + 1}/{len(script.turns)} "
+                    f"({turn.speaker} → voice: {voice})...")
         for attempt in range(1, _TTS_MAX_ATTEMPTS + 1):
             try:
-                # OpenAI TTS — returns raw MP3/PCM bytes directly
                 response = client.audio.speech.create(
                     model="tts-1-hd",       # high-quality model
                     voice=voice,
-                    input=turn_txt,
+                    input=turn.text.strip(),
                     response_format="pcm",  # 24 kHz, 16-bit, mono — matches WAV params
                 )
-                audio_segments.append(response.content)
                 logger.info(f"   ✅ Turn {idx + 1} synthesised ({len(response.content):,} bytes).")
-                success = True
-                break
-
+                # The UI needs a tick per finished turn or a long synthesis
+                # reads as hung and gets re-triggered.
+                with done_lock:
+                    done += 1
+                    _emit(_job(state), "podcast_generator", "working",
+                          f"Synthesising audio... {done}/{len(turns)} turns done",
+                          {"progress": done / len(turns)})
+                return response.content
             except Exception as e:
-                err = str(e)
                 logger.warning(f"   ⚠️ Turn {idx + 1} attempt {attempt} failed: {e}")
                 if attempt < _TTS_MAX_ATTEMPTS:
                     wait = (_TTS_BACKOFF_BASE ** attempt) + random.random()
                     logger.info(f"   ⏳ Retrying in {wait:.1f}s...")
                     time.sleep(wait)
+        logger.error(f"   ❌ Turn {idx + 1} failed after {_TTS_MAX_ATTEMPTS} attempts.")
+        return None
 
-        if not success:
-            logger.error(f"   ❌ Turn {idx + 1} failed after {_TTS_MAX_ATTEMPTS} attempts.")
-            return False
+    # Turns are independent requests: one at a time, a 21–23 turn episode
+    # spent 101–128 s here. map() keeps results in script order.
+    with ThreadPoolExecutor(max_workers=_TTS_CONCURRENCY) as pool:
+        audio_segments = list(pool.map(_synthesise, turns))   # raw PCM per turn
+    if any(segment is None for segment in audio_segments):
+        return False
 
     # ── Merge all PCM segments into a single WAV ──────────────────────────
     if not audio_segments:
