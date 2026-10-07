@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from collections import defaultdict
 from typing import Any
 
@@ -84,18 +85,24 @@ def _price_for(model: str) -> tuple[float, float]:
 # ---------------------------------------------------------------------------
 
 _lock = threading.Lock()
-_totals: dict[str, dict[str, int]] = defaultdict(
-    lambda: {"calls": 0, "input_tokens": 0, "output_tokens": 0}
-)
+_ZERO = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0, "seconds": 0.0}
+_totals: dict[str, dict[str, Any]] = defaultdict(lambda: dict(_ZERO))
 
 
-def record(model: str, input_tokens: int, output_tokens: int) -> None:
-    """Add one call's usage to the process-wide total. Thread-safe."""
+def record(model: str, input_tokens: int, output_tokens: int,
+           reasoning_tokens: int = 0, seconds: float = 0.0) -> None:
+    """Add one call's usage to the process-wide total. Thread-safe.
+
+    `reasoning_tokens` is the hidden part of `output_tokens` (already counted
+    and billed there); `seconds` is the call's wall-clock time.
+    """
     with _lock:
         row = _totals[model or "unknown"]
         row["calls"] += 1
         row["input_tokens"] += int(input_tokens or 0)
         row["output_tokens"] += int(output_tokens or 0)
+        row["reasoning_tokens"] += int(reasoning_tokens or 0)
+        row["seconds"] += float(seconds or 0.0)
 
 
 def snapshot() -> dict[str, dict[str, int]]:
@@ -126,15 +133,17 @@ def delta(before: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
     now = snapshot()
 
     by_model: dict[str, dict[str, Any]] = {}
-    tot_calls = tot_in = tot_out = 0
-    tot_cost = 0.0
+    tot_calls = tot_in = tot_out = tot_reason = 0
+    tot_cost = tot_secs = 0.0
     priced = True
 
     for model, row in now.items():
-        base = before.get(model, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+        base = {**_ZERO, **before.get(model, {})}
         calls = row["calls"] - base["calls"]
         inp = row["input_tokens"] - base["input_tokens"]
         out = row["output_tokens"] - base["output_tokens"]
+        reason = row["reasoning_tokens"] - base["reasoning_tokens"]
+        secs = row["seconds"] - base["seconds"]
         if calls <= 0 and inp <= 0 and out <= 0:
             continue
 
@@ -148,6 +157,8 @@ def delta(before: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
             "input_tokens": inp,
             "output_tokens": out,
             "total_tokens": inp + out,
+            "reasoning_tokens": reason,
+            "seconds": round(secs, 2),
             "cost_usd": round(cost, 6),
             "price_per_1m_input": p_in,
             "price_per_1m_output": p_out,
@@ -155,6 +166,8 @@ def delta(before: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
         tot_calls += calls
         tot_in += inp
         tot_out += out
+        tot_reason += reason
+        tot_secs += secs
         tot_cost += cost
 
     return {
@@ -164,6 +177,8 @@ def delta(before: dict[str, dict[str, int]] | None = None) -> dict[str, Any]:
             "input_tokens": tot_in,
             "output_tokens": tot_out,
             "total_tokens": tot_in + tot_out,
+            "reasoning_tokens": tot_reason,
+            "seconds": round(tot_secs, 2),
             "cost_usd": round(tot_cost, 6),
         },
         "priced": priced,
@@ -182,6 +197,8 @@ def format_report(usage: dict[str, Any]) -> str:
         f"Input tokens:   {t['input_tokens']:,}",
         f"Output tokens:  {t['output_tokens']:,}",
         f"Total tokens:   {t['total_tokens']:,}",
+        f"  of which hidden reasoning: {t.get('reasoning_tokens', 0):,} (inside output tokens)",
+        f"Model time:     {t.get('seconds', 0):.1f}s summed over calls (parallel calls overlap)",
         f"Estimated cost: ${t['cost_usd']:.4f} USD",
         "",
         "Per model",
@@ -194,7 +211,8 @@ def format_report(usage: dict[str, Any]) -> str:
             f"{model}",
             f"    calls {row['calls']:>4}   "
             f"in {row['input_tokens']:>8,}   out {row['output_tokens']:>7,}   "
-            f"${row['cost_usd']:.4f}",
+            f"reasoning {row.get('reasoning_tokens', 0):>7,}   "
+            f"{row.get('seconds', 0):>7.1f}s   ${row['cost_usd']:.4f}",
             f"    priced at ${row['price_per_1m_input']}/1M in, "
             f"${row['price_per_1m_output']}/1M out",
         ]
@@ -226,7 +244,16 @@ class UsageCallback(BaseCallbackHandler):
 
     raise_error = False
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._started: dict[Any, float] = {}  # run_id -> monotonic start
+
+    def on_chat_model_start(self, serialized, messages, *, run_id=None, **kwargs: Any) -> None:  # noqa: ANN001
+        self._started[run_id] = time.monotonic()
+
     def on_llm_end(self, response, **kwargs: Any) -> None:  # noqa: ANN001
+        started = self._started.pop(kwargs.get("run_id"), None)
+        seconds = time.monotonic() - started if started is not None else 0.0
         try:
             model = ""
             if getattr(response, "llm_output", None):
@@ -240,11 +267,15 @@ class UsageCallback(BaseCallbackHandler):
                         if not model:
                             meta = getattr(message, "response_metadata", {}) or {}
                             model = meta.get("model_name") or meta.get("model") or ""
+                        details = usage.get("output_token_details") or {}
                         record(
                             model or "unknown",
                             usage.get("input_tokens", 0),
                             usage.get("output_tokens", 0),
+                            details.get("reasoning", 0),
+                            seconds,
                         )
+                        seconds = 0.0  # one call, however many generations it returned
         except Exception:  # noqa: BLE001 - accounting must never break a run
             pass
 
@@ -294,6 +325,22 @@ def demo() -> None:
 
     # dated snapshots still price via longest-prefix match
     assert _price_for("gpt-4o-2024-11-20") == _DEFAULT_PRICES["gpt-4o"]
+
+    # reasoning tokens and call time are recorded alongside, not on top of, output
+    import uuid
+    rid = uuid.uuid4()
+    mid = snapshot()
+    cb.on_chat_model_start({}, [], run_id=rid)
+    time.sleep(0.01)
+    msg = AIMessage(content="x", usage_metadata={
+        "input_tokens": 10, "output_tokens": 300, "total_tokens": 310,
+        "output_token_details": {"reasoning": 256}})
+    cb.on_llm_end(LLMResult(generations=[[ChatGeneration(message=msg)]],
+                            llm_output={"model_name": "gpt-5-mini"}), run_id=rid)
+    dt = delta(mid)["total"]
+    assert (dt["output_tokens"], dt["reasoning_tokens"]) == (300, 256), dt
+    assert 0.01 <= dt["seconds"] < 5, dt
+    assert "hidden reasoning: 256" in format_report(delta(mid))
 
     # a malformed response must not raise
     cb.on_llm_end(object())
