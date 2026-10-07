@@ -101,12 +101,21 @@ export default function App() {
     });
   };
 
-  // Poll jobs every 15s and clean up the websocket on unmount.
+  // Poll jobs every 15s while the tab is visible (a background tab has no one
+  // to show the sidebar to), catch up the moment it is shown again, and clean
+  // up the websocket on unmount.
   useEffect(() => {
     fetchJobsList();
-    const interval = setInterval(fetchJobsList, 15000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchJobsList();
+    }, 15000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchJobsList();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
       wsClientRef.current.disconnect();
     };
   }, []);
