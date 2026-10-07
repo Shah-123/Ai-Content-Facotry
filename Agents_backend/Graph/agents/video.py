@@ -936,8 +936,10 @@ def video_generator_node(state: State) -> dict:
             return None
 
         try:
-            from moviepy.audio.io.AudioFileClip import AudioFileClip as _AClip
-            audio_dur = _AClip(audio_path).duration
+            # The voiceover is a WAV save_pcm_as_wav wrote, so its header has the
+            # length. AudioFileClip spawned an ffmpeg reader for this and never closed it.
+            with wave.open(audio_path, "rb") as wf:
+                audio_dur = wf.getnframes() / wf.getframerate()
             logger.info(f"   ⏱️ Audio duration: {audio_dur:.1f}s")
         except Exception as e:
             logger.error(f"Could not read audio duration: {e}")

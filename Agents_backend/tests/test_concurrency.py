@@ -152,16 +152,15 @@ def test_video_prep_chains_run_concurrently(tmp_path, monkeypatch):
 
     def tts(script, voice=None):
         barrier.wait()
-        return str(tmp_path / "voice.wav")
+        path = str(tmp_path / "voice.wav")
+        video.save_pcm_as_wav(b"\0\0" * 24000 * 30, path)  # 30 s of silence
+        return path
 
     class Planner:
         def invoke(self, _):
             barrier.wait()
             return video.VideoScenePlan(keywords=["a", "b"])
 
-    audio_mod = types.ModuleType("moviepy.audio.io.AudioFileClip")
-    audio_mod.AudioFileClip = lambda path: SimpleNamespace(duration=30.0)
-    monkeypatch.setitem(sys.modules, "moviepy.audio.io.AudioFileClip", audio_mod)
     monkeypatch.setattr(utils, "get_llm", lambda **_: SimpleNamespace(
         invoke=lambda _: SimpleNamespace(content="the script")))
     monkeypatch.setattr(video, "_build_voiceover_brief", lambda *_: "brief")
