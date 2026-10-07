@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Literal
 
-from Graph.agents.utils import logger, _job, _emit, llm_quality
+from Graph.agents.utils import logger, _job, _emit, llm_quality, _REQUEST_TIMEOUT
 
 # ============================================================================
 # CONSTANTS
@@ -65,7 +65,9 @@ def _get_openai_client():
     if not api_key:
         logger.warning("OPENAI_API_KEY not set — cannot generate podcast audio.")
         return None
-    return OpenAI(api_key=api_key)
+    # The per-turn loop owns retries and backoff, so the SDK's own are off; the
+    # timeout replaces the SDK's 600 s default, as for the chat clients.
+    return OpenAI(api_key=api_key, timeout=_REQUEST_TIMEOUT, max_retries=0)
 
 
 def _get_audio_file_clip():

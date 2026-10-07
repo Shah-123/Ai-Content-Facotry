@@ -52,7 +52,7 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from Graph.state import State
-from .utils import logger, llm, _job, _emit, _REQUEST_TIMEOUT
+from .utils import logger, llm, _job, _emit, _REQUEST_TIMEOUT, _MAX_RETRIES
 
 
 # ============================================================================
@@ -329,7 +329,7 @@ def get_word_timestamps(audio_path: str, model_size: str = "tiny") -> List[dict]
         try:
             from openai import OpenAI
             logger.info("   🎙️ Transcribing audio via OpenAI Whisper API for word timestamps...")
-            client = OpenAI(api_key=api_key)
+            client = OpenAI(api_key=api_key, timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
             with open(audio_path, "rb") as audio_file:
                 response = client.audio.transcriptions.create(
                     model="whisper-1",
