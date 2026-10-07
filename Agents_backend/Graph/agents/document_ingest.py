@@ -22,7 +22,7 @@ import json
 import logging
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -43,6 +43,7 @@ from .utils import _emit, _job, llm, logger, fence, is_verbatim, UNTRUSTED_NOTE
 # Hard cap on how many chunks we'll send to the LLM for a single document.
 # Keeps cost predictable on a 200-page PDF.
 _MAX_CHUNKS = 30
+_EXTRACT_CONCURRENCY = 8
 
 # Default chunking parameters (in characters, not tokens).
 # ~6000 chars ≈ 1.5k tokens — comfortable for a single LLM extraction call.
@@ -319,15 +320,19 @@ def extract_evidence_from_chunks(
     if not work:
         return out, truncated
 
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = {
-            ex.submit(_extract_one_chunk, c, filename, topic_hint): c for c in work
-        }
-        for fut in as_completed(futures):
-            try:
-                out.extend(fut.result() or [])
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"Chunk extractor raised: {exc}")
+    def _extract(chunk: Chunk) -> List[EvidenceItem]:
+        try:
+            return _extract_one_chunk(chunk, filename, topic_hint) or []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Chunk extractor raised: {exc}")
+            return []
+
+    # 8 in flight, not 4: a typical upload's chunks now go out in one wave
+    # instead of two. map() keeps chunk order, so which copy of a repeated stat
+    # the de-duplication below keeps no longer depends on which call finished first.
+    with ThreadPoolExecutor(max_workers=min(_EXTRACT_CONCURRENCY, len(work))) as ex:
+        for items in ex.map(_extract, work):
+            out.extend(items)
 
     # De-duplicate by snippet (LLM occasionally repeats stats across chunks).
     seen: set[str] = set()
