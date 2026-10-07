@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from Graph.agents import research as research_mod
 from Graph.agents.research import _research_result, research_node
-from Graph.state import EvidenceItem
+from Graph.state import EvidenceItem, EvidencePack
 
 
 def _evidence(url: str = "https://example.com/a") -> EvidenceItem:
@@ -90,3 +90,36 @@ def test_research_node_downgrades_when_every_search_returns_nothing():
     assert out["evidence"] == []
     assert out["mode"] == "closed_book"
     assert out["needs_research"] is False
+
+
+def test_every_page_is_scraped_at_once_not_in_waves_of_five():
+    """Pages used to be fetched five at a time, so 15 pages waited on three
+    slowest-URL timeouts. Each fake scrape waits on one barrier, which only
+    opens if all eight are in flight together; a smaller pool leaves it stuck
+    until the timeout breaks it and the count below falls short."""
+    import threading
+    from unittest.mock import MagicMock
+
+    n = 8
+    barrier = threading.Barrier(n, timeout=3)
+    fetched = []
+
+    def fake_scrape(url):
+        barrier.wait()
+        fetched.append(url)
+        return "page text"
+
+    results = [
+        {"url": f"https://example.com/{i}", "title": f"Source {i}", "snippet": f"distinct{i} wording{i} here{i}"}
+        for i in range(n)
+    ]
+    fake_llm = MagicMock()
+    fake_llm.with_structured_output.return_value.invoke.return_value = EvidencePack(evidence=[_evidence()])
+    state = {"topic": "t", "mode": "hybrid", "queries": ["q"], "recency_days": 3650, "_job_id": ""}
+
+    with patch.object(research_mod, "_tavily_search", return_value=results), \
+         patch.object(research_mod, "scrape_full_webpage", fake_scrape), \
+         patch.object(research_mod, "llm", fake_llm):
+        research_node(state)
+
+    assert len(fetched) == n

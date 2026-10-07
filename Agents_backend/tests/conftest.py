@@ -40,6 +40,8 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy-key-for-unit-tests")
 os.environ.setdefault("TAVILY_API_KEY", "tvly-test-dummy-key")
 os.environ.setdefault("GOOGLE_API_KEY", "AIzaSy-test-dummy-key")
 os.environ.setdefault("PEXELS_API_KEY", "test-dummy-pexels-key")
+# The API tests start the app's lifespan; keep its boot-time import warm-up thread out of them.
+os.environ.setdefault("WARMUP_IMPORTS", "0")
 
 # ===========================================================================
 # 3. Stub out heavy optional dependencies that are NOT installed in the

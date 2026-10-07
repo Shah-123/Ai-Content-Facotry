@@ -114,6 +114,10 @@ class State(TypedDict, total=False):
     document_filename: Optional[str]  # original filename for citations
 
     # --- Router Outputs ---
+    # Set when the API already asked the model while the topic guard ran
+    # (routing.predict_route); router_node then skips its own call. A plain dict
+    # (RouterDecision.model_dump()) so the checkpoint holds no further custom type.
+    router_decision: Optional[dict]
     needs_research: bool
     mode: str
     queries: List[str]
@@ -133,6 +137,7 @@ class State(TypedDict, total=False):
 
     # --- Reducer/Merger Outputs ---
     merged_md: str            # Text combined from sections
+    merged_body: str          # The sections only (no title, no references): the SEO node's input
     md_with_placeholders: str # Text with [[IMAGE_1]] tags
 
     # Note: We store dicts here because we use .model_dump() in nodes.py

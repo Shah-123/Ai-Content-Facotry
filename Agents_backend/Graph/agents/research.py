@@ -258,7 +258,12 @@ def research_node(state: State) -> dict:
     deep_evidence_context = ""
     scraped_parts = {}
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # Pure network waits, so fetch every page at once. In waves of five each wave
+    # lasted as long as its slowest URL (Jina's 8s timeout, then a 10s direct fetch),
+    # and 15 pages meant three of them. Results are keyed by idx and reassembled in
+    # order below, so completion order never reaches the evidence.
+    # ponytail: if Jina starts answering 429s under this burst, cap the pool.
+    with ThreadPoolExecutor(max_workers=len(top_results)) as executor:
         future_to_item = {
             executor.submit(scrape_full_webpage, r['url']): (idx, r)
             for idx, r in enumerate(top_results)

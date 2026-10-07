@@ -2,6 +2,7 @@
 import os
 import sys
 import logging
+import threading
 from pathlib import Path
 
 # Force UTF-8 encoding for stdout/stderr to prevent CP1252/charmap crashes on Windows when printing emojis
@@ -40,9 +41,26 @@ logger = logging.getLogger("api.main")
 
 from contextlib import asynccontextmanager
 
+def _warm_imports() -> None:
+    """Pay the pipeline's import cost at boot instead of on the first request.
+
+    The first POST /api/jobs imported the whole agents package inside its async
+    handler: about 3s on the event loop, during which every WebSocket and every
+    other request stalled.
+    """
+    try:
+        import Graph.nodes  # noqa: F401  (builds the LLM clients, so it needs OPENAI_API_KEY)
+        from api.background import _get_pipeline_main
+        _get_pipeline_main()
+    except Exception as exc:  # e.g. no key yet: the first request reports it, as before
+        logger.warning(f"Import warm-up skipped: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     events.start_cleanup_task()
+    if os.getenv("WARMUP_IMPORTS", "1") != "0":
+        threading.Thread(target=_warm_imports, name="warm-imports", daemon=True).start()
     yield
     events.stop_cleanup_task()
 

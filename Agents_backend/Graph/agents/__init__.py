@@ -2,7 +2,7 @@
 from .routing import router_node
 from .research import research_node
 from .orchestrator import orchestrator_node
-from .workers import fanout, worker_node, merge_content
+from .workers import fanout, worker_node, merge_content, seo_metadata_node
 from .multimedia import decide_images, generate_and_place_images
 from .quality_control import qa_agent_node
 from .revision import revision_node
@@ -18,6 +18,7 @@ __all__ = [
     "fanout",
     "worker_node",
     "merge_content",
+    "seo_metadata_node",
     "decide_images",
     "generate_and_place_images",
     "qa_agent_node",

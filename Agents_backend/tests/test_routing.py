@@ -42,6 +42,44 @@ def test_forced_research_without_queries_falls_back_to_the_topic():
     assert out["queries"] == ["How photosynthesis works"]
 
 
+def test_a_decision_made_ahead_of_time_gives_the_same_answer_without_asking_the_model():
+    """The API asks the router beside the topic guard and hands the result over."""
+    decision = RouterDecision(
+        needs_research=True, mode="open_book", reason="Time-sensitive", queries=["a", "b"]
+    )
+    state = {"topic": "Multi-agent AI", "source_mode": "hybrid"}
+
+    class _NoModel:
+        def with_structured_output(self, _schema):
+            raise AssertionError("the router asked the model despite having a decision")
+
+    with patch.object(routing, "llm", _NoModel()):
+        precomputed = routing.router_node({**state, "router_decision": decision.model_dump()})
+
+    assert precomputed == _run_router(decision, state)
+
+
+def test_predict_route_returns_the_decision_and_fails_soft():
+    decision = RouterDecision(needs_research=False, mode="closed_book", reason="r", queries=[])
+
+    class _FakeStructured:
+        def invoke(self, _messages):
+            return decision
+
+    class _FakeLLM:
+        def with_structured_output(self, _schema):
+            return _FakeStructured()
+
+    class _BrokenLLM:
+        def with_structured_output(self, _schema):
+            raise RuntimeError("no api")
+
+    with patch.object(routing, "llm", _FakeLLM()):
+        assert routing.predict_route("A topic") == decision
+    with patch.object(routing, "llm", _BrokenLLM()):
+        assert routing.predict_route("A topic") is None  # router_node will ask again
+
+
 def test_llm_supplied_queries_are_preserved():
     decision = RouterDecision(
         needs_research=True,

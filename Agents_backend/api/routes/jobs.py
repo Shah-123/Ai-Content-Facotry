@@ -5,6 +5,7 @@ import logging
 import asyncio
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
@@ -18,6 +19,9 @@ from api.background import _run_pipeline, _run_manual_task, _ensure_pipeline_run
 logger = logging.getLogger("api.routes.jobs")
 router = APIRouter(tags=["jobs"])
 
+# Speculative router calls (see create_new_job): one short model call each.
+_route_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="route-guess")
+
 
 @router.post("/api/jobs")
 async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTasks):
@@ -26,9 +30,22 @@ async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTask
     # Reject unsafe / nonsensical topics BEFORE creating a job or burning
     # any pipeline tokens. Run in a worker thread so the synchronous LLM
     # call doesn't block the FastAPI event loop.
-    from Graph.agents.topic_guard import evaluate_topic
+    from Graph.agents.topic_guard import evaluate_topic, _trivial_reject
+    from Graph.agents.routing import predict_route
+    import usage
+
+    usage_before = usage.snapshot()  # the guard and router calls below are part of this job's cost
+
+    # The router's answer depends only on the topic, so start asking it now, beside the
+    # guard, rather than after the job exists. Nothing here waits for it: the pipeline
+    # picks the answer up when it starts. Junk the free screen rejects anyway gets no call.
+    route_future = None
+    if _trivial_reject(req.topic) is None:
+        route_future = _route_pool.submit(predict_route, req.topic)
     verdict = await asyncio.to_thread(evaluate_topic, req.topic)
     if not verdict.is_safe:
+        if route_future:
+            route_future.cancel()  # no-op once it is running; its answer is simply unused
         logger.warning(
             f"Topic rejected by guard: '{req.topic[:80]}' "
             f"(category={verdict.category}) — {verdict.reason}"
@@ -57,6 +74,8 @@ async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTask
         topic             = req.topic,
         config            = generation_config,
         worker_event      = worker_event,
+        router_future     = route_future,
+        usage_before      = usage_before,
     )
     return job
 

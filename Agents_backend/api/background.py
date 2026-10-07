@@ -37,23 +37,30 @@ from api.utils import (
 logger = logging.getLogger("api.background")
 
 
+# The boot-time warm-up and the first job can both call _get_pipeline_main(). Half-way
+# through exec_module the module is already in sys.modules but has no save_blog_content
+# yet, so an unlocked second caller would execute main.py a second time.
+_pipeline_lock = threading.Lock()
+
+
 def _get_pipeline_main():
     """Dynamically loads and caches the root main.py module safely."""
-    if "backend_pipeline_main" in sys.modules and hasattr(sys.modules["backend_pipeline_main"], "save_blog_content"):
-        return sys.modules["backend_pipeline_main"]
-    import importlib.util
-    if str(_BACKEND_DIR) not in sys.path:
-        sys.path.insert(0, str(_BACKEND_DIR))
-    main_py_path = _BACKEND_DIR / "main.py"
-    spec = importlib.util.spec_from_file_location("backend_pipeline_main", main_py_path)
-    pipeline_main = importlib.util.module_from_spec(spec)
-    sys.modules["backend_pipeline_main"] = pipeline_main
-    try:
-        spec.loader.exec_module(pipeline_main)
-    except Exception:
-        sys.modules.pop("backend_pipeline_main", None)
-        raise
-    return pipeline_main
+    with _pipeline_lock:
+        if "backend_pipeline_main" in sys.modules and hasattr(sys.modules["backend_pipeline_main"], "save_blog_content"):
+            return sys.modules["backend_pipeline_main"]
+        import importlib.util
+        if str(_BACKEND_DIR) not in sys.path:
+            sys.path.insert(0, str(_BACKEND_DIR))
+        main_py_path = _BACKEND_DIR / "main.py"
+        spec = importlib.util.spec_from_file_location("backend_pipeline_main", main_py_path)
+        pipeline_main = importlib.util.module_from_spec(spec)
+        sys.modules["backend_pipeline_main"] = pipeline_main
+        try:
+            spec.loader.exec_module(pipeline_main)
+        except Exception:
+            sys.modules.pop("backend_pipeline_main", None)
+            raise
+        return pipeline_main
 
 
 def build_initial_state(job_id: str, topic: str, blog_folder: str,
@@ -108,6 +115,8 @@ def _run_pipeline(
     topic: str,
     config: dict[str, Any],
     worker_event: threading.Event,
+    router_future=None,
+    usage_before=None,
 ):
     """
     Runs the full LangGraph pipeline in a background thread.
@@ -119,7 +128,8 @@ def _run_pipeline(
     # Token accounting baseline for this run. Snapshot/delta rather than a
     # contextvar because LangGraph dispatches section writers to worker threads.
     import usage as _usage
-    usage_before = _usage.snapshot()
+    if usage_before is None:  # the API passes one taken before the topic guard and router call
+        usage_before = _usage.snapshot()
     try:
         generation_config = GenerationConfig.model_validate(config)
         # Late import so api.py can load without OPENAI_API_KEY set
@@ -215,6 +225,11 @@ def _run_pipeline(
 
         if not plan:
             events.emit(job_id, "router", "working", "Analyzing topic and routing to agents...")
+            if router_future is not None and not is_resume:
+                # Asked while the topic guard ran: wait only for what is left of that call.
+                decision = router_future.result()
+                if decision is not None:
+                    initial_state["router_decision"] = decision.model_dump()
             for _ in graph.stream(initial_state if not is_resume else None, thread_cfg, stream_mode="values"):
                 pass
             state = graph.get_state(thread_cfg)

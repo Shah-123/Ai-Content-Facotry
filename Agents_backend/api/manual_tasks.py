@@ -103,6 +103,11 @@ def _load_context(job_id: str, task_name: str, pipeline_loader: Callable[[], Any
         "image_quality": config.image_quality,
         "image_style": config.image_style,
     }
+    if task_name == "qa":
+        # The auditor checks every link against the research evidence. Without it
+        # every link reads as fabricated: the verdict is forced to NEEDS_REVISION
+        # and the article is rewritten and re-audited for nothing.
+        state["evidence"] = _load_evidence(base_path)
 
     return ManualTaskContext(
         job_id=job_id,
@@ -272,6 +277,21 @@ def _read_blog_markdown(base_path: Path, meta: dict[str, Any]) -> str:
     if not candidates:
         raise FileNotFoundError(f"Could not locate blog markdown file in {base_path}")
     return candidates[0].read_text(encoding="utf-8")
+
+
+def _load_evidence(base_path: Path) -> list:
+    """EvidenceItem objects from research/evidence.json (the QA nodes use attribute access)."""
+    from Graph.state import EvidenceItem
+
+    path = base_path / "research" / "evidence.json"
+    raw = _read_json(path, warning_label="evidence.json", default=[]) if path.exists() else []
+    items = []
+    for entry in raw:
+        try:
+            items.append(EvidenceItem.model_validate(entry))
+        except Exception as error:
+            logger.warning("Skipping an unreadable evidence entry: %s", error)
+    return items
 
 
 def _read_plan(base_path: Path) -> Any:
