@@ -69,3 +69,82 @@ def test_verdict_rule_matches_the_router():
     assert verdict(["minor", "minor", "suggestion"]) == "READY"
     assert verdict(["minor", "critical"]) == "NEEDS_REVISION"
     assert verdict([]) == "READY"
+
+
+# ---------------------------------------------------------------------------
+# section_title survives QA, so revision can target one section
+# ---------------------------------------------------------------------------
+# qa_agent_node used to build its issue dicts without section_title, so the
+# title match in revision_node never fired; a paraphrased claim or a citation
+# issue then matched no section and the whole article was rewritten.
+
+from unittest.mock import patch
+
+from Graph.agents import quality_control as qc
+from Graph.state import EvidenceItem
+from Graph.structured_data import QAIssue, QAReport
+
+ARTICLE = (
+    "# Title\n\n"
+    "Intro with a [stray](https://stray.example/a) link.\n\n"
+    "## Alpha\n\n"
+    "Alpha cites [a source](https://good.example/x) properly.\n\n"
+    "## Beta\n\n"
+    "Beta cites [an invention](https://bad.example/y) instead.\n"
+)
+ALL_GOOD = ["https://good.example/x", "https://stray.example/a", "https://bad.example/y"]
+
+
+def _evidence(*urls):
+    return [EvidenceItem(title="T", url=u, snippet="S", published_at=None, source="x.com") for u in urls]
+
+
+def _audit(issues, evidence=ALL_GOOD):
+    report = QAReport(depth_score=7, structure_score=7, readability_score=7, overall_score=8,
+                      verdict="READY", issues=issues, strengths=["clear"])
+    fake = SimpleNamespace(with_structured_output=lambda _s: SimpleNamespace(invoke=lambda _m: report))
+    with patch.object(qc, "llm_quality", fake):
+        return qc.qa_agent_node({"final": ARTICLE, "evidence": _evidence(*evidence), "_job_id": ""})
+
+
+def test_a_bad_link_names_the_section_it_sits_in():
+    issues, _ = verify_citations(ARTICLE, _evidence("https://good.example/x"))
+    assert {i["claim"]: i["section_title"] for i in issues} == {
+        "Link '[stray](https://stray.example/a)'": None,  # before the first H2
+        "Link '[an invention](https://bad.example/y)'": "Beta",
+    }
+
+
+def test_qa_issues_keep_the_section_title_the_model_gave():
+    out = _audit([QAIssue(claim="an invented statistic", section_title="Alpha",
+                          issue_type="fact_error", severity="critical", recommendation="remove it")])
+    assert [i["section_title"] for i in out["qa_issues"]] == ["Alpha"]
+
+
+def test_citation_issues_get_their_section_whether_injected_or_echoed():
+    echoed = QAIssue(claim="Link '[an invention](https://bad.example/y)'", issue_type="hallucination",
+                     severity="critical", recommendation="replace it")
+    out = _audit([echoed], evidence=["https://good.example/x"])
+    assert {i["claim"]: i["section_title"] for i in out["qa_issues"]} == {
+        "Link '[an invention](https://bad.example/y)'": "Beta",  # echoed: filled in
+        "Link '[stray](https://stray.example/a)'": None,         # injected
+    }
+
+
+def test_a_paraphrased_claim_is_revised_in_its_own_section_only():
+    from Graph.agents import revision, utils
+
+    qa = _audit([QAIssue(claim="a paraphrase that appears nowhere in the text", section_title="Beta",
+                         issue_type="fact_error", severity="critical", recommendation="fix it")])
+    prompts = []
+
+    def _invoke(messages):
+        prompts.append(messages[1].content)
+        return SimpleNamespace(content="A rewritten section body. " * 10)
+
+    with patch.object(utils, "llm_quality", SimpleNamespace(invoke=_invoke)):
+        out = revision.revision_node({"final": ARTICLE, "qa_issues": qa["qa_issues"]})
+
+    assert len(prompts) == 1 and "Beta" in prompts[0]
+    assert "Alpha cites [a source](https://good.example/x) properly." in out["final"]  # untouched
+    assert "A rewritten section body." in out["final"]
