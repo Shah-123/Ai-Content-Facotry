@@ -37,23 +37,30 @@ from api.utils import (
 logger = logging.getLogger("api.background")
 
 
+# The boot-time warm-up and the first job can both call _get_pipeline_main(). Half-way
+# through exec_module the module is already in sys.modules but has no save_blog_content
+# yet, so an unlocked second caller would execute main.py a second time.
+_pipeline_lock = threading.Lock()
+
+
 def _get_pipeline_main():
     """Dynamically loads and caches the root main.py module safely."""
-    if "backend_pipeline_main" in sys.modules and hasattr(sys.modules["backend_pipeline_main"], "save_blog_content"):
-        return sys.modules["backend_pipeline_main"]
-    import importlib.util
-    if str(_BACKEND_DIR) not in sys.path:
-        sys.path.insert(0, str(_BACKEND_DIR))
-    main_py_path = _BACKEND_DIR / "main.py"
-    spec = importlib.util.spec_from_file_location("backend_pipeline_main", main_py_path)
-    pipeline_main = importlib.util.module_from_spec(spec)
-    sys.modules["backend_pipeline_main"] = pipeline_main
-    try:
-        spec.loader.exec_module(pipeline_main)
-    except Exception:
-        sys.modules.pop("backend_pipeline_main", None)
-        raise
-    return pipeline_main
+    with _pipeline_lock:
+        if "backend_pipeline_main" in sys.modules and hasattr(sys.modules["backend_pipeline_main"], "save_blog_content"):
+            return sys.modules["backend_pipeline_main"]
+        import importlib.util
+        if str(_BACKEND_DIR) not in sys.path:
+            sys.path.insert(0, str(_BACKEND_DIR))
+        main_py_path = _BACKEND_DIR / "main.py"
+        spec = importlib.util.spec_from_file_location("backend_pipeline_main", main_py_path)
+        pipeline_main = importlib.util.module_from_spec(spec)
+        sys.modules["backend_pipeline_main"] = pipeline_main
+        try:
+            spec.loader.exec_module(pipeline_main)
+        except Exception:
+            sys.modules.pop("backend_pipeline_main", None)
+            raise
+        return pipeline_main
 
 
 def build_initial_state(job_id: str, topic: str, blog_folder: str,
