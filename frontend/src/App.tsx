@@ -10,7 +10,7 @@ import { Cpu, X } from 'lucide-react';
 import { motion } from 'motion/react';
 
 /** Backend statuses that mean the job record changed and should be re-fetched. */
-const WS_REFRESH_STATUSES = ['completed', 'error', 'plan_ready', 'plan_revised', 'plan_approved'];
+const WS_REFRESH_STATUSES = ['completed', 'error', 'plan_ready', 'plan_revised', 'plan_approved', 'draft_ready'];
 
 const ContentView = lazy(() => import('./ContentView').then(({ ContentView }) => ({ default: ContentView })));
 

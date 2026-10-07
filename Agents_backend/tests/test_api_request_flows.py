@@ -603,3 +603,53 @@ class TestWebSocketOwnership:
             event_bus.emit(job_id, "router", "started", "owner sees this")
             assert ws.receive_json()["message"] == "owner sees this"
         event_bus.clear_job(job_id)
+
+
+class TestArticleIsPublishedBeforeTheJobEnds:
+    """The article is final after the keyword step; the UI must not wait for
+    evaluation and the media nodes to see it."""
+
+    def test_the_article_is_saved_when_the_keyword_step_finishes(self, monkeypatch, tmp_path):
+        import sqlite3
+        import threading
+        from types import SimpleNamespace
+
+        from api import background
+
+        log = []
+
+        class _Graph:
+            def get_state(self, _cfg):
+                # A resumed, already-approved job: straight to phase 2.
+                return SimpleNamespace(next=("worker",), values={"plan": object(), "final": "# T\n\nthe article"})
+
+            def stream(self, _state, _cfg, **kw):
+                assert kw.get("stream_mode") == "updates"
+                for node in ("qa_agent", "keyword_optimizer", "geval_evaluator", "video_generator"):
+                    log.append(f"ran {node}")
+                    yield {node: {}}
+
+        fake_main = SimpleNamespace(
+            build_graph=lambda memory: _Graph(),
+            create_blog_structure=lambda topic: {k: str(tmp_path) for k in ("base", "reports", "metadata")},
+            save_blog_content=lambda folders, state: {},
+            generate_readme=lambda *a: None,
+            refine_plan_with_llm=None,
+        )
+        monkeypatch.setattr(background, "_get_pipeline_main", lambda: fake_main)
+        monkeypatch.setattr(background, "_create_sqlite_checkpoint_conn",
+                            lambda _path: sqlite3.connect(":memory:", check_same_thread=False))
+        monkeypatch.setattr(background.events, "emit",
+                            lambda _j, agent, status, *a, **k: log.append(f"event {status}"))
+        for name in ("set_job_running", "set_job_awaiting_approval", "set_job_completed", "set_job_failed"):
+            monkeypatch.setattr(background, name, lambda *a, **k: None)
+        monkeypatch.setattr(background, "update_job",
+                            lambda _j, **f: log.append(("saved", f["final_content"])) if "final_content" in f else None)
+        monkeypatch.setattr(background, "get_job_healed", lambda _j: {"status": "running"})
+        monkeypatch.setattr(background, "_update_metadata_json", lambda *a, **k: None)
+
+        background._run_pipeline(job_id="j", topic="t", config={}, worker_event=threading.Event())
+
+        i = log.index("ran keyword_optimizer")
+        assert log[i + 1:i + 3] == [("saved", "# T\n\nthe article"), "event draft_ready"]
+        assert log.index("ran geval_evaluator") > i + 2   # published before evaluation started

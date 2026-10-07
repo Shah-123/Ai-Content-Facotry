@@ -63,6 +63,20 @@ def _get_pipeline_main():
         return pipeline_main
 
 
+def _publish_draft(job_id: str, final_content: str) -> None:
+    """Show the article as soon as it is final, not when the whole job ends.
+
+    Nothing after the keyword step edits `final` (evaluation and the media nodes
+    only read it), yet the UI showed no text until they had all finished.
+    set_job_completed() later writes the same text again.
+    """
+    if not final_content:
+        return
+    update_job(job_id, final_content=final_content, word_count=len(final_content.split()))
+    events.emit(job_id, "system", "draft_ready",
+                "Article ready: open Studio to read it while evaluation and media finish.")
+
+
 def build_initial_state(job_id: str, topic: str, blog_folder: str,
                         generation_config: GenerationConfig) -> dict[str, Any]:
     """Assemble the graph's initial state from a validated GenerationConfig.
@@ -281,8 +295,9 @@ def _run_pipeline(
 
         # ── Phase 2: Write & Produce ──────────────────────────────────────
         events.emit(job_id, "writer", "working", "Writing blog sections...")
-        for _ in graph.stream(None, thread_cfg, stream_mode="values", recursion_limit=150):
-            pass
+        for update in graph.stream(None, thread_cfg, stream_mode="updates", recursion_limit=150):
+            if "keyword_optimizer" in update:
+                _publish_draft(job_id, graph.get_state(thread_cfg).values.get("final", ""))
 
         # ── Save outputs ──────────────────────────────────────────────────
         final_state = graph.get_state(thread_cfg).values

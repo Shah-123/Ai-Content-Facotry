@@ -159,7 +159,7 @@ export interface Job {
 export interface AgentEvent {
   job_id: string;
   agent_name: string;
-  status: 'started' | 'working' | 'completed' | 'error' | 'plan_ready' | 'plan_revised' | 'plan_approved';
+  status: 'started' | 'working' | 'completed' | 'error' | 'plan_ready' | 'plan_revised' | 'plan_approved' | 'draft_ready';
   message: string;
   timestamp: number;
   metrics?: Record<string, any>;

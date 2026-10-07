@@ -290,3 +290,24 @@ def test_media_router_returns_end_when_all_toggles_are_off():
     assert after_evaluator(one_on) == ["video_generator"]
 
     assert len(after_evaluator({})) == 3, "defaults should fan out to all three"
+
+
+def test_updates_stream_names_the_keyword_step(monkeypatch):
+    """_run_pipeline publishes the article when an update keyed "keyword_optimizer"
+    arrives; the real compiled graph must report the node under that name."""
+    import main
+    from langgraph.checkpoint.memory import MemorySaver
+
+    for name in ("qa_agent_node", "seo_metadata_node", "geval_evaluation_node"):
+        monkeypatch.setattr(main, name, lambda s: {})
+    monkeypatch.setattr(main, "validate_completion", lambda s: {})
+    monkeypatch.setattr(main, "keyword_optimizer_node", lambda s: {"keyword_report": "r"})
+
+    graph = main.build_graph(MemorySaver())
+    config = {"configurable": {"thread_id": "updates-names"}}
+    graph.update_state(config, {"final": "article", "generate_qa": False, "generate_campaign": False,
+                                "generate_video": False, "generate_podcast": False}, as_node="reducer")
+
+    nodes = [n for update in graph.stream(None, config, stream_mode="updates") for n in update]
+    assert "keyword_optimizer" in nodes
+    assert nodes.index("keyword_optimizer") < nodes.index("geval_evaluator")
