@@ -522,6 +522,13 @@ def ingest_upload(upload_dir: Path, original_filename: str) -> dict:
 
     parsed = parse_document(src)
 
+    # The working title needs only the parsed text, so derive it while the
+    # document is embedded and indexed below rather than after: its LLM call
+    # no longer adds to the time the user waits on an upload.
+    topic_pool = ThreadPoolExecutor(max_workers=1)
+    topic_future = topic_pool.submit(derive_topic_from_document, parsed["text"])
+    topic_pool.shutdown(wait=False)  # the submitted task still runs to completion
+
     # ── Semantic Chunking ───────────────────────────────────────────
     embeddings_model = get_embeddings_model()
     try:
@@ -572,7 +579,7 @@ def ingest_upload(upload_dir: Path, original_filename: str) -> dict:
     except Exception as exc:
         logger.warning(f"Failed to persist local chunk index for {original_filename}: {exc}")
 
-    derived_topic = derive_topic_from_document(parsed["text"])
+    derived_topic = topic_future.result()
     preview = (parsed["text"] or "")[:600]
 
     meta = {

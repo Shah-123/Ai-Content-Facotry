@@ -911,77 +911,89 @@ def video_generator_node(state: State) -> dict:
     logger.info(f"   📝 Script ({len(script.split())} words):\n{script[:200]}...")
 
     # ------------------------------------------------------------------
-    # 2. Hook card
+    # 2-6. The hook card, the voiceover (+ caption timings) and the stock
+    #      footage each depend only on the script, so the three chains run
+    #      side by side instead of one after another.
     # ------------------------------------------------------------------
-    _emit(_job(state), "video", "working", "Generating hook title card...")
-    try:
-        hook = _generate_hook_card(topic, script)
-    except Exception as e:
-        logger.warning(f"Hook generation failed ({e}), using defaults.")
-        hook = HookCard(headline=topic[:40], subline="Watch to find out more")
+    def _make_hook() -> HookCard:
+        _emit(_job(state), "video", "working", "Generating hook title card...")
+        try:
+            hook = _generate_hook_card(topic, script)
+        except Exception as e:
+            logger.warning(f"Hook generation failed ({e}), using defaults.")
+            hook = HookCard(headline=topic[:40], subline="Watch to find out more")
 
-    logger.info(f"   🪝 Hook: '{hook.headline}' / '{hook.subline}'")
+        logger.info(f"   🪝 Hook: '{hook.headline}' / '{hook.subline}'")
+        return hook
 
-    # ------------------------------------------------------------------
-    # 3. TTS audio
-    # ------------------------------------------------------------------
-    _emit(_job(state), "video", "working", "Generating voiceover audio...")
-    audio_path = generate_tts_voiceover(script)
-    if not audio_path:
-        logger.error("TTS failed. Aborting video generation.")
+    def _make_voiceover() -> Optional[tuple]:
+        """(audio_path, audio_dur, caption_chunks), or None if the audio failed."""
+        # 3. TTS audio
+        _emit(_job(state), "video", "working", "Generating voiceover audio...")
+        audio_path = generate_tts_voiceover(script)
+        if not audio_path:
+            logger.error("TTS failed. Aborting video generation.")
+            return None
+
+        try:
+            from moviepy.audio.io.AudioFileClip import AudioFileClip as _AClip
+            audio_dur = _AClip(audio_path).duration
+            logger.info(f"   ⏱️ Audio duration: {audio_dur:.1f}s")
+        except Exception as e:
+            logger.error(f"Could not read audio duration: {e}")
+            return None
+
+        # 4. Word timestamps (whisper) → caption chunks
+        _emit(_job(state), "video", "working", "Transcribing audio for karaoke captions...")
+        model_size = state.get("whisper_model_size") or os.getenv("WHISPER_MODEL_SIZE", "tiny")
+        word_timestamps = get_word_timestamps(audio_path, model_size=model_size)
+        caption_chunks  = build_caption_chunks(word_timestamps, audio_dur, script)
+        logger.info(f"   💬 Built {len(caption_chunks)} caption chunks.")
+        return audio_path, audio_dur, caption_chunks
+
+    def _fetch_footage() -> List[str]:
+        # 5. Plan video scenes (portrait queries)
+        _emit(_job(state), "video", "working", "Planning stock footage queries...")
+        fallback_queries = [f"{topic} vertical", "abstract background portrait"]
+        try:
+            planner = llm.with_structured_output(VideoScenePlan)
+            plan    = planner.invoke([
+                SystemMessage(content=VIDEO_PLAN_SYSTEM),
+                HumanMessage(content=f"Topic: {topic}\n\nVoiceover Script:\n{script}"),
+            ])
+            queries = plan.keywords or fallback_queries
+        except Exception as e:
+            # Same guard as the hook card above. This call only returns a 3-5 word
+            # keyword list, but unguarded it blocks the job for the full
+            # timeout x retries budget and then kills a video that already has
+            # its audio and captions. The fallback queries still find footage.
+            logger.warning(f"Scene planning failed ({e}), using fallback queries.")
+            queries = fallback_queries
+        logger.info(f"   🎥 Pexels queries: {queries}")
+
+        # 6. Fetch portrait Pexels clips
+        _emit(_job(state), "video", "working", f"Fetching {len(queries)} portrait stock clips...")
+        # Fetched in parallel: one at a time this step took ~100 s for 5 clips.
+        with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+            fetched = list(pool.map(lambda iq: fetch_pexels_video(iq[1], temp_dir, iq[0]),
+                                    enumerate(queries)))
+        downloaded = [p for p in fetched if p]
+        logger.info(f"   ✅ Downloaded {len(downloaded)}/{len(queries)} clips")
+        return downloaded
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        hook_future      = pool.submit(_make_hook)
+        voiceover_future = pool.submit(_make_voiceover)
+        footage_future   = pool.submit(_fetch_footage)
+
+    voiceover = voiceover_future.result()
+    if not voiceover:
         _emit(_job(state), "video", "error", "Audio generation failed.")
         _cleanup()
         return {"video_path": None}
-
-    try:
-        from moviepy.audio.io.AudioFileClip import AudioFileClip as _AClip
-        audio_dur = _AClip(audio_path).duration
-        logger.info(f"   ⏱️ Audio duration: {audio_dur:.1f}s")
-    except Exception as e:
-        logger.error(f"Could not read audio duration: {e}")
-        _cleanup()
-        return {"video_path": None}
-
-    # ------------------------------------------------------------------
-    # 4. Word timestamps (whisper) → caption chunks
-    # ------------------------------------------------------------------
-    _emit(_job(state), "video", "working", "Transcribing audio for karaoke captions...")
-    model_size = state.get("whisper_model_size") or os.getenv("WHISPER_MODEL_SIZE", "tiny")
-    word_timestamps = get_word_timestamps(audio_path, model_size=model_size)
-    caption_chunks  = build_caption_chunks(word_timestamps, audio_dur, script)
-    logger.info(f"   💬 Built {len(caption_chunks)} caption chunks.")
-
-    # ------------------------------------------------------------------
-    # 5. Plan video scenes (portrait queries)
-    # ------------------------------------------------------------------
-    _emit(_job(state), "video", "working", "Planning stock footage queries...")
-    fallback_queries = [f"{topic} vertical", "abstract background portrait"]
-    try:
-        planner = llm.with_structured_output(VideoScenePlan)
-        plan    = planner.invoke([
-            SystemMessage(content=VIDEO_PLAN_SYSTEM),
-            HumanMessage(content=f"Topic: {topic}\n\nVoiceover Script:\n{script}"),
-        ])
-        queries = plan.keywords or fallback_queries
-    except Exception as e:
-        # Same guard as the hook card above. This call only returns a 3-5 word
-        # keyword list, but unguarded it blocks the job for the full
-        # timeout x retries budget and then kills a video that already has
-        # its audio and captions. The fallback queries still find footage.
-        logger.warning(f"Scene planning failed ({e}), using fallback queries.")
-        queries = fallback_queries
-    logger.info(f"   🎥 Pexels queries: {queries}")
-
-    # ------------------------------------------------------------------
-    # 6. Fetch portrait Pexels clips
-    # ------------------------------------------------------------------
-    _emit(_job(state), "video", "working", f"Fetching {len(queries)} portrait stock clips...")
-    # Fetched in parallel: one at a time this step took ~100 s for 5 clips.
-    with ThreadPoolExecutor(max_workers=len(queries)) as pool:
-        fetched = list(pool.map(lambda iq: fetch_pexels_video(iq[1], temp_dir, iq[0]),
-                                enumerate(queries)))
-    downloaded = [p for p in fetched if p]
-    logger.info(f"   ✅ Downloaded {len(downloaded)}/{len(queries)} clips")
+    audio_path, audio_dur, caption_chunks = voiceover
+    hook       = hook_future.result()
+    downloaded = footage_future.result()
 
     if not downloaded:
         fallback = fetch_pexels_video("abstract minimal portrait", temp_dir, 99)
