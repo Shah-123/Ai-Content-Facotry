@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle2, Clock, Podcast, Film, Share2, Download,
@@ -38,6 +38,8 @@ const generatedFigureHtmlToMarkdown = (content: string) => content.replace(
     return `\n\n![${alt}](<${src}>)${caption ? `\n\n*${caption}*` : ''}\n\n`;
   }
 );
+
+const REMARK_PLUGINS = [remarkGfm];
 
 const resolveContentImageUrls = (content: string, jobId?: string) => {
   if (!content) return '';
@@ -92,6 +94,15 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
   }, [currentJob?.id]);
 
   const radarPoints = useGEvalRadar(currentJob);
+
+  // Parsing a 2-3k word article is the heaviest thing this view renders, and it
+  // re-renders on every agent event and every 3 s poll while a manual task runs.
+  // Re-parse only when the text (or the job its image URLs point at) changes.
+  const articleBody = useMemo(() => (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>
+      {resolveContentImageUrls(editedContent, currentJob?.id)}
+    </ReactMarkdown>
+  ), [editedContent, currentJob?.id]);
 
   // ffmpeg keeps muxing for minutes after the last frame, so the backend's
   // render ticks end on "Exporting video..." (Graph/agents/video.py). Echo the
@@ -367,9 +378,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
                       </div>
                     ) : (
                       <div className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-a:text-accent-600 hover:prose-a:text-accent-500">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {resolveContentImageUrls(editedContent, currentJob?.id)}
-                        </ReactMarkdown>
+                        {articleBody}
                       </div>
                     )
                   ) : currentJob.status === 'running' || currentJob.status === 'awaiting_approval' || currentJob.status === 'pending' ? (
