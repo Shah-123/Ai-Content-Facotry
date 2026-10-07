@@ -103,6 +103,25 @@ class TestRequestTimeoutsAreConfigured:
             "600s default; use get_llm() instead:\n  " + "\n  ".join(offenders)
         )
 
+    def test_raw_openai_clients_set_a_timeout(self):
+        """Image, Whisper and TTS calls use the raw SDK client, which also defaults to
+        600s with 2 retries; each construction must pass its own timeout."""
+        import pathlib
+        import re
+
+        backend = pathlib.Path(__file__).resolve().parent.parent
+        offenders = []
+        for path in backend.rglob("*.py"):
+            if "tests" in path.parts:
+                continue
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if re.search(r"(?<!Chat)\bOpenAI\s*\(", line) and "timeout=" not in line:
+                    offenders.append(f"{path.relative_to(backend)}:{i}")
+
+        assert not offenders, "OpenAI(...) without timeout=:\n  " + "\n  ".join(offenders)
+
 
 class TestReasoningEffort:
     """Generation runs at reduced reasoning effort; auditing and judging do not.

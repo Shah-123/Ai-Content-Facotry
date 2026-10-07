@@ -76,9 +76,15 @@ def verify_citations(blog_text: str, evidence: list) -> tuple[list[dict], int]:
     """
     issues = []
     # Find all inline markdown links: [Link Text](URL)
-    links = re.findall(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', blog_text)
+    links = list(re.finditer(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', blog_text))
     if not links:
         return issues, 0
+
+    # H2 headings with their offsets, so a bad link can name the section it sits in.
+    # revision_node matches issues to sections by that title; without it these
+    # issues matched nothing and the whole article was rewritten instead.
+    headings = [(m.start(), m.group(1).strip())
+                for m in re.finditer(r'^## (.+)$', blog_text, re.MULTILINE)]
 
     # Extract all valid domains and exact URLs from research evidence
     valid_urls = set()
@@ -99,7 +105,8 @@ def verify_citations(blog_text: str, evidence: list) -> tuple[list[dict], int]:
             except Exception:
                 pass
 
-    for link_text, link_url in links:
+    for match in links:
+        link_text, link_url = match.group(1), match.group(2)
         link_url_clean = link_url.strip().lower()
         
         # Verify if exact URL is valid
@@ -121,8 +128,10 @@ def verify_citations(blog_text: str, evidence: list) -> tuple[list[dict], int]:
             continue
             
         # If it doesn't match any evidence URL or domain, it is hallucinated!
+        section = next((title for pos, title in reversed(headings) if pos <= match.start()), None)
         issues.append({
             "claim": f"Link '[{link_text}]({link_url})'",
+            "section_title": section,
             "issue_type": "hallucination",
             "severity": "critical",
             "recommendation": (
@@ -221,17 +230,21 @@ def qa_agent_node(state: State) -> dict:
     if citation_issues:
         # Inject citation issues if not already present in report
         for issue_dict in citation_issues:
-            exists = any(
-                issue_dict["claim"] in (existing.claim or "")
-                for existing in report.issues
+            echoed = next(
+                (e for e in report.issues if issue_dict["claim"] in (e.claim or "")),
+                None,
             )
-            if not exists:
+            if echoed is None:
                 report.issues.append(QAIssue(
                     claim=issue_dict["claim"],
+                    section_title=issue_dict["section_title"],
                     issue_type="hallucination",
                     severity="critical",
                     recommendation=issue_dict["recommendation"]
                 ))
+            elif not echoed.section_title:
+                # The scanner knows where the link is; the model may not have said.
+                echoed.section_title = issue_dict["section_title"]
 
     # --- 3b. SCORE AND VERDICT ARE DERIVED IN CODE ---
     # The model rates the three dimensions; Python decides the grade and the
@@ -313,6 +326,7 @@ def qa_agent_node(state: State) -> dict:
     issues_list = [
         {
             "claim": issue.claim,
+            "section_title": issue.section_title,
             "issue_type": issue.issue_type,
             "severity": issue.severity,
             "recommendation": issue.recommendation,

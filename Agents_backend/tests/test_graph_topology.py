@@ -51,6 +51,7 @@ EXPECTED_NODES = {
     "worker",
     "reducer",
     "completion_validator",
+    "seo_metadata_generator",
     "qa_agent",
     "revision",
     "keyword_optimizer",
@@ -100,6 +101,8 @@ def test_deepeval_is_not_a_graph_node(topology):
         ("orchestrator", "worker", "the Send fan-out dispatches section writers"),
         ("worker", "reducer", "sections are merged after writing"),
         ("reducer", "completion_validator", "structure is checked before QA"),
+        ("completion_validator", "seo_metadata_generator", "SEO metadata is generated alongside QA"),
+        ("seo_metadata_generator", "__end__", "the SEO branch ends on its own"),
         ("keyword_optimizer", "geval_evaluator", "evaluation follows SEO optimisation"),
         ("campaign_generator", "__end__", "media nodes terminate the graph"),
         ("video_generator", "__end__", "media nodes terminate the graph"),
@@ -187,15 +190,55 @@ def test_completion_validator_routes_on_the_generate_qa_flag():
     """
     from api.background import build_initial_state
     from api.schemas import GenerationConfig
-
-    def route(state):  # mirrors the lambda in main.build_graph
-        return "qa_agent" if state.get("generate_qa", False) else "keyword_optimizer"
+    from main import after_validation_router  # the real router, not a copy of it
 
     on = build_initial_state("j", "t", "/tmp", GenerationConfig())
     off = build_initial_state("j", "t", "/tmp", GenerationConfig(generate_qa=False))
 
-    assert route(on) == "qa_agent"
-    assert route(off) == "keyword_optimizer"
+    # The SEO metadata call is always the second branch, run beside the first.
+    assert after_validation_router(on) == ["qa_agent", "seo_metadata_generator"]
+    assert after_validation_router(off) == ["keyword_optimizer", "seo_metadata_generator"]
+
+
+def test_seo_metadata_runs_beside_qa_and_still_reaches_the_final_state(monkeypatch):
+    """Run the real compiled graph from the reducer onward, with the nodes stubbed.
+
+    The SEO call used to sit inside merge_content, in front of everything. Here QA and
+    the SEO node each wait on one barrier, which only opens if both are in flight at
+    once; run one after the other, the first would sit there until the timeout broke
+    the barrier and the run raised. The metadata must still land in the final state.
+    """
+    import threading
+
+    import main
+    from langgraph.checkpoint.memory import MemorySaver
+
+    barrier = threading.Barrier(2, timeout=5)
+
+    def qa(state):
+        barrier.wait()
+        return {"qa_verdict": "READY", "qa_issues": []}
+
+    def seo(state):
+        barrier.wait()
+        return {"seo_metadata": {"reading_time_minutes": 3}}
+
+    monkeypatch.setattr(main, "qa_agent_node", qa)
+    monkeypatch.setattr(main, "seo_metadata_node", seo)
+    monkeypatch.setattr(main, "validate_completion", lambda s: {})
+    monkeypatch.setattr(main, "keyword_optimizer_node", lambda s: {})
+    monkeypatch.setattr(main, "geval_evaluation_node", lambda s: {})
+
+    graph = main.build_graph(MemorySaver())
+    config = {"configurable": {"thread_id": "seo-beside-qa"}}
+    graph.update_state(
+        config,
+        {"final": "article", "generate_qa": True,
+         "generate_campaign": False, "generate_video": False, "generate_podcast": False},
+        as_node="reducer",  # as if the reducer had just finished
+    )
+
+    assert graph.invoke(None, config)["seo_metadata"] == {"reading_time_minutes": 3}
 
 
 def test_revision_loop_is_bounded():
@@ -247,3 +290,24 @@ def test_media_router_returns_end_when_all_toggles_are_off():
     assert after_evaluator(one_on) == ["video_generator"]
 
     assert len(after_evaluator({})) == 3, "defaults should fan out to all three"
+
+
+def test_updates_stream_names_the_keyword_step(monkeypatch):
+    """_run_pipeline publishes the article when an update keyed "keyword_optimizer"
+    arrives; the real compiled graph must report the node under that name."""
+    import main
+    from langgraph.checkpoint.memory import MemorySaver
+
+    for name in ("qa_agent_node", "seo_metadata_node", "geval_evaluation_node"):
+        monkeypatch.setattr(main, name, lambda s: {})
+    monkeypatch.setattr(main, "validate_completion", lambda s: {})
+    monkeypatch.setattr(main, "keyword_optimizer_node", lambda s: {"keyword_report": "r"})
+
+    graph = main.build_graph(MemorySaver())
+    config = {"configurable": {"thread_id": "updates-names"}}
+    graph.update_state(config, {"final": "article", "generate_qa": False, "generate_campaign": False,
+                                "generate_video": False, "generate_podcast": False}, as_node="reducer")
+
+    nodes = [n for update in graph.stream(None, config, stream_mode="updates") for n in update]
+    assert "keyword_optimizer" in nodes
+    assert nodes.index("keyword_optimizer") < nodes.index("geval_evaluator")

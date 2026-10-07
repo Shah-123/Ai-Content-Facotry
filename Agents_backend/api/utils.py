@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, Any
 import threading
 
-from db import get_job, list_jobs, update_job
+from db import get_job, update_job
 from api.state import _job_file_locks
 
 logger = logging.getLogger("api.utils")
@@ -126,8 +126,3 @@ def get_job_healed(job_id: str) -> Optional[dict]:
         job = _verify_and_clean_job_files(job)
     return job
 
-
-def list_jobs_healed(limit: int = 50, owner_id: str | None = None) -> list[dict]:
-    """Retrieve jobs list and run self-healing verification on their files."""
-    jobs = list_jobs(limit, owner_id)
-    return [_verify_and_clean_job_files(j) for j in jobs]

@@ -36,6 +36,7 @@ from Graph.nodes import (
     worker_node,
     fanout,
     merge_content,
+    seo_metadata_node,
     decide_images,
     generate_and_place_images,
     qa_agent_node,
@@ -460,6 +461,14 @@ def _qa_needs_review(state: State) -> bool:
     return any(i.get("severity") == "critical" for i in issues)
 
 
+def after_validation_router(s: State) -> list:
+    """completion_validator fans out: the QA audit (or straight to the optimizer when QA
+    is off) and the SEO metadata call run side by side. Nothing downstream reads the
+    metadata, so its LLM call hides behind the audit instead of sitting in front of it."""
+    return ["qa_agent" if s.get("generate_qa", False) else "keyword_optimizer",
+            "seo_metadata_generator"]
+
+
 def build_graph(memory=None):
     """Build the LangGraph workflow with all nodes."""
 
@@ -493,6 +502,8 @@ def build_graph(memory=None):
     workflow.add_node("worker",               worker_node)
     workflow.add_node("reducer",              reducer.compile())
     workflow.add_node("completion_validator", validate_completion)
+    # Not named "seo_metadata": LangGraph rejects a node that shares a name with a state key.
+    workflow.add_node("seo_metadata_generator", seo_metadata_node)
     workflow.add_node("qa_agent",             qa_agent_node)
     workflow.add_node("revision",              revision_node)
     workflow.add_node("keyword_optimizer",    keyword_optimizer_node)
@@ -553,9 +564,10 @@ def build_graph(memory=None):
     # architecture diagram would have shown.
     workflow.add_conditional_edges(
         "completion_validator",
-        lambda s: "qa_agent" if s.get("generate_qa", False) else "keyword_optimizer",
-        ["qa_agent", "keyword_optimizer"],
+        after_validation_router,
+        ["qa_agent", "keyword_optimizer", "seo_metadata_generator"],
     )
+    workflow.add_edge("seo_metadata_generator", END)
 
     # ✅ Automated Revision Loop:
     # qa_agent → _after_qa routes to either:

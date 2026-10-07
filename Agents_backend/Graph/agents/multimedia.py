@@ -10,7 +10,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from Graph.state import State, GlobalImagePlan
 from Graph.templates import DECIDE_IMAGES_SYSTEM
-from .utils import logger, llm, _job, _emit, _safe_slug
+from .utils import logger, llm, _job, _emit, _safe_slug, _REQUEST_TIMEOUT, _MAX_RETRIES
 
 
 def decide_images(state: State) -> dict:
@@ -69,7 +69,9 @@ def _generate_image_openai_dalle(prompt: str, model: str | None = "dall-e-3", si
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        # The SDK default is a 600 s timeout with 2 retries: one wedged image
+        # call could hold the job for 30 minutes. Same bounds as the chat clients.
+        client = OpenAI(api_key=api_key, timeout=_REQUEST_TIMEOUT, max_retries=_MAX_RETRIES)
 
         kwargs = {
             "model": model,

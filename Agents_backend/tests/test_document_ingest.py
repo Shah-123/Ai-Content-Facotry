@@ -7,6 +7,7 @@ LLM calls are mocked so the suite runs offline.
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 from pathlib import Path
 from unittest.mock import patch
@@ -291,3 +292,27 @@ def test_document_ingest_node_rag_retrieval(tmp_path: Path, monkeypatch):
     assert out["document_filename"] == "doc.pdf"
     assert len(out["evidence"]) == 1
     assert out["evidence"][0].snippet == "AI safety policy details"
+
+
+def test_extraction_runs_eight_chunks_at_once_and_keeps_chunk_order(monkeypatch):
+    """Eight calls must be in flight together (a barrier of 8 only opens then), and
+    the results come back in chunk order whichever call finishes first."""
+    import threading
+    import time
+
+    chunks = [di.Chunk(f"chunk {i} reports unique fact {i}.", page_start=i + 1, page_end=i + 1)
+              for i in range(8)]
+    barrier = threading.Barrier(8, timeout=5)
+
+    class _Extractor:
+        def invoke(self, msgs):
+            n = int(re.search(r"unique fact (\d+)", msgs[1].content).group(1))
+            barrier.wait()
+            time.sleep((8 - n) * 0.01)  # later chunks finish first
+            return _fake_pack([f"unique fact {n}"])
+
+    monkeypatch.setattr(di, "llm", SimpleNamespace(with_structured_output=lambda _s: _Extractor()))
+
+    items, _ = di.extract_evidence_from_chunks(chunks, filename="doc.pdf")
+
+    assert [i.snippet for i in items] == [f"unique fact {n}" for n in range(8)]

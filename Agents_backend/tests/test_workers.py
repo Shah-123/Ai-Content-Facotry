@@ -150,6 +150,47 @@ class TestFinalContainsNoPublisherMetadata:
         assert "{seo_block}" not in code, "SEO block is being appended to the article again"
         assert "seo_block" not in code, "seo_block must not exist in merge_content"
 
+    def test_merge_content_makes_no_model_call_and_hands_over_the_body(self):
+        """The SEO call moved to its own node; merge_content is plain Python again."""
+        from unittest.mock import patch
+        from Graph.agents import workers
+        from Graph.state import Plan, Task
+
+        plan = Plan(
+            blog_title="T", tone="professional", audience="general",
+            tasks=[Task(id=0, title="A", goal="g", bullets=["b"]),
+                   Task(id=1, title="B", goal="g", bullets=["b"])],
+        )
+        state = {"plan": plan, "_job_id": "",
+                 "sections": [(1, "## B\n\nbody b"), (0, "## A\n\nbody a")]}
+
+        with patch.object(workers, "_generate_seo_metadata",
+                          side_effect=AssertionError("merge_content must not call the model")):
+            out = workers.merge_content(state)
+
+        assert out["merged_body"] == "## A\n\nbody a\n\n## B\n\nbody b"  # ordered by task id
+        assert out["final"] == out["merged_md"] == "# T\n\n" + out["merged_body"] + "\n"
+        assert "seo_metadata" not in out
+
+    def test_seo_metadata_node_uses_the_merged_body_and_plan(self):
+        from unittest.mock import patch
+        from Graph.agents import workers
+
+        with patch.object(workers, "_generate_seo_metadata",
+                          return_value={"reading_time_minutes": 4}) as gen:
+            out = workers.seo_metadata_node({"merged_body": "BODY", "plan": "PLAN"})
+
+        assert out == {"seo_metadata": {"reading_time_minutes": 4}}
+        assert gen.call_args.args[:2] == ("BODY", "PLAN")
+
+    def test_a_failed_seo_call_is_non_fatal(self):
+        from unittest.mock import patch
+        from Graph.agents import workers
+
+        with patch.object(workers, "_generate_seo_metadata", side_effect=RuntimeError("no api")):
+            assert workers.seo_metadata_node({"merged_body": "b", "plan": "p"}) == {}
+        assert workers.seo_metadata_node({}) == {}  # e.g. a checkpoint from before this node existed
+
     def test_reading_time_survives_extraction_failure(self):
         """Reading time is computed locally, so a failed LLM call must not lose it."""
         from Graph.agents.workers import _generate_seo_metadata

@@ -208,16 +208,28 @@ def get_job(job_id: str) -> Optional[dict]:
     return _row_to_dict(row) if row else None
 
 
+# The job list is a summary: the sidebar polls it every 15 s and reads only id,
+# topic and status, and opening a job fetches the full row. SELECT * shipped up
+# to 50 articles, plans, social posts and score blobs on every poll.
+_LIST_COLUMNS = (
+    "id, topic, tone, sections, status, created_at, completed_at, blog_folder, "
+    "qa_score, qa_verdict, blog_evaluator_score, blog_file, blog_html_file, "
+    "podcast_file, video_file, error_message, word_count, generate_podcast, "
+    "generate_video, generate_campaign, image_model, image_size, image_quality, "
+    "image_style, config_json, owner_id"
+)
+
+
 def list_jobs(limit: int = 50, owner_id: Optional[str] = None) -> list[dict]:
-    """List jobs sorted newest-first — only `owner_id`'s jobs when given."""
+    """Job summaries, newest first — only `owner_id`'s jobs when given."""
     with get_db() as conn:
         if owner_id is None:
             cursor = conn.execute(
-                _format_sql("SELECT * FROM web_jobs ORDER BY created_at DESC LIMIT ?"), (limit,)
+                _format_sql(f"SELECT {_LIST_COLUMNS} FROM web_jobs ORDER BY created_at DESC LIMIT ?"), (limit,)
             )
         else:
             cursor = conn.execute(
-                _format_sql("SELECT * FROM web_jobs WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?"),
+                _format_sql(f"SELECT {_LIST_COLUMNS} FROM web_jobs WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?"),
                 (owner_id, limit),
             )
         rows = cursor.fetchall()
