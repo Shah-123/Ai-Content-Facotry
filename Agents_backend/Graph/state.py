@@ -114,6 +114,10 @@ class State(TypedDict, total=False):
     document_filename: Optional[str]  # original filename for citations
 
     # --- Router Outputs ---
+    # Set when the API already asked the model while the topic guard ran
+    # (routing.predict_route); router_node then skips its own call. A plain dict
+    # (RouterDecision.model_dump()) so the checkpoint holds no further custom type.
+    router_decision: Optional[dict]
     needs_research: bool
     mode: str
     queries: List[str]

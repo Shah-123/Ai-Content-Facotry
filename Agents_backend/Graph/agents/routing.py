@@ -5,16 +5,35 @@ from Graph.state import State, RouterDecision
 from Graph.templates import ROUTER_SYSTEM
 from .utils import logger, llm, _job, _emit
 
+def decide_route(topic: str, as_of: str) -> RouterDecision:
+    """The router's one model call."""
+    decider = llm.with_structured_output(RouterDecision)
+    return decider.invoke([
+        SystemMessage(content=ROUTER_SYSTEM),
+        HumanMessage(content=f"Topic: {topic}\nAs-of date: {as_of}"),
+    ])
+
+
+def predict_route(topic: str) -> RouterDecision | None:
+    """Ask the router ahead of the pipeline, while the topic guard is still running.
+
+    The answer depends only on the topic and the date, so it can be computed
+    speculatively. Any failure returns None and router_node asks the model itself.
+    """
+    try:
+        return decide_route(topic, date.today().isoformat())
+    except Exception as exc:
+        logger.warning(f"Speculative router call failed ({exc}); the router node will ask again.")
+        return None
+
+
 def router_node(state: State) -> dict:
     _emit(_job(state), "router", "started", "Analyzing topic and deciding research strategy...")
     logger.info("🚦 ROUTING ---")
-    decider = llm.with_structured_output(RouterDecision)
     as_of = state.get("as_of", date.today().isoformat())
-    
-    decision = decider.invoke([
-        SystemMessage(content=ROUTER_SYSTEM),
-        HumanMessage(content=f"Topic: {state['topic']}\nAs-of date: {as_of}"),
-    ])
+
+    given = state.get("router_decision")
+    decision = RouterDecision(**given) if given else decide_route(state["topic"], as_of)
 
     source_mode = (state.get("source_mode") or "").lower()
     if source_mode == "closed_book":

@@ -115,6 +115,8 @@ def _run_pipeline(
     topic: str,
     config: dict[str, Any],
     worker_event: threading.Event,
+    router_future=None,
+    usage_before=None,
 ):
     """
     Runs the full LangGraph pipeline in a background thread.
@@ -126,7 +128,8 @@ def _run_pipeline(
     # Token accounting baseline for this run. Snapshot/delta rather than a
     # contextvar because LangGraph dispatches section writers to worker threads.
     import usage as _usage
-    usage_before = _usage.snapshot()
+    if usage_before is None:  # the API passes one taken before the topic guard and router call
+        usage_before = _usage.snapshot()
     try:
         generation_config = GenerationConfig.model_validate(config)
         # Late import so api.py can load without OPENAI_API_KEY set
@@ -222,6 +225,11 @@ def _run_pipeline(
 
         if not plan:
             events.emit(job_id, "router", "working", "Analyzing topic and routing to agents...")
+            if router_future is not None and not is_resume:
+                # Asked while the topic guard ran: wait only for what is left of that call.
+                decision = router_future.result()
+                if decision is not None:
+                    initial_state["router_decision"] = decision.model_dump()
             for _ in graph.stream(initial_state if not is_resume else None, thread_cfg, stream_mode="values"):
                 pass
             state = graph.get_state(thread_cfg)

@@ -2,9 +2,11 @@
 Request-level tests for the FastAPI route layer.
 
 These drive the real application through TestClient against a throwaway SQLite
-file. Exactly two things are stubbed and nothing else:
+file. Exactly three things are stubbed and nothing else:
 
   * `evaluate_topic` — otherwise every job creation costs a live LLM call.
+  * `predict_route`  — job creation asks the router beside the guard; the
+                       fixture answers None, which means "the pipeline asks".
   * `_run_pipeline`  — TestClient executes BackgroundTasks after the response
                        returns, so an unstubbed test would launch the entire
                        generation pipeline in a worker thread.
@@ -35,6 +37,10 @@ def client(tmp_path, monkeypatch):
     users.init_users()
 
     import api.routes.jobs as jobs_routes
+
+    from Graph.agents import routing
+
+    monkeypatch.setattr(routing, "predict_route", lambda _topic: None)
 
     dispatched: list[dict] = []
     monkeypatch.setattr(jobs_routes, "_run_pipeline", lambda **kw: dispatched.append(kw))
@@ -119,6 +125,152 @@ class TestJobLifecycle:
 
     def test_deleting_an_unknown_job_is_404_not_500(self, client):
         assert client.delete("/api/jobs/nope").status_code == 404
+
+
+class TestRouterRunsBesideTheGuard:
+    """The router's answer depends only on the topic, so job creation starts asking it
+    beside the topic guard, and hands the call to the pipeline, which waits for what is
+    left of it. The HTTP response never waits for the router."""
+
+    def test_the_call_in_flight_is_handed_to_the_pipeline(self, client, monkeypatch):
+        from Graph.agents import routing
+        from Graph.state import RouterDecision
+
+        decision = RouterDecision(needs_research=True, mode="hybrid", reason="r", queries=["q"])
+        monkeypatch.setattr(routing, "predict_route", lambda _topic: decision)
+        _stub_topic_guard(monkeypatch)
+
+        assert client.post("/api/jobs", json={"topic": "How photosynthesis works"}).status_code == 200
+
+        assert client.dispatched[0]["router_future"].result(timeout=5) == decision
+        assert isinstance(client.dispatched[0]["usage_before"], dict)
+
+    def test_job_creation_does_not_wait_for_the_router(self, client, monkeypatch):
+        """A slow router must not delay the job appearing: before this change the router
+        ran inside the pipeline, so the response came back as soon as the guard did."""
+        import threading
+        import time
+
+        from Graph.agents import routing
+
+        release = threading.Event()
+        monkeypatch.setattr(routing, "predict_route", lambda _topic: release.wait(10))
+        _stub_topic_guard(monkeypatch)
+
+        started = time.perf_counter()
+        r = client.post("/api/jobs", json={"topic": "How photosynthesis works"})
+        elapsed = time.perf_counter() - started
+        still_running = not client.dispatched[0]["router_future"].done()
+        release.set()
+
+        assert r.status_code == 200
+        assert elapsed < 5, "the response waited for the router"
+        assert still_running
+
+    def test_the_guard_and_the_router_are_in_flight_together(self, client, monkeypatch):
+        """Each waits on one barrier, which only opens if both are running at once."""
+        import threading
+
+        from Graph.agents import routing, topic_guard
+
+        verdict = _stub_topic_guard(monkeypatch)
+        barrier = threading.Barrier(2, timeout=5)
+
+        def guard(_topic):
+            barrier.wait()
+            return verdict
+
+        def route(_topic):
+            barrier.wait()
+
+        monkeypatch.setattr(topic_guard, "evaluate_topic", guard)
+        monkeypatch.setattr(routing, "predict_route", route)
+
+        assert client.post("/api/jobs", json={"topic": "How photosynthesis works"}).status_code == 200
+
+    def test_a_rejection_does_not_wait_for_the_router(self, client, monkeypatch):
+        import threading
+        import time
+
+        from Graph.agents import routing
+
+        release = threading.Event()
+        monkeypatch.setattr(routing, "predict_route", lambda _topic: release.wait(10))
+        _stub_topic_guard(monkeypatch, safe=False, category="nonsense")
+
+        started = time.perf_counter()
+        r = client.post("/api/jobs", json={"topic": "something unsafe"})
+        elapsed = time.perf_counter() - started
+        release.set()
+
+        assert r.status_code == 400
+        assert elapsed < 5, "the rejection waited for the speculative router call"
+
+    def test_junk_the_free_screen_rejects_gets_no_router_call(self, client, monkeypatch):
+        from Graph.agents import routing
+
+        asked = []
+        monkeypatch.setattr(routing, "predict_route", lambda topic: asked.append(topic))
+
+        assert client.post("/api/jobs", json={"topic": "asdfgh"}).status_code == 400
+        assert asked == []
+
+    def test_the_pipeline_accepts_what_the_handler_passes(self):
+        """_run_pipeline is stubbed everywhere above, so a drifted signature would go unnoticed."""
+        import inspect
+
+        from api import background
+
+        params = inspect.signature(background._run_pipeline).parameters
+        for name in ("job_id", "topic", "config", "worker_event", "router_future", "usage_before"):
+            assert name in params, name
+
+    def test_the_pipeline_starts_with_the_answer_to_the_call_already_in_flight(self, monkeypatch, tmp_path):
+        """Drive the real _run_pipeline with a recording graph: the decision the API's call
+        produced must reach the graph's initial state, where router_node picks it up."""
+        import sqlite3
+        import threading
+        from concurrent.futures import Future
+        from types import SimpleNamespace
+
+        from api import background
+        from Graph.state import RouterDecision
+
+        decision = RouterDecision(needs_research=True, mode="hybrid", reason="r", queries=["q"])
+        asked = Future()
+        asked.set_result(decision)
+
+        started_with = []
+
+        class _Graph:
+            def get_state(self, _cfg):
+                return SimpleNamespace(next=(), values={})
+
+            def stream(self, state, _cfg, **_kw):
+                started_with.append(state)
+                return iter(())
+
+        fake_main = SimpleNamespace(
+            build_graph=lambda memory: _Graph(),
+            create_blog_structure=lambda topic: {k: str(tmp_path) for k in ("base", "reports", "metadata")},
+            save_blog_content=lambda folders, state: {},
+            generate_readme=lambda *a: None,
+            refine_plan_with_llm=None,
+        )
+        monkeypatch.setattr(background, "_get_pipeline_main", lambda: fake_main)
+        monkeypatch.setattr(background, "_create_sqlite_checkpoint_conn",
+                            lambda _path: sqlite3.connect(":memory:", check_same_thread=False))
+        monkeypatch.setattr(background.events, "emit", lambda *a, **k: None)
+        for name in ("set_job_running", "set_job_awaiting_approval", "set_job_completed",
+                     "set_job_failed", "update_job"):
+            monkeypatch.setattr(background, name, lambda *a, **k: None)
+        monkeypatch.setattr(background, "get_job_healed", lambda _job_id: None)
+        monkeypatch.setattr(background, "_update_metadata_json", lambda *a, **k: None)
+
+        background._run_pipeline(job_id="j", topic="t", config={}, worker_event=threading.Event(),
+                                 router_future=asked)
+
+        assert started_with[0]["router_decision"] == decision.model_dump()
 
 
 class TestTopicGuardGatesJobCreation:
