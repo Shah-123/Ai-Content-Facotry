@@ -71,6 +71,8 @@ graph TD
     H --> CV(Completion Validator)
     H2 --> CV
 
+    CV -->|"always, beside QA"| SEO(SEO Metadata)
+    SEO --> Z
     CV -->|generate_qa| I(Quality Control Auditor)
     CV -->|QA disabled| K
     I -->|"critical issues, under limit"| J(Revision Agent)
@@ -134,8 +136,9 @@ which, and `None` is a deliberate design choice rather than a missing feature.
 | **Ingest / RAG** | `text-embedding-3-small` + `gpt-5-mini` | [document_ingest.py](Agents_backend/Graph/agents/document_ingest.py) | Semantic chunking via sentence-embedding distance, ChromaDB indexing, and topic-scoped retrieval with a three-tier fallback (Chroma → local vectors → persisted evidence). Evidence is extracted only from retrieved chunks. |
 | **Orchestrator** | `gpt-5-mini` | [orchestrator.py](Agents_backend/Graph/agents/orchestrator.py) | Plans the outline, then **partitions evidence across sections** so parallel workers cite different sources instead of converging on the same few statistics. A higher temperature is requested to vary outlines between runs, but reasoning-family models such as `gpt-5-mini` ignore the parameter — see the note below the table. |
 | **Worker (×N)** | `gpt-5-mini` | [workers.py](Agents_backend/Graph/agents/workers.py) | Writes its assigned section in parallel via LangGraph `Send()`, receiving only its own evidence slice plus sibling section titles for transition context. |
-| **Reducer** | **None** (deterministic) | [workers.py](Agents_backend/Graph/agents/workers.py) | Orders sections by task ID, joins them, and builds the references table from the evidence pool — all plain Python. The single LLM call in this module generates SEO metadata, not the merge itself. |
+| **Reducer** | **None** (deterministic) | [workers.py](Agents_backend/Graph/agents/workers.py) | Orders sections by task ID, joins them, and builds the references table from the evidence pool — all plain Python. No model is called here; the SEO metadata is its own node (below). |
 | **Completion Validator** | **None** (deterministic) | [completion_validator.py](Agents_backend/Graph/completion_validator.py) | Regex checks for missing sections and low word count, applies shared auto-repairs, and scores completeness. No model involved. |
+| **SEO Metadata** | `gpt-5-mini` | [workers.py](Agents_backend/Graph/agents/workers.py) | Meta title and description, keywords, FAQ and reading time, from the merged body. Runs **beside** the QA audit rather than in front of it: nothing reads the result until the files are saved, so its LLM call hides behind the audit. Saved to `reports/seo_metadata.txt`, never appended to the article. |
 | **Quality Control** | `gpt-5-mini` + deterministic check | [quality_control.py](Agents_backend/Graph/agents/quality_control.py) | Audits the draft against evidence for hallucinations and structure. A **non-LLM citation verifier** parses every hyperlink and checks it against the research evidence by URL and domain; any unmatched link forces `NEEDS_REVISION` and caps the score at 6.0 regardless of the model's opinion. |
 | **Revision** | `gpt-5-mini` | [revision.py](Agents_backend/Graph/agents/revision.py) | Surgically rewrites only the sections carrying critical issues, falling back to a full-article edit. Bounded at 2 attempts; output shorter than 60% of the original is rejected. |
 | **SEO Optimizer** | `gpt-5-mini` + deterministic analysis | [keyword_optimizer.py](Agents_backend/Graph/keyword_optimizer.py) | Keyword density and placement are computed in Python; the model is used only to weave under-represented keywords back into the weakest passages. |

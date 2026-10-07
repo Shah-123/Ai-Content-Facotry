@@ -466,16 +466,6 @@ def merge_content(state: State) -> dict:
                 "\n".join(rows)
             )
 
-    # ── SEO Metadata ─────────────────────────────────────────────────────────
-    # Kept in state and written to disk by save_blog_content(); deliberately NOT
-    # appended to the article. `final` must be the article and only the article,
-    # because every evaluator downstream scores it.
-    seo_metadata = None
-    try:
-        seo_metadata = _generate_seo_metadata(body, plan, state)
-    except Exception as e:
-        logger.warning(f"⚠️ SEO metadata generation failed (non-fatal): {e}")
-
     # Title + body + references. The references table stays: it is part of the
     # article a reader should see, unlike the meta-title/description block.
     merged_md  = f"# {plan.blog_title}\n\n{body}{references_md}\n"
@@ -483,7 +473,7 @@ def merge_content(state: State) -> dict:
 
     logger.info(
         f"✅ Merged {len(ordered_content)} sections "
-        f"(References: {bool(references_md)}, SEO metadata: {bool(seo_metadata)})"
+        f"(References: {bool(references_md)})"
     )
     _emit(_job(state), "merger", "completed",
           f"Merged {len(ordered_content)} sections ({word_count} words)",
@@ -492,7 +482,24 @@ def merge_content(state: State) -> dict:
           f"All {len(ordered_content)} sections written",
           {"sections": len(ordered_content), "words": word_count})
 
-    result = {"merged_md": merged_md, "final": merged_md}
-    if seo_metadata:
-        result["seo_metadata"] = seo_metadata
-    return result
+    return {"merged_md": merged_md, "final": merged_md, "merged_body": body}
+
+
+def seo_metadata_node(state: State) -> dict:
+    """SEO metadata, generated alongside the QA audit instead of inside merge_content.
+
+    Nothing reads it until save_blog_content() runs after the graph ends, yet the
+    call used to sit in front of every downstream stage. It takes the same prompt
+    and the same input as before (the merged body, ahead of any QA or keyword
+    edits), so the result is unchanged.
+
+    Kept in state and written to disk by save_blog_content(); deliberately NOT
+    appended to the article. `final` must be the article and only the article,
+    because every evaluator downstream scores it.
+    """
+    try:
+        seo_metadata = _generate_seo_metadata(state["merged_body"], state["plan"], state)
+    except Exception as e:
+        logger.warning(f"⚠️ SEO metadata generation failed (non-fatal): {e}")
+        return {}
+    return {"seo_metadata": seo_metadata} if seo_metadata else {}
