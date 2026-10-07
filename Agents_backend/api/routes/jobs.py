@@ -10,10 +10,10 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from db import create_job, get_job, update_job, delete_job
+from db import create_job, get_job, list_jobs, update_job, delete_job
 from api.schemas import CreateJobRequest, RevisePlanRequest, SaveBlogRequest, UpdatePlanRequest
 from api.state import _worker_approval_events, _plan_revisions, _direct_plan_updates
-from api.utils import get_job_healed, list_jobs_healed
+from api.utils import get_job_healed
 from api.background import _run_pipeline, _run_manual_task, _ensure_pipeline_running
 from api.users import require_job_owner
 
@@ -86,7 +86,9 @@ async def create_new_job(req: CreateJobRequest, background_tasks: BackgroundTask
 @router.get("/api/jobs")
 async def list_all_jobs(user: dict = Depends(require_job_owner)):
     """Return the caller's jobs, newest-first."""
-    return await asyncio.to_thread(list_jobs_healed, owner_id=user["id"])
+    # No file healing here: it opened metadata.json and globbed the images folder
+    # for every listed job on every poll. Opening a job still heals it.
+    return await asyncio.to_thread(list_jobs, owner_id=user["id"])
 
 
 @router.get("/api/jobs/{job_id}")

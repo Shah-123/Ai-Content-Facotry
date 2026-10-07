@@ -36,3 +36,22 @@ def test_create_job_preserves_the_complete_generation_config(tmp_path: Path, mon
     assert job["tone"] == "technical"
     assert job["sections"] == 5
     assert job["generate_video"] is True
+
+
+def test_the_job_list_is_a_summary_without_the_heavy_fields(tmp_path: Path, monkeypatch):
+    """The sidebar polls this every 15 s; it must not ship whole articles."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "web_jobs.db")
+    db.init_db()
+    job = db.create_job("List me", config={"tone": "technical", "sections": 4})
+    db.update_job(job["id"], status="completed", final_content="x" * 10_000,
+                  plan_json='{"blog_title": "T"}', social_linkedin="post",
+                  geval_scores='{"overall_score": 8}')
+
+    [listed] = db.list_jobs()
+
+    assert (listed["id"], listed["topic"], listed["status"]) == (job["id"], "List me", "completed")
+    assert listed["config"]["tone"] == "technical"   # still rebuilt from config_json
+    for heavy in ("final_content", "plan_json", "social_linkedin", "social_twitter"):
+        assert heavy not in listed
+    assert listed["plan"] is None and listed["geval_scores"] is None
+    assert db.get_job(job["id"])["final_content"] == "x" * 10_000  # the full row is unchanged
