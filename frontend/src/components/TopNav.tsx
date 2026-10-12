@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Bell, Menu, Sun, Moon, CheckCircle2, LogOut } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Bell, Menu, Sun, Moon, LogOut } from 'lucide-react';
 import { Job, AuthUser, auth } from '../api';
 import { ViewState } from '../types';
 import { useTheme } from '../hooks/useTheme';
@@ -7,6 +7,7 @@ import { useTheme } from '../hooks/useTheme';
 interface TopNavProps {
   view: ViewState;
   onToggleMobileSidebar?: () => void;
+  isMobileSidebarOpen?: boolean;
   /** Jobs that finished during this session, newest first. */
   notifications: Job[];
   unread: number;
@@ -15,7 +16,7 @@ interface TopNavProps {
 }
 
 export function TopNav({
-  view, onToggleMobileSidebar,
+  view, onToggleMobileSidebar, isMobileSidebarOpen,
   notifications, unread, onOpenNotifications, onSelectNotification,
 }: TopNavProps) {
   const { theme, toggleTheme } = useTheme();
@@ -36,45 +37,39 @@ export function TopNav({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isBellOpen]);
 
+  const themeLabel = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+
   return (
-    <nav className="sticky top-0 w-full z-40 bg-base-950/80 backdrop-blur-2xl flex justify-between items-center px-6 md:px-8 py-3 border-b border-white/6 h-14 shrink-0 shadow-sm transition-colors">
-      <div className="flex items-center gap-4">
-        <span className="text-base font-extrabold text-gradient-amber tracking-tight block md:hidden">AI Content Factory</span>
-        <div className="hidden md:flex items-center gap-2">
-          <div className="px-2.5 py-1 rounded-full bg-accent-500/10 border border-accent-500/20 text-accent-400 text-label font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent-400 status-pulse"></span>
-            Multi-Agent Engine Active
-          </div>
-        </div>
-        {view === 'content' && (
-          <span className="hidden md:inline-flex px-3 py-1.5 rounded-xl text-accent-400 bg-accent-500/10 border border-accent-500/20 font-bold text-xs">
-            Studio View
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
+    <nav className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-canvas/80 backdrop-blur-md px-4 md:px-6">
+      <button onClick={onToggleMobileSidebar} className="btn btn-ghost btn-icon lg:hidden" aria-label="Open menu" title="Open menu" aria-expanded={!!isMobileSidebarOpen} aria-controls="app-sidebar">
+        <Menu aria-hidden="true" />
+      </button>
+      <span className="text-ui font-semibold text-base-50 lg:hidden">AI Content Factory</span>
+      <span className="hidden lg:block text-ui font-medium text-base-100">
+        {view === 'content' ? 'Studio' : 'Dashboard'}
+      </span>
+
+      <div className="ml-auto flex items-center gap-1">
         <button
           onClick={toggleTheme}
-          className="p-2 rounded-xl text-base-400 hover:text-accent-400 hover:bg-white/5 transition-all"
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          aria-label="Toggle theme"
+          className="btn btn-ghost btn-icon"
+          title={themeLabel}
+          aria-label={themeLabel}
         >
-          {theme === 'dark'
-            ? <Sun className="w-4.5 h-4.5" />
-            : <Moon className="w-4.5 h-4.5" />}
+          {theme === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
         </button>
 
         <div className="relative">
           <button
             onClick={toggleBell}
-            className="relative p-2 rounded-xl text-base-400 hover:text-accent-400 hover:bg-white/5 transition-all"
+            className="btn btn-ghost btn-icon relative"
             title={unread > 0 ? `${unread} finished blog${unread > 1 ? 's' : ''}` : 'Notifications'}
             aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
             aria-expanded={isBellOpen}
           >
-            <Bell className="w-4.5 h-4.5" />
+            <Bell aria-hidden="true" />
             {unread > 0 && (
-              <span className="absolute top-1.5 right-1.5 min-w-[15px] h-[15px] px-1 rounded-full bg-emerald-500 text-label font-bold text-base-950 leading-[15px] text-center ring-2 ring-base-950">
+              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 grid place-items-center rounded-full bg-accent-500 text-on-accent font-mono text-label">
                 {unread > 9 ? '9+' : unread}
               </span>
             )}
@@ -84,8 +79,8 @@ export function TopNav({
             <>
               {/* click-away catcher */}
               <div className="fixed inset-0 z-40" onClick={() => setIsBellOpen(false)} />
-              <div className="absolute right-0 mt-2 w-72 z-50 glass-panel rounded-xl border border-white/10 p-1.5 shadow-xl">
-                <p className="px-2.5 py-1.5 text-label font-bold text-base-400 uppercase tracking-wider">Notifications</p>
+              <div className="absolute right-0 top-full mt-1.5 z-50 surface-raised w-80 max-sm:fixed max-sm:inset-x-4 max-sm:top-14 max-sm:w-auto p-1">
+                <p className="px-2.5 py-1.5 text-xs font-medium text-base-500">Notifications</p>
                 {notifications.length === 0 ? (
                   <p className="px-2.5 pb-3 pt-1 text-xs text-base-500">
                     Nothing yet. Finished blogs show up here.
@@ -94,11 +89,11 @@ export function TopNav({
                   <button
                     key={job.id}
                     onClick={() => { setIsBellOpen(false); onSelectNotification(job.id); }}
-                    className="w-full flex items-start gap-2.5 text-left px-2.5 py-2 rounded-lg hover:bg-white/5 transition-colors"
+                    className="menu-item h-auto items-start py-2 transition-colors"
                   >
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" aria-hidden="true" />
-                    <span className="min-w-0">
-                      <span className="block text-xs font-semibold text-base-100 truncate">{job.topic}</span>
+                    <span className="dot dot-success mt-1.5" aria-hidden="true" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-base-100">{job.topic}</span>
                       <span className="block text-xs text-base-500">Blog ready — open studio draft</span>
                     </span>
                   </button>
@@ -108,7 +103,6 @@ export function TopNav({
           )}
         </div>
 
-        <button onClick={onToggleMobileSidebar} className="md:hidden p-2 rounded-xl text-base-400 hover:text-accent-400 hover:bg-white/5" aria-label="Open menu"><Menu className="w-5 h-5" /></button>
         <UserMenu />
       </div>
     </nav>
@@ -119,6 +113,17 @@ export function TopNav({
  *  hardcoded "SE" placeholder. */
 function UserMenu() {
   const [isOpen, setIsOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  // Escape closes the menu and hands focus back to the avatar ("Sign out"
+  // unmounts, so focus would otherwise drop to <body>).
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setIsOpen(false); btnRef.current?.focus(); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
   // AuthGate resolved this before App ever mounted — no second request.
   const user: AuthUser | null = auth.user;
 
@@ -128,10 +133,18 @@ function UserMenu() {
     : '·';
 
   return (
-    <div className="relative ml-1">
+    <div
+      className="relative ml-1"
+      onBlur={(e) => {
+        // Ignore a null relatedTarget (mouse click without focus, alt-tab).
+        const n = e.relatedTarget as Node | null;
+        if (n && !e.currentTarget.contains(n)) setIsOpen(false);
+      }}
+    >
       <button
+        ref={btnRef}
         onClick={() => setIsOpen(open => !open)}
-        className="w-8 h-8 rounded-xl aurora-chip flex items-center justify-center text-xs font-bold shadow-sm"
+        className="grid size-8 [@media(pointer:coarse)]:size-10 place-items-center rounded-full bg-base-800 ring-1 ring-line-strong text-xs font-medium text-base-200"
         title={label || 'Account'}
         aria-label="Account menu"
         aria-expanded={isOpen}
@@ -141,14 +154,15 @@ function UserMenu() {
       {isOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 mt-2 w-56 z-50 glass-panel rounded-xl border border-white/10 p-1.5 shadow-xl">
-            <p className="px-2.5 py-1.5 text-xs font-semibold text-base-100 truncate">{user?.name || 'Signed in'}</p>
-            <p className="px-2.5 pb-2 text-xs text-base-500 truncate">{user?.email}</p>
+          <div className="absolute right-0 top-full mt-1.5 z-50 surface-raised w-56 p-1">
+            <p className="px-2.5 pt-1.5 text-ui font-medium text-base-100 truncate">{user?.name || 'Signed in'}</p>
+            <p className="px-2.5 pb-1.5 text-xs text-base-500 truncate">{user?.email}</p>
+            <div className="my-1 h-px bg-line" />
             <button
               onClick={() => auth.signOut()}
-              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-semibold text-base-300 hover:text-base-100 hover:bg-white/5 transition-colors border-t border-white/8"
+              className="menu-item transition-colors"
             >
-              <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+              <LogOut aria-hidden="true" />
               Sign out
             </button>
           </div>

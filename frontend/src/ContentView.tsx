@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import {
-  CheckCircle2, Clock, Podcast, Film, Share2, Download,
-  FileText, Settings, Image as ImageIcon,
-  Copy, RefreshCw, Bot, Trash2,
-  Sparkles, Edit3, Zap, FileCode, Check, Printer, ExternalLink, Save
+  Clock, Podcast, Film, Share2, Download,
+  FileText, Image as ImageIcon, Gauge, Loader2, AlertTriangle, ChevronDown,
+  Copy, RefreshCw, Trash2,
+  Edit3, FileCode, Check, Printer, ExternalLink, Save
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { APIClient, Job, AgentEvent, API_BASE_URL, withApiKey } from './api';
 import { TabButton } from './components/TabButton';
@@ -41,6 +41,43 @@ const generatedFigureHtmlToMarkdown = (content: string) => content.replace(
 
 const REMARK_PLUGINS = [remarkGfm];
 
+// Wide tables scroll inside their own frame instead of the article column.
+const MARKDOWN_COMPONENTS: Components = {
+  table: ({ node: _node, ...p }) => (
+    <div className="my-7 overflow-x-auto rounded-lg ring-1 ring-line"><table {...p} /></div>
+  ),
+};
+
+const TABS: { id: TabState; label: string; icon: React.ReactNode }[] = [
+  { id: 'blog', label: 'Blog', icon: <FileText /> },
+  { id: 'geval', label: 'G-Eval audit', icon: <Gauge /> },
+  { id: 'video', label: 'Video', icon: <Film /> },
+  { id: 'podcast', label: 'Podcast', icon: <Podcast /> },
+  { id: 'social', label: 'Social', icon: <Share2 /> },
+  { id: 'images', label: 'Images', icon: <ImageIcon /> },
+];
+
+// Status map (spec section 4): dot + badge + copy per job status.
+const STATUS_BADGE: Record<Job['status'], { badge: string; dot: string; label: string }> = {
+  completed: { badge: 'badge', dot: 'dot dot-success', label: 'Completed' },
+  awaiting_approval: { badge: 'badge badge-warning', dot: 'dot dot-warning', label: 'Awaiting approval' },
+  running: { badge: 'badge badge-accent', dot: 'dot live-dot', label: 'Running' },
+  pending: { badge: 'badge', dot: 'dot dot-pending', label: 'Queued' },
+  failed: { badge: 'badge badge-error', dot: 'dot dot-error', label: 'Failed' },
+};
+
+// Close the native <details> menu an item lives in.
+const closeMenu = (el: HTMLElement) => el.closest('details')?.removeAttribute('open');
+
+// Render hashtags in a quieter tone; split() with a capture group puts the
+// matches at odd indices.
+const withHashtags = (text: string) =>
+  text.split(/(#[\p{L}\p{N}_]+)/u).map((part, i) =>
+    i % 2 ? <span key={i} className="text-base-400">{part}</span> : part
+  );
+
+const humaniseFilename = (name: string) => name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ');
+
 const resolveContentImageUrls = (content: string, jobId?: string) => {
   if (!content) return '';
   if (!jobId) return generatedFigureHtmlToMarkdown(content);
@@ -63,6 +100,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editedContent, setEditedContent] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
+  const [copiedChannel, setCopiedChannel] = useState<'linkedin' | 'x' | null>(null);
 
   // Seed the editor from the server copy whenever the job (or its content)
   // changes. Deliberately NOT keyed on isEditing: re-running on every
@@ -99,7 +137,7 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
   // re-renders on every agent event and every 3 s poll while a manual task runs.
   // Re-parse only when the text (or the job its image URLs point at) changes.
   const articleBody = useMemo(() => (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
       {resolveContentImageUrls(editedContent, currentJob?.id)}
     </ReactMarkdown>
   ), [editedContent, currentJob?.id]);
@@ -114,24 +152,16 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
 
   if (!currentJob) {
     return (
-      <main className="flex-1 p-6 md:p-10 flex items-center justify-center">
-        <section className="w-full max-w-lg rounded-3xl border border-white/8 bg-base-900/60 p-8 text-center shadow-xl backdrop-blur-md">
-          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-accent-500/20 bg-accent-500/10">
-            <FileText className="h-7 w-7 text-accent-400" />
-          </div>
-          <h1 className="text-xl font-bold text-base-100">Your studio is ready</h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-base-400">
-            Create a generation job to review, edit, export, and extend your content here.
-          </p>
-          <button
-            type="button"
-            onClick={() => navTo('chat')}
-            className="btn-primary mt-6 inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold"
-          >
-            <Sparkles className="h-4 w-4" />
-            Create a new job
-          </button>
-        </section>
+      <main className="flex-1 relative overflow-y-auto w-full">
+        <div className="mx-auto w-full max-w-5xl px-4 md:px-10 pt-6 md:pt-8 pb-16">
+          <EmptyState
+            icon={<FileText />}
+            title="Your studio is ready"
+            description="Create a generation job to review, edit, export, and extend your content here."
+            onGenerate={() => navTo('chat')}
+            actionLabel="Create a new job"
+          />
+        </div>
       </main>
     );
   }
@@ -159,568 +189,607 @@ export function ContentView({ navTo, currentJob, refreshJob, events = [], reconn
     if (await saveEdits()) window.location.assign(APIClient.getExportUrl(currentJob.id, format));
   };
 
-  return (
-    <main className="flex-1 p-6 md:p-10 flex flex-col relative overflow-y-auto w-full max-w-6xl mx-auto">
 
-      {/* Header and Tabs */}
-      <div className="mb-8 fade-in">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-          <h2 className="text-2xl font-bold text-base-50 tracking-tight line-clamp-1">Studio: {currentJob.topic}</h2>
-          <div className="flex items-center gap-2.5 shrink-0">
-            <span className="px-2.5 py-1 rounded-lg bg-accent-glow text-accent-400 text-label font-semibold uppercase tracking-wider flex items-center gap-1.5 border border-accent-500/20">
-              {currentJob?.status === 'completed' ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-              {currentJob?.status || 'Draft'}
-            </span>
-            {onDeleteJob && (
-              <button
-                onClick={() => onDeleteJob(currentJob.id)}
-                className="text-base-400 text-sm font-medium hover:text-signal-error transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/3"
-                title="Delete Job"
-              >
-                <Trash2 className="w-3.5 h-3.5" /> Delete
-              </button>
-            )}
+  // Show the Check only once the clipboard write actually succeeded.
+  const copyPost = (channel: 'linkedin' | 'x', text: string) =>
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedChannel(channel);
+      setTimeout(() => setCopiedChannel(null), 2000);
+    }).catch(() => { });
+
+  // Roving focus for the tablist: arrows wrap, Home/End jump to the ends.
+  const handleTabKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const i = TABS.findIndex((t) => t.id === activeTab);
+    const last = TABS.length - 1;
+    const next = e.key === 'ArrowRight' ? (i + 1) % TABS.length
+      : e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length
+        : e.key === 'Home' ? 0
+          : e.key === 'End' ? last
+            : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    setActiveTab(TABS[next].id);
+    e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+  };
+
+  const status = STATUS_BADGE[currentJob.status] ?? STATUS_BADGE.pending;
+  const createdAt = currentJob.created_at ? new Date(currentJob.created_at) : null;
+  const imageFiles = currentJob.image_files ?? [];
+  const canAudit = currentJob.status === 'completed';
+  const radarAxes = [
+    { key: 'coherence', label: 'Coherence', x: 50, y: 15, anchor: 'middle' },
+    { key: 'relevance', label: 'Relevance', x: 83, y: 51.5, anchor: 'start' },
+    { key: 'accuracy', label: 'Accuracy', x: 50, y: 88, anchor: 'middle' },
+    { key: 'tone_alignment', label: 'Tone', x: 17, y: 51.5, anchor: 'end' },
+  ] as const;
+
+  const imageTile = (imgPath: string, idx: number, single = false) => {
+    const url = APIClient.getFileUrl(currentJob.id, imgPath);
+    const filename = imgPath.split('/').pop() || `image_${idx + 1}.png`;
+    const name = humaniseFilename(filename);
+    return (
+      <div key={imgPath} className={`group relative overflow-hidden rounded-xl ring-1 ring-line bg-surface ${single ? '' : 'aspect-[16/10]'}`}>
+        <img
+          src={url}
+          alt={name}
+          className={`transition-transform duration-[400ms] group-hover:scale-[1.02] ${single ? 'block h-auto w-full object-contain' : 'size-full object-cover'}`}
+        />
+        <div className={`absolute inset-0 bg-linear-to-t from-black/60 via-transparent transition-opacity ${single ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'}`}>
+          <div className="absolute right-2 top-2 flex gap-1.5">
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="grid size-8 [@media(pointer:coarse)]:size-10 place-items-center rounded-lg bg-black/50 text-white backdrop-blur hover:bg-black/70 transition-colors"
+              aria-label={`Open ${name} in a new tab`}
+              title="View full image in new tab"
+            >
+              <ExternalLink className="size-4" />
+            </a>
+            <a
+              href={url}
+              download={filename}
+              target="_blank"
+              rel="noreferrer"
+              className="grid size-8 [@media(pointer:coarse)]:size-10 place-items-center rounded-lg bg-black/50 text-white backdrop-blur hover:bg-black/70 transition-colors"
+              aria-label={`Download ${name}`}
+              title="Download"
+            >
+              <Download className="size-4" />
+            </a>
           </div>
-        </div>
-
-        <div className="flex gap-2 text-sm font-medium overflow-x-auto pb-2 border-b border-white/4">
-          <TabButton<TabState> id="blog" icon={<FileText className="w-4 h-4" />} label="Blog" activeTab={activeTab} setActiveTab={setActiveTab} />
-          <TabButton<TabState> id="geval" icon={<Bot className="w-4 h-4" />} label="G-Eval Audit" activeTab={activeTab} setActiveTab={setActiveTab} />
-          <TabButton<TabState> id="video" icon={<Film className="w-4 h-4" />} label="Video" activeTab={activeTab} setActiveTab={setActiveTab} />
-          <TabButton<TabState> id="podcast" icon={<Podcast className="w-4 h-4" />} label="Podcast" activeTab={activeTab} setActiveTab={setActiveTab} />
-          <TabButton<TabState> id="social" icon={<Share2 className="w-4 h-4" />} label="Social Media" activeTab={activeTab} setActiveTab={setActiveTab} />
-          <TabButton<TabState> id="images" icon={<ImageIcon className="w-4 h-4" />} label="Images" activeTab={activeTab} setActiveTab={setActiveTab} />
+          <span className="absolute bottom-2 left-3 right-3 font-mono text-xs text-white/85 truncate">{name}</span>
         </div>
       </div>
+    );
+  };
 
-      {/* Tab Content with animated transitions */}
-      <div className="flex-1">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-          >
+  return (
+    <main className="flex-1 relative overflow-y-auto w-full scroll-pt-16">
+      <div className="@container mx-auto w-full max-w-5xl px-4 md:px-10 pt-6 pb-16">
 
-            {/* BLOG TAB */}
-            {activeTab === 'blog' && (
-              <div className="flex flex-col gap-4">
-                {/* Action Bar & Token Badge */}
-                {currentJob.final_content && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-base-900/80 dark:bg-base-900/90 border border-base-750/80 backdrop-blur-xl shadow-lg">
-                    {/* Measured token usage and cost, recorded per run by
-                        Agents_backend/usage.py and read off the job row. Never
-                        estimated client-side: the previous badge multiplied the
-                        word count by a magic constant and was 2x out on cost.
-                        Absent usage means "not measured", so it renders as such
-                        rather than as a zero or a guess. */}
-                    <div className="flex items-center gap-3 text-xs font-semibold">
-                      {currentJob.usage ? (
-                        <>
-                          <span
-                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-accent-500/10 text-accent-400 border border-accent-500/20 shadow-sm font-mono"
-                            title={`${currentJob.usage.total.calls} model calls · ${currentJob.usage.total.input_tokens.toLocaleString()} in / ${currentJob.usage.total.output_tokens.toLocaleString()} out`}
-                          >
-                            <Zap className="w-3.5 h-3.5" />
-                            {currentJob.usage.total.total_tokens.toLocaleString()} Tokens
-                          </span>
-                          <span
-                            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 shadow-sm font-mono"
-                            title={currentJob.usage.priced
-                              ? 'Estimated from published list prices for the models actually called'
-                              : 'Partial: at least one model called has no published price, so the real cost is higher'}
-                          >
-                            {/* A trailing + when usage.priced is false — that flag
-                                means a called model had no known price, so this
-                                is a floor, not the total. */}
-                            💰 ${currentJob.usage.total.cost_usd.toFixed(4)}{currentJob.usage.priced ? '' : '+'} USD
-                          </span>
-                        </>
-                      ) : (
-                        <span
-                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/5 text-base-400 border border-white/8 shadow-sm font-mono"
-                          title="This job finished before usage metering existed, or never completed."
-                        >
-                          <Zap className="w-3.5 h-3.5" />
-                          Usage not recorded
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="font-mono text-xs text-base-400">Job {currentJob.id.slice(0, 8)}</p>
+            <h1 className="mt-1 font-serif text-title-sm md:text-title text-base-50 text-balance line-clamp-2">{currentJob.topic}</h1>
+            <div className="mt-2 flex items-center gap-3 text-xs text-base-400">
+              <span className={status.badge}><span className={status.dot} />{status.label}</span>
+              {createdAt && !isNaN(createdAt.getTime()) && (
+                <time dateTime={currentJob.created_at} className="font-mono tabular-nums">
+                  {createdAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                </time>
+              )}
+            </div>
+          </div>
+          {onDeleteJob && (
+            <button
+              type="button"
+              onClick={() => onDeleteJob(currentJob.id)}
+              className="btn btn-danger btn-icon btn-sm shrink-0"
+              aria-label="Delete job"
+              title="Delete job"
+            >
+              <Trash2 />
+            </button>
+          )}
+        </div>
+
+        {/* Tabs */}
+        <div
+          role="tablist"
+          aria-label="Studio sections"
+          onKeyDown={handleTabKeyDown}
+          className="mt-6 flex gap-1 overflow-x-auto -mx-4 px-4 md:-mx-1 md:px-1 scroll-px-4 shadow-[inset_0_-1px_0_var(--color-line)] [scrollbar-width:none]"
+        >
+          {TABS.map((t) => (
+            <TabButton<TabState> key={t.id} id={t.id} icon={t.icon} label={t.label} activeTab={activeTab} setActiveTab={setActiveTab} />
+          ))}
+        </div>
+
+        {/* Tab panel: opacity only, no exit, so no stacking or height jump */}
+        <motion.div
+          key={activeTab}
+          role="tabpanel"
+          id={`panel-${activeTab}`}
+          aria-labelledby={`tab-${activeTab}`}
+          className="mt-6"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+        >
+
+          {/* BLOG TAB */}
+          {activeTab === 'blog' && (
+            <div>
+              {currentJob.final_content && (
+                <div className="sticky top-0 z-10 -mx-1 px-1 mb-6 flex flex-wrap items-center justify-between gap-2 py-2 bg-canvas/85 backdrop-blur-md border-b border-line">
+                  {/* Measured token usage and cost, recorded per run by
+                      Agents_backend/usage.py and read off the job row. Never
+                      estimated client-side: the previous badge multiplied the
+                      word count by a magic constant and was 2x out on cost.
+                      Absent usage means "not measured", so it renders as such
+                      rather than as a zero or a guess. */}
+                  <p className="font-mono text-xs text-base-400 tabular-nums">
+                    {currentJob.usage ? (
+                      <>
+                        <span title={`${currentJob.usage.total.calls} model calls · ${currentJob.usage.total.input_tokens.toLocaleString()} in / ${currentJob.usage.total.output_tokens.toLocaleString()} out`}>
+                          {currentJob.usage.total.total_tokens.toLocaleString()} tokens
                         </span>
-                      )}
-                    </div>
-
-                    {/* Action Controls */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => setIsEditing(!isEditing)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                          isEditing
-                            ? 'bg-accent-500 text-base-950 shadow-md shadow-accent-500/30'
-                            : 'bg-base-800/80 text-base-100 hover:text-accent-400 border border-base-700/80 hover:border-accent-500/30'
-                        }`}
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        {isEditing ? 'Preview' : 'Edit'}
-                      </button>
-
-                      {(isDirty || saving) && (
-                        <button
-                          onClick={saveEdits}
-                          disabled={saving}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-wait"
-                          title="Save your edits so exports and media re-runs use them"
+                        {' · '}
+                        <span
+                          title={currentJob.usage.priced
+                            ? 'Estimated from published list prices for the models actually called'
+                            : 'Partial: at least one model called has no published price, so the real cost is higher'}
                         >
-                          <Save className="w-3.5 h-3.5" />
-                          {saving ? 'Saving…' : 'Save'}
-                        </button>
-                      )}
-                      {saveError && !isEditing && (
-                        <span className="text-xs font-semibold text-rose-400">{saveError}</span>
-                      )}
-
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(editedContent);
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 2000);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-base-800/80 text-base-100 hover:text-accent-400 border border-base-700/80 hover:border-accent-500/30 transition-all shadow-sm cursor-pointer"
-                      >
-                        {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        {copied ? 'Copied!' : 'Copy'}
-                      </button>
-
-                      {/* PDF Export */}
-                      <a
-                        href={APIClient.getExportUrl(currentJob.id, 'pdf')}
-                        onClick={exportSaved('pdf')}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-500/10 text-rose-500 dark:text-rose-400 hover:bg-rose-500/20 border border-rose-500/25 transition-all shadow-sm cursor-pointer"
-                        title="Download as publication-ready PDF"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        Export PDF
-                      </a>
-
-                      {/* DOCX Export */}
-                      <a
-                        href={APIClient.getExportUrl(currentJob.id, 'docx')}
-                        onClick={exportSaved('docx')}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-sky-500/10 text-sky-500 dark:text-sky-400 hover:bg-sky-500/20 border border-sky-500/25 transition-all shadow-sm cursor-pointer"
-                        title="Download as Microsoft Word document (.docx)"
-                      >
-                        <FileText className="w-3.5 h-3.5" />
-                        Export DOCX
-                      </a>
-
-                      {/* HTML Export */}
-                      <a
-                        href={APIClient.getExportUrl(currentJob.id, 'html')}
-                        onClick={exportSaved('html')}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-500 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/25 transition-all shadow-sm cursor-pointer"
-                        title="Download as standalone HTML document"
-                      >
-                        <FileCode className="w-3.5 h-3.5" />
-                        Export HTML
-                      </a>
-
-                      {/* Markdown Download */}
-                      <button
-                        onClick={() => {
-                          const rawText = editedContent;
-                          const resolvedText = resolveContentImageUrls(rawText, currentJob.id);
-                          const filename = `${(currentJob.topic || 'blog').replace(/[^a-z0-9]/gi, '_')}.md`;
-                          const blob = new Blob([resolvedText], { type: 'text/markdown;charset=utf-8' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = filename;
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          URL.revokeObjectURL(url);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-base-800/80 text-base-100 hover:text-accent-400 border border-base-700/80 hover:border-accent-500/30 transition-all shadow-sm cursor-pointer"
-                        title="Download Markdown with picture URLs"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Export MD
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <article className="high-contrast-card rounded-2xl p-8 md:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.3)] relative overflow-hidden bg-white text-slate-800">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-accent-500 to-accent-600"></div>
-                  {currentJob.final_content ? (
-                    isEditing ? (
-                      <div className="flex flex-col gap-3">
-                        <div className="flex items-center justify-between text-xs text-slate-500 border-b pb-2">
-                          <span className="font-semibold text-slate-700">Markdown Editor</span>
-                          <span className={saveError ? 'text-rose-600' : undefined}>
-                            {saveError
-                              ? saveError
-                              : isDirty
-                                ? 'Unsaved changes — preview, copy and Markdown export use them now; Save for PDF/DOCX/HTML and media re-runs'
-                                : 'All changes saved'}
-                          </span>
-                        </div>
-                        <textarea
-                          value={editedContent}
-                          onChange={(e) => setEditedContent(e.target.value)}
-                          className="w-full h-[600px] p-4 font-mono text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-accent-500 text-slate-900 bg-slate-50/50 resize-y"
-                        />
-                      </div>
+                          {/* A trailing + when usage.priced is false — that flag
+                              means a called model had no known price, so this
+                              is a floor, not the total. */}
+                          ${currentJob.usage.total.cost_usd.toFixed(4)}{currentJob.usage.priced ? '' : '+'}
+                        </span>
+                      </>
                     ) : (
-                      <div className="prose prose-slate max-w-none prose-headings:text-slate-900 prose-a:text-accent-600 hover:prose-a:text-accent-500">
-                        {articleBody}
+                      <span title="This job finished before usage metering existed, or never completed.">
+                        Usage not recorded
+                      </span>
+                    )}
+                  </p>
+
+                  <div className="ml-auto flex items-center gap-1.5">
+                    {saveError && !isEditing && (
+                      <span role="alert" className="text-xs text-signal-error">{saveError}</span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(!isEditing)}
+                      aria-pressed={isEditing}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      <Edit3 />
+                      {isEditing ? 'Preview' : 'Edit'}
+                    </button>
+
+                    {(isDirty || saving) && (
+                      <button
+                        type="button"
+                        onClick={saveEdits}
+                        disabled={saving}
+                        className="btn btn-primary btn-sm"
+                        title="Save your edits so exports and media re-runs use them"
+                      >
+                        {saving ? <Loader2 className="animate-spin" /> : <Save />}
+                        {saving ? 'Saving…' : 'Save'}
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(editedContent);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                      className="btn btn-ghost btn-icon btn-sm"
+                      aria-label={copied ? 'Copied' : 'Copy Markdown'}
+                      title={copied ? 'Copied' : 'Copy Markdown'}
+                    >
+                      {copied ? <Check className="text-signal-success" /> : <Copy />}
+                    </button>
+
+                    <details
+                      className="relative group/menu"
+                      // A null relatedTarget (click that does not focus, alt-tab) must not close the menu.
+                      onBlur={(e) => { const n = e.relatedTarget as Node | null; if (n && !e.currentTarget.contains(n)) e.currentTarget.removeAttribute('open'); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.currentTarget.removeAttribute('open');
+                          e.currentTarget.querySelector('summary')?.focus();
+                        }
+                      }}
+                    >
+                      <summary className="btn btn-secondary btn-sm">
+                        <Download />
+                        Export
+                        <ChevronDown className="transition-transform group-open/menu:rotate-180" />
+                      </summary>
+                      <div className="surface-raised menu">
+                        <a
+                          className="menu-item"
+                          href={APIClient.getExportUrl(currentJob.id, 'pdf')}
+                          onClick={(e) => { const el = e.currentTarget; exportSaved('pdf')(e); closeMenu(el); }}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Download as publication-ready PDF"
+                        >
+                          <Printer />PDF<span className="ml-auto font-mono text-xs text-base-500">.pdf</span>
+                        </a>
+                        <a
+                          className="menu-item"
+                          href={APIClient.getExportUrl(currentJob.id, 'docx')}
+                          onClick={(e) => { const el = e.currentTarget; exportSaved('docx')(e); closeMenu(el); }}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Download as Microsoft Word document (.docx)"
+                        >
+                          <FileText />Word<span className="ml-auto font-mono text-xs text-base-500">.docx</span>
+                        </a>
+                        <a
+                          className="menu-item"
+                          href={APIClient.getExportUrl(currentJob.id, 'html')}
+                          onClick={(e) => { const el = e.currentTarget; exportSaved('html')(e); closeMenu(el); }}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Download as standalone HTML document"
+                        >
+                          <FileCode />HTML<span className="ml-auto font-mono text-xs text-base-500">.html</span>
+                        </a>
+                        <button
+                          type="button"
+                          className="menu-item"
+                          onClick={(e) => {
+                            const rawText = editedContent;
+                            const resolvedText = resolveContentImageUrls(rawText, currentJob.id);
+                            const filename = `${(currentJob.topic || 'blog').replace(/[^a-z0-9]/gi, '_')}.md`;
+                            const blob = new Blob([resolvedText], { type: 'text/markdown;charset=utf-8' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = filename;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                            closeMenu(e.currentTarget);
+                          }}
+                          title="Download Markdown with picture URLs"
+                        >
+                          <Download />Markdown<span className="ml-auto font-mono text-xs text-base-500">.md</span>
+                        </button>
                       </div>
-                    )
+                    </details>
+                  </div>
+                </div>
+              )}
+
+              {currentJob.final_content && isEditing ? (
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-4 text-xs text-base-500">
+                    <span className="font-medium text-base-300">Markdown editor</span>
+                    <span className={saveError ? 'text-signal-error' : undefined}>
+                      {saveError
+                        ? saveError
+                        : isDirty
+                          ? 'Unsaved changes — preview, copy and Markdown export use them now; Save for PDF/DOCX/HTML and media re-runs'
+                          : 'All changes saved'}
+                    </span>
+                  </div>
+                  <textarea
+                    value={editedContent}
+                    onChange={(e) => setEditedContent(e.target.value)}
+                    aria-label="Article Markdown"
+                    className="field font-mono text-base md:text-[13px] leading-6 min-h-[60vh] p-6 rounded-2xl"
+                  />
+                </div>
+              ) : (
+                <article className="rounded-2xl bg-surface ring-1 ring-line shadow-[var(--elev-1)] px-5 py-10 @2xl:px-16 @2xl:pt-12 @2xl:pb-16 max-sm:bg-transparent max-sm:ring-0 max-sm:shadow-none max-sm:px-0 max-sm:py-2">
+                  {currentJob.final_content ? (
+                    <div className="prose prose-editorial">
+                      {articleBody}
+                    </div>
                   ) : currentJob.status === 'running' || currentJob.status === 'awaiting_approval' || currentJob.status === 'pending' ? (
-                    <div className="flex flex-col items-center justify-center p-12 text-slate-500 space-y-4">
-                      <div className="orbital-loader">
-                        <div className="orbital-ring orbital-ring-1" />
-                        <div className="orbital-ring orbital-ring-2" />
-                        <div className="orbital-ring orbital-ring-3" />
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <Bot className="w-6 h-6 text-accent-500 animate-pulse" />
-                        </div>
+                    <div className="flex flex-col items-center text-center">
+                      <div className="mb-4 grid size-10 place-items-center rounded-lg bg-hover ring-1 ring-line [&_svg]:size-5">
+                        <Loader2 className="animate-spin text-accent-400" />
                       </div>
-                      <p className="font-semibold text-slate-600 mt-4">Agents are at work...</p>
-                      <p className="text-sm">Head back to the Dashboard to see live updates.</p>
+                      <h3 className="text-heading text-base-50">Agents are at work…</h3>
+                      <p className="mt-1.5 max-w-sm text-ui text-base-400">Head back to the Dashboard to see live updates.</p>
                     </div>
                   ) : currentJob.status === 'failed' ? (
-                    <div className="flex flex-col items-center justify-center p-12 text-red-500 space-y-4">
-                      <Settings className="w-12 h-12 opacity-50" />
-                      <p className="font-bold">Generation failed</p>
-                      <p className="text-sm opacity-80">{currentJob.error_message || "An unknown error occurred."}</p>
+                    <div className="flex flex-col items-center text-center">
+                      <div className="mb-4 grid size-10 place-items-center rounded-lg bg-hover ring-1 ring-line text-signal-error [&_svg]:size-5">
+                        <AlertTriangle />
+                      </div>
+                      <h3 className="text-heading text-base-50">Generation failed</h3>
+                      <p role="alert" className="mt-4 rounded-lg bg-signal-error-dim px-3 py-2 text-left text-ui text-signal-error">
+                        {currentJob.error_message || 'An unknown error occurred.'}
+                      </p>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center p-12 text-slate-500">
-                      <Clock className="w-12 h-12 mb-4 opacity-50" />
-                      <p>Content not available for this job.</p>
+                    <div className="flex flex-col items-center text-center">
+                      <div className="mb-4 grid size-10 place-items-center rounded-lg bg-hover ring-1 ring-line text-base-300 [&_svg]:size-5">
+                        <Clock />
+                      </div>
+                      <p className="text-ui text-base-400">Content not available for this job.</p>
                     </div>
                   )}
                 </article>
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
-            {/* G-EVAL TAB */}
-            {activeTab === 'geval' && (
-              <div className="space-y-6">
-                {/* Always mounted: QA can be re-run on a finished blog even
-                    when the G-Eval pass never produced scores. */}
-                <QAAuditSection
+          {/* G-EVAL TAB */}
+          {activeTab === 'geval' && (
+            <div className="grid gap-4 @xl:grid-cols-2">
+              {/* KPI strip. QA is always mounted: it can be re-run on a
+                  finished blog even when the G-Eval pass never produced scores. */}
+              <QAAuditSection
+                currentJob={currentJob}
+                isRunning={!!triggering['qa'] || isTaskRunning('qa_agent')}
+                onRun={() => handleTrigger('qa')}
+              />
+              {/* DEEPEVAL ACADEMIC AUDIT (Liu et al. 2023, deepeval library).
+                  Renders its KPI tile here and its rubric grid at the end
+                  of this grid (order-last). */}
+              {canAudit && (
+                <DeepEvalSection
                   currentJob={currentJob}
-                  isRunning={!!triggering['qa'] || isTaskRunning('qa_agent')}
-                  onRun={() => handleTrigger('qa')}
+                  isRunning={!!triggering['deepeval']}
+                  onRun={() => handleTrigger('deepeval')}
                 />
-                {currentJob.geval_scores ? (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              )}
 
-                    {/* Left Side: Score card and SVG Radar Chart */}
-                    <div className="lg:col-span-1 glass-panel p-6 rounded-2xl flex flex-col items-center border border-white/6 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
-                      <h3 className="font-bold text-base-50 mb-1 tracking-wide uppercase text-label text-base-400">Weighted Quality Grade</h3>
-
-                      {/* Animated Score Ring */}
-                      <div className="my-4">
-                        <div
-                          className="score-ring"
-                          style={{ '--score-pct': (currentJob.geval_scores.overall_score / 5) * 100 } as React.CSSProperties}
-                        >
-                          <div className="score-ring-inner">
-                            <motion.span
-                              className="text-3xl font-extrabold text-accent-400"
-                              initial={{ opacity: 0, scale: 0.5 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              transition={{ delay: 0.3, type: 'spring', stiffness: 200 }}
-                            >
-                              {currentJob.geval_scores.overall_score}
-                            </motion.span>
-                            <span className="text-label text-base-500 uppercase tracking-widest font-semibold mt-0.5">out of 5</span>
-                          </div>
+              {currentJob.geval_scores ? (
+                <>
+                  {/* Overall grade + radar */}
+                  <section className="@xl:col-span-2 card p-6 grid gap-8 @2xl:grid-cols-[200px_1fr] @4xl:grid-cols-[160px_minmax(0,320px)_1fr] items-center">
+                    <div className="flex flex-col items-center gap-4">
+                      <h3 className="text-xs font-medium text-base-500">Weighted grade</h3>
+                      <div
+                        className="score-ring"
+                        style={{ '--score-pct': (currentJob.geval_scores.overall_score / 5) * 100 } as React.CSSProperties}
+                      >
+                        <div className="score-ring-inner">
+                          <span className="text-kpi text-base-50 tabular-nums">{currentJob.geval_scores.overall_score}</span>
+                          <span className="text-xs text-base-500">of 5</span>
                         </div>
                       </div>
-
-                      {/* SVG Radar Chart */}
-                      <div className="w-full relative px-4 py-2 border-t border-white/4 mt-4">
-                        <svg viewBox="0 0 100 100" className="w-full h-auto overflow-visible select-none drop-shadow-[0_0_12px_var(--color-accent-glow)]">
-                          {/* Grid concentric circles (representing 1 to 5 scores) */}
-                          {[1, 2, 3, 4, 5].map((lvl) => (
-                            <circle key={lvl} cx="50" cy="50" r={lvl * 6} fill="none" stroke="currentColor" className="text-slate-300/30 dark:text-white/4" strokeWidth="0.5" />
-                          ))}
-
-                          {/* Axis Lines */}
-                          <line x1="50" y1="20" x2="50" y2="80" stroke="currentColor" className="text-slate-300/40 dark:text-white/6" strokeWidth="0.5" />
-                          <line x1="20" y1="50" x2="80" y2="50" stroke="currentColor" className="text-slate-300/40 dark:text-white/6" strokeWidth="0.5" />
-
-                          {/* Radar polygon shape */}
-                          <polygon points={radarPoints} fill="var(--color-accent-glow)" stroke="var(--color-accent-500)" strokeWidth="1.5" strokeLinejoin="round" />
-
-                          {/* Grid values labels */}
-                          <text x="50" y="49" fill="currentColor" className="text-slate-400 dark:text-white/20" fontSize="2" textAnchor="middle">0</text>
-                          {[1, 2, 3, 4, 5].map((lvl) => (
-                            <text key={lvl} x="50" y={50 - lvl * 6 + 0.8} fill="currentColor" className="text-slate-400 dark:text-white/25" fontSize="2" textAnchor="middle">{lvl}</text>
-                          ))}
-
-                          {/* Axis Labels (top, right, bottom, left) */}
-                          <text x="50" y="15" fill={hoveredMetric === 'coherence' ? 'var(--color-accent-500)' : 'currentColor'} fontSize="3.5" fontWeight={hoveredMetric === 'coherence' ? 'bold' : 'normal'} textAnchor="middle" className="text-slate-600 dark:text-slate-300/80 cursor-pointer transition-all" onMouseEnter={() => setHoveredMetric('coherence')} onMouseLeave={() => setHoveredMetric(null)}>Coherence</text>
-                          <text x="83" y="51" fill={hoveredMetric === 'relevance' ? 'var(--color-accent-500)' : 'currentColor'} fontSize="3.5" fontWeight={hoveredMetric === 'relevance' ? 'bold' : 'normal'} textAnchor="start" className="text-slate-600 dark:text-slate-300/80 cursor-pointer transition-all" onMouseEnter={() => setHoveredMetric('relevance')} onMouseLeave={() => setHoveredMetric(null)}>Relevance</text>
-                          <text x="50" y="87" fill={hoveredMetric === 'accuracy' ? 'var(--color-accent-500)' : 'currentColor'} fontSize="3.5" fontWeight={hoveredMetric === 'accuracy' ? 'bold' : 'normal'} textAnchor="middle" className="text-slate-600 dark:text-slate-300/80 cursor-pointer transition-all" onMouseEnter={() => setHoveredMetric('accuracy')} onMouseLeave={() => setHoveredMetric(null)}>Accuracy</text>
-                          <text x="17" y="51" fill={hoveredMetric === 'tone_alignment' ? 'var(--color-accent-500)' : 'currentColor'} fontSize="3.5" fontWeight={hoveredMetric === 'tone_alignment' ? 'bold' : 'normal'} textAnchor="end" className="text-slate-600 dark:text-slate-300/80 cursor-pointer transition-all" onMouseEnter={() => setHoveredMetric('tone_alignment')} onMouseLeave={() => setHoveredMetric(null)}>Tone</text>
-
-                          {/* Active points */}
-                          {(() => {
-                            const scores = currentJob.geval_scores;
-                            const center = 50;
-                            const scale = 30;
-                            const maxVal = 5;
-                            const items = [
-                              { key: 'coherence', score: scores.coherence.score, angle: -Math.PI / 2 },
-                              { key: 'relevance', score: scores.relevance.score, angle: 0 },
-                              { key: 'accuracy', score: scores.accuracy.score, angle: Math.PI / 2 },
-                              { key: 'tone_alignment', score: scores.tone_alignment.score, angle: Math.PI }
-                            ];
-
-                            return items.map((itm) => {
-                              const dist = (itm.score / maxVal) * scale;
-                              const cx = center + dist * Math.cos(itm.angle);
-                              const cy = center + dist * Math.sin(itm.angle);
-                              const active = hoveredMetric === itm.key;
-                              return (
-                                <circle key={itm.key} cx={cx} cy={cy} r={active ? 2.5 : 1.5} fill={active ? "#ffffff" : "var(--color-accent-500)"} stroke={active ? "var(--color-accent-500)" : "none"} strokeWidth="0.5" className="transition-all duration-300 cursor-pointer" onMouseEnter={() => setHoveredMetric(itm.key)} onMouseLeave={() => setHoveredMetric(null)} />
-                              );
-                            });
-                          })()}
-                        </svg>
-                      </div>
                     </div>
 
-                    {/* Right Side: Score breakdowns and justifications */}
-                    <div className="lg:col-span-2 space-y-4">
-                      <RubricDetailCard metricKey="coherence" title="Coherence (Structure & Flow)" evaluation={currentJob.geval_scores.coherence} hoveredKey={hoveredMetric} setHoveredKey={setHoveredMetric} />
-                      <RubricDetailCard metricKey="relevance" title="Relevance (Topic & Keyword Coverage)" evaluation={currentJob.geval_scores.relevance} hoveredKey={hoveredMetric} setHoveredKey={setHoveredMetric} />
-                      <RubricDetailCard metricKey="accuracy" title="Accuracy & Grounding (Entailment)" evaluation={currentJob.geval_scores.accuracy} hoveredKey={hoveredMetric} setHoveredKey={setHoveredMetric} />
-                      <RubricDetailCard metricKey="tone_alignment" title="Tone & Audience Alignment" evaluation={currentJob.geval_scores.tone_alignment} hoveredKey={hoveredMetric} setHoveredKey={setHoveredMetric} />
-                    </div>
+                    {/* SVG radar chart */}
+                    <svg viewBox="4 9 102 83" className="mx-auto w-full max-w-xs h-auto overflow-visible select-none" role="img" aria-label="G-Eval scores radar chart">
+                      {[1, 2, 3, 4, 5].map((lvl) => (
+                        <circle key={lvl} cx="50" cy="50" r={lvl * 6} fill="none" stroke="var(--color-line-strong)" strokeWidth="0.5" />
+                      ))}
+                      <line x1="50" y1="20" x2="50" y2="80" stroke="var(--color-line-strong)" strokeWidth="0.5" />
+                      <line x1="20" y1="50" x2="80" y2="50" stroke="var(--color-line-strong)" strokeWidth="0.5" />
 
-                    {/* ============================================================
-                    DEEPEVAL ACADEMIC AUDIT (Liu et al. 2023, deepeval library)
-                    Manual run, displayed inline under the in-house G-Eval card.
-                   ============================================================ */}
-                    <div className="lg:col-span-3 mt-2">
-                      <DeepEvalSection
-                        currentJob={currentJob}
-                        isRunning={!!triggering['deepeval']}
-                        onRun={() => handleTrigger('deepeval')}
-                      />
-                    </div>
+                      <polygon points={radarPoints} fill="rgba(var(--accent-rgb),0.14)" stroke="var(--color-indicator)" strokeWidth={0.75} strokeLinejoin="round" />
 
+                      {/* Axis labels (top, right, bottom, left) */}
+                      {radarAxes.map((a) => (
+                        <text
+                          key={a.key}
+                          x={a.x}
+                          y={a.y}
+                          fontSize="3.8"
+                          textAnchor={a.anchor}
+                          className={`cursor-pointer transition-colors ${hoveredMetric === a.key ? 'fill-base-50 font-medium' : 'fill-base-400'}`}
+                          onMouseEnter={() => setHoveredMetric(a.key)}
+                          onMouseLeave={() => setHoveredMetric(null)}
+                        >
+                          {a.label}
+                        </text>
+                      ))}
+
+                      {/* Active points */}
+                      {(() => {
+                        const scores = currentJob.geval_scores;
+                        const center = 50;
+                        const scale = 30;
+                        const maxVal = 5;
+                        const items = [
+                          { key: 'coherence', score: scores.coherence.score, angle: -Math.PI / 2 },
+                          { key: 'relevance', score: scores.relevance.score, angle: 0 },
+                          { key: 'accuracy', score: scores.accuracy.score, angle: Math.PI / 2 },
+                          { key: 'tone_alignment', score: scores.tone_alignment.score, angle: Math.PI }
+                        ];
+
+                        return items.map((itm) => {
+                          const dist = (itm.score / maxVal) * scale;
+                          const cx = center + dist * Math.cos(itm.angle);
+                          const cy = center + dist * Math.sin(itm.angle);
+                          const active = hoveredMetric === itm.key;
+                          return (
+                            <circle key={itm.key} cx={cx} cy={cy} r={active ? 2.5 : 1.5} fill="var(--color-indicator)" stroke={active ? 'var(--color-surface)' : 'none'} strokeWidth="0.75" className="cursor-pointer" onMouseEnter={() => setHoveredMetric(itm.key)} onMouseLeave={() => setHoveredMetric(null)} />
+                          );
+                        });
+                      })()}
+                    </svg>
+
+                    <dl className="hidden @4xl:grid gap-1">
+                      {radarAxes.map((a) => (
+                        <div
+                          key={a.key}
+                          onMouseEnter={() => setHoveredMetric(a.key)}
+                          onMouseLeave={() => setHoveredMetric(null)}
+                          className={`flex items-baseline justify-between gap-4 rounded-md px-3 py-2 transition-colors ${hoveredMetric === a.key ? 'bg-selected' : ''}`}
+                        >
+                          <dt className="text-ui text-base-300">{a.label}</dt>
+                          <dd className="font-mono text-[13px] text-base-100 tabular-nums">{currentJob.geval_scores![a.key].score}/5</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+
+                  {/* Rubric breakdowns and justifications */}
+                  <div className="@xl:col-span-2 grid gap-3 @2xl:grid-cols-2">
+                    <RubricDetailCard metricKey="coherence" title="Coherence (Structure & Flow)" evaluation={currentJob.geval_scores.coherence} hoveredKey={hoveredMetric} setHoveredKey={setHoveredMetric} />
+                    <RubricDetailCard metricKey="relevance" title="Relevance (Topic & Keyword Coverage)" evaluation={currentJob.geval_scores.relevance} hoveredKey={hoveredMetric} setHoveredKey={setHoveredMetric} />
+                    <RubricDetailCard metricKey="accuracy" title="Accuracy & Grounding (Entailment)" evaluation={currentJob.geval_scores.accuracy} hoveredKey={hoveredMetric} setHoveredKey={setHoveredMetric} />
+                    <RubricDetailCard metricKey="tone_alignment" title="Tone & Audience Alignment" evaluation={currentJob.geval_scores.tone_alignment} hoveredKey={hoveredMetric} setHoveredKey={setHoveredMetric} />
                   </div>
-                ) : (
-                  <div className="glass-panel p-12 rounded-2xl flex flex-col items-center justify-center text-center min-h-[400px] border border-white/4 relative overflow-hidden group max-w-3xl mx-auto">
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-accent-500/5 rounded-full blur-3xl group-hover:bg-accent-500/10 transition-all duration-700"></div>
-                    <div className="relative z-10 w-24 h-24 bg-base-900 rounded-full flex items-center justify-center mb-6 shadow-xl border border-white/6 text-accent-400 group-hover:scale-105 transition-transform duration-500">
-                      <Bot className="w-12 h-12" />
-                    </div>
-                    <h3 className="text-2xl font-bold text-base-50 mb-3">No Evaluation Data</h3>
-                    <p className="text-base-400 mb-8 max-w-md text-sm leading-relaxed">
-                      Run the content pipeline completely to generate G-Eval scores across coherence, relevance, accuracy, and tone.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
+                </>
+              ) : !currentJob.deepeval_scores && !triggering['deepeval'] ? (
+                <div className="@xl:col-span-2">
+                  <EmptyState
+                    icon={<Gauge />}
+                    title="No evaluation yet"
+                    description="The in-house G-Eval scores appear when the content pipeline completes."
+                  />
+                </div>
+              ) : null}
+            </div>
+          )}
 
-            {/* VIDEO TAB */}
-            {activeTab === 'video' && (
-              <div>
-                {currentJob.video_file ? (
-                  <div className="glass-panel p-6 rounded-2xl">
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-xl font-bold text-base-50 flex items-center gap-2"><Film className="w-5 h-5 text-accent-400" /> Synthetic Video</h3>
-                      <a href={APIClient.getFileUrl(currentJob.id, currentJob.video_file)} download target="_blank" rel="noreferrer"
-                        className="btn-primary px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2">
-                        <Download className="w-4 h-4" /> Download MP4
+          {/* VIDEO TAB */}
+          {activeTab === 'video' && (
+            <div>
+              {currentJob.video_file ? (
+                <div className="grid gap-8 @3xl:grid-cols-[auto_1fr] items-start">
+                  <video
+                    src={APIClient.getFileUrl(currentJob.id, currentJob.video_file)}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="mx-auto block aspect-[9/16] h-[min(72vh,720px)] w-auto max-w-full rounded-xl bg-black ring-1 ring-line"
+                  />
+                  <div>
+                    <h3 className="text-heading text-base-50">Short video</h3>
+                    <p className="mt-1 font-mono text-xs text-base-500">9:16 · MP4</p>
+                    <div className="mt-4 flex gap-2">
+                      <a href={APIClient.getFileUrl(currentJob.id, currentJob.video_file)} download target="_blank" rel="noreferrer" className="btn btn-secondary">
+                        <Download /> Download MP4
                       </a>
                     </div>
-                    <div className="bg-black rounded-xl overflow-hidden aspect-video border border-white/6 w-full max-w-4xl mx-auto">
-                      <video src={APIClient.getFileUrl(currentJob.id, currentJob.video_file)} controls className="w-full h-full object-contain"></video>
-                    </div>
                   </div>
-                ) : isTaskRunning('video') ? (
-                  <LoadingState title={videoTitle} description="Our AI is crafting a storyboard, generating voiceovers, and compiling your video." agentEvents={videoEvents} />
-                ) : (
-                  <EmptyState
-                    icon={<Film className="w-12 h-12" />}
-                    title="Create a Video from your Blog"
-                    description="Automatically transform this blog post into an engaging synthetic video with AI voiceover and animated visuals."
-                    onGenerate={() => handleTrigger('video')}
-                    error={getLastTaskError('video')}
-                  />
-                )}
-              </div>
-            )}
+                </div>
+              ) : isTaskRunning('video') ? (
+                <LoadingState title={videoTitle} description="Our AI is crafting a storyboard, generating voiceovers, and compiling your video." agentEvents={videoEvents} />
+              ) : (
+                <EmptyState
+                  icon={<Film />}
+                  title="Create a video from your blog"
+                  description="Automatically transform this blog post into an engaging synthetic video with AI voiceover and animated visuals."
+                  onGenerate={() => handleTrigger('video')}
+                  error={getLastTaskError('video')}
+                  actionLabel="Render video"
+                  hint="About 2–3 min · uses the saved article"
+                />
+              )}
+            </div>
+          )}
 
-            {/* PODCAST TAB */}
-            {activeTab === 'podcast' && (
-              <div>
-                {currentJob.podcast_file ? (
-                  <PodcastPlayer currentJob={currentJob} />
-                ) : isTaskRunning('podcast') ? (
-                  <LoadingState title="Generating Podcast..." description="Our AI hosts are warming up their mics and preparing the script." agentEvents={getCurrentRunEvents('podcast')} />
-                ) : (
-                  <EmptyState
-                    icon={<Podcast className="w-12 h-12" />}
-                    title="Generate a Podcast"
-                    description="Convert your written content into an engaging conversational audio podcast."
-                    onGenerate={() => handleTrigger('podcast')}
-                    error={getLastTaskError('podcast')}
-                  />
-                )}
-              </div>
-            )}
+          {/* PODCAST TAB */}
+          {activeTab === 'podcast' && (
+            <div>
+              {currentJob.podcast_file ? (
+                <PodcastPlayer currentJob={currentJob} />
+              ) : isTaskRunning('podcast') ? (
+                <LoadingState title="Generating Podcast..." description="Our AI hosts are warming up their mics and preparing the script." agentEvents={getCurrentRunEvents('podcast')} />
+              ) : (
+                <EmptyState
+                  icon={<Podcast />}
+                  title="Generate a podcast"
+                  description="Convert your written content into an engaging conversational audio podcast."
+                  onGenerate={() => handleTrigger('podcast')}
+                  error={getLastTaskError('podcast')}
+                  actionLabel="Generate podcast"
+                  hint="About 1–2 min · 2 hosts · MP3"
+                />
+              )}
+            </div>
+          )}
 
-            {/* SOCIAL TAB */}
-            {activeTab === 'social' && (
-              <div>
-                {currentJob.social_linkedin ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="glass-panel p-6 rounded-2xl flex flex-col h-full hover-lift">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-base-100">
-                          <svg className="w-5 h-5 fill-current text-[#0a66c2]" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"></path></svg>
-                          LinkedIn Post
-                        </div>
-                        <button onClick={() => navigator.clipboard.writeText(currentJob.social_linkedin!).catch(() => { })} className="text-base-400 hover:text-accent-400 transition-colors p-2 rounded-lg hover:bg-white/5" title="Copy to clipboard"><Copy className="w-4 h-4" /></button>
-                      </div>
-                      <div className="bg-base-900 rounded-xl p-5 border border-white/5 flex-1">
-                        <p className="text-sm text-base-300 leading-relaxed whitespace-pre-wrap">{currentJob.social_linkedin}</p>
-                      </div>
+          {/* SOCIAL TAB */}
+          {activeTab === 'social' && (
+            <div>
+              {currentJob.social_linkedin ? (
+                <div className="grid gap-4 @2xl:grid-cols-2">
+                  <div className="card p-5 flex flex-col">
+                    <div className="flex items-center gap-2.5">
+                      <svg aria-hidden="true" className="size-4 fill-current text-[#0a66c2]" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"></path></svg>
+                      <span className="text-ui font-medium text-base-100">LinkedIn</span>
+                      <button type="button" onClick={() => copyPost('linkedin', currentJob.social_linkedin!)} className="ml-auto btn btn-ghost btn-icon btn-sm" aria-label={copiedChannel === 'linkedin' ? 'Copied' : 'Copy LinkedIn post'} title={copiedChannel === 'linkedin' ? 'Copied' : 'Copy to clipboard'}>{copiedChannel === 'linkedin' ? <Check className="text-signal-success" /> : <Copy />}</button>
                     </div>
-
-                    <div className="glass-panel p-6 rounded-2xl flex flex-col h-full hover-lift">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-base-100">
-                          <svg className="w-5 h-5 fill-current text-base-200" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.008 4.09H5.078z"></path></svg>
-                          X / Twitter Post
-                        </div>
-                        <button onClick={() => navigator.clipboard.writeText(currentJob.social_twitter!).catch(() => { })} className="text-base-400 hover:text-accent-400 transition-colors p-2 rounded-lg hover:bg-white/5" title="Copy to clipboard"><Copy className="w-4 h-4" /></button>
-                      </div>
-                      <div className="bg-base-900 rounded-xl p-5 border border-white/5 flex-1">
-                        <p className="text-sm text-base-300 leading-relaxed whitespace-pre-wrap">{currentJob.social_twitter}</p>
-                      </div>
-                    </div>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-base-200">{withHashtags(currentJob.social_linkedin)}</p>
                   </div>
-                ) : isTaskRunning('campaign') ? (
-                  <LoadingState title="Generating Campaign..." description="Drafting optimized posts for your social channels." agentEvents={getCurrentRunEvents('social')} />
-                ) : (
-                  <EmptyState
-                    icon={<Share2 className="w-12 h-12" />}
-                    title="Generate Social Media Campaign"
-                    description="Automatically write engaging LinkedIn and X/Twitter posts optimized for virality and reach."
-                    onGenerate={() => handleTrigger('social')}
-                    error={getLastTaskError('campaign')}
-                  />
-                )}
-              </div>
-            )}
 
-            {/* IMAGES TAB */}
-            {activeTab === 'images' && (
-              <div>
-                {isTaskRunning('images') ? (
-                  <LoadingState title="Generating Images..." description={`Our AI is crafting custom visuals for your blog post using the ${currentJob?.image_model || 'DALL-E 3'} model.`} agentEvents={getCurrentRunEvents('images')} />
-                ) : currentJob?.image_files && currentJob.image_files.length > 0 ? (
-                  <div className="space-y-6">
-                    <div className="glass-panel p-6 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-white/6 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
-                      <div>
-                        <h3 className="text-xl font-bold text-base-50 tracking-tight flex items-center gap-2">
-                          <ImageIcon className="w-5 h-5 text-accent-400" /> Generated Images Gallery
-                        </h3>
-                        <p className="text-xs text-base-400 mt-1">
-                          {currentJob.image_files.length} custom AI visual(s) generated for <span className="text-base-200 font-medium">"{currentJob.topic}"</span>
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleTrigger('images')}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-accent-500/10 text-accent-400 hover:bg-accent-500/20 border border-accent-500/20 transition-all flex items-center gap-2 cursor-pointer shrink-0"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" /> Regenerate Images
-                      </button>
+                  <div className="card p-5 flex flex-col">
+                    <div className="flex items-center gap-2.5">
+                      <svg aria-hidden="true" className="size-4 fill-current text-base-200" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.008 4.09H5.078z"></path></svg>
+                      <span className="text-ui font-medium text-base-100">X / Twitter</span>
+                      <button type="button" onClick={() => copyPost('x', currentJob.social_twitter!)} className="ml-auto btn btn-ghost btn-icon btn-sm" aria-label={copiedChannel === 'x' ? 'Copied' : 'Copy X post'} title={copiedChannel === 'x' ? 'Copied' : 'Copy to clipboard'}>{copiedChannel === 'x' ? <Check className="text-signal-success" /> : <Copy />}</button>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {currentJob.image_files.map((imgPath, idx) => {
-                        const url = APIClient.getFileUrl(currentJob.id, imgPath);
-                        const filename = imgPath.split('/').pop() || `image_${idx + 1}.png`;
-                        return (
-                          <motion.div
-                            key={imgPath}
-                            initial={{ opacity: 0, y: 15 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: idx * 0.08 }}
-                            className="glass-panel rounded-2xl border border-white/6 overflow-hidden flex flex-col justify-between group hover:border-accent-500/40 hover:shadow-[0_12px_40px_rgba(0,0,0,0.3)] transition-all duration-300"
-                          >
-                            <div className="relative aspect-video bg-base-950 overflow-hidden">
-                              <img
-                                src={url}
-                                alt={filename}
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                              />
-                              <div className="absolute inset-0 bg-gradient-to-t from-base-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-between p-4">
-                                <span className="text-xs font-mono font-semibold text-white/90 truncate max-w-[200px]">
-                                  {filename}
-                                </span>
-                                <a
-                                  href={url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-all cursor-pointer"
-                                  title="View full image in new tab"
-                                >
-                                  <ExternalLink className="w-4 h-4" />
-                                </a>
-                              </div>
-                            </div>
-                            <div className="p-4 flex items-center justify-between gap-3 bg-base-900/40 border-t border-white/4">
-                              <span className="text-xs font-semibold text-base-200 truncate flex-1" title={filename}>
-                                {filename}
-                              </span>
-                              <a
-                                href={url}
-                                download={filename}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-accent-500 text-base-950 hover:bg-accent-400 transition-all flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
-                              >
-                                <Download className="w-3.5 h-3.5" /> Download
-                              </a>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-base-200">{withHashtags(currentJob.social_twitter ?? '')}</p>
                   </div>
-                ) : (
-                  <EmptyState
-                    icon={<ImageIcon className="w-12 h-12" />}
-                    title="Generate Blog Images"
-                    description={`Create custom AI-generated visuals for your blog post using state-of-the-art ${currentJob?.image_model || 'DALL-E 3'} rendering.`}
-                    onGenerate={() => handleTrigger('images')}
-                    error={getLastTaskError('images')}
-                  />
-                )}
-              </div>
-            )}
+                </div>
+              ) : isTaskRunning('campaign') ? (
+                <LoadingState title="Generating Campaign..." description="Drafting optimized posts for your social channels." agentEvents={getCurrentRunEvents('social')} />
+              ) : (
+                <EmptyState
+                  icon={<Share2 />}
+                  title="Generate a social media campaign"
+                  description="Automatically write engaging LinkedIn and X/Twitter posts optimized for virality and reach."
+                  onGenerate={() => handleTrigger('social')}
+                  error={getLastTaskError('campaign')}
+                  actionLabel="Write social posts"
+                  hint="LinkedIn and X · uses the saved article"
+                />
+              )}
+            </div>
+          )}
 
-          </motion.div>
-        </AnimatePresence>
+          {/* IMAGES TAB */}
+          {activeTab === 'images' && (
+            <div>
+              {isTaskRunning('images') ? (
+                <LoadingState title="Generating Images..." description={`Our AI is crafting custom visuals for your blog post using the ${currentJob?.image_model || 'DALL-E 3'} model.`} agentEvents={getCurrentRunEvents('images')} />
+              ) : imageFiles.length > 0 ? (
+                <div className={imageFiles.length === 1 ? 'max-w-3xl' : undefined}>
+                  <div className="flex items-end justify-between gap-4 mb-4">
+                    <div>
+                      <h3 className="text-heading text-base-50">Images</h3>
+                      <p className="text-ui text-base-500">{imageFiles.length} image{imageFiles.length === 1 ? '' : 's'}</p>
+                    </div>
+                    <button type="button" onClick={() => handleTrigger('images')} className="btn btn-secondary btn-sm">
+                      <RefreshCw /> Regenerate
+                    </button>
+                  </div>
+
+                  {imageFiles.length === 1 ? (
+                    imageTile(imageFiles[0], 0, true)
+                  ) : (
+                    <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
+                      {imageFiles.map((p, i) => imageTile(p, i))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={<ImageIcon />}
+                  title="Generate blog images"
+                  description={`Create custom AI-generated visuals for your blog post using state-of-the-art ${currentJob?.image_model || 'DALL-E 3'} rendering.`}
+                  onGenerate={() => handleTrigger('images')}
+                  error={getLastTaskError('images')}
+                  actionLabel="Generate images"
+                  hint="Uses the saved article"
+                />
+              )}
+            </div>
+          )}
+
+        </motion.div>
       </div>
     </main>
   );

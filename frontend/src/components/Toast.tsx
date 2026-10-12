@@ -67,10 +67,10 @@ export const toast = {
   },
 };
 
-const STYLES: Record<ToastKind, { icon: typeof Info; ring: string; tint: string; fg: string }> = {
-  error: { icon: AlertTriangle, ring: 'border-signal-error/30', tint: 'bg-signal-error-dim', fg: 'text-signal-error' },
-  success: { icon: CheckCircle2, ring: 'border-signal-success/30', tint: 'bg-signal-success-dim', fg: 'text-signal-success' },
-  info: { icon: Info, ring: 'border-signal-info/30', tint: 'bg-signal-info-dim', fg: 'text-signal-info' },
+const STYLES: Record<ToastKind, { icon: typeof Info; fg: string }> = {
+  error: { icon: AlertTriangle, fg: 'text-signal-error' },
+  success: { icon: CheckCircle2, fg: 'text-signal-success' },
+  info: { icon: Info, fg: 'text-signal-info' },
 };
 
 export function Toasts() {
@@ -88,33 +88,33 @@ export function Toasts() {
     <div
       aria-live="polite"
       aria-atomic="false"
-      className="fixed bottom-4 right-4 z-[200] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2"
+      className="fixed bottom-4 right-4 max-sm:inset-x-4 max-sm:bottom-auto max-sm:top-16 z-[110] flex flex-col gap-2"
     >
       <AnimatePresence initial={false}>
         {visible.map(item => {
-          const { icon: Icon, ring, tint, fg } = STYLES[item.kind];
+          const { icon: Icon, fg } = STYLES[item.kind];
           return (
             <motion.div
               key={item.id}
               layout
-              initial={{ opacity: 0, y: 12, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.97 }}
-              transition={{ duration: 0.18 }}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] } }}
+              exit={{ opacity: 0, transition: { duration: 0.12 } }}
               role={item.kind === 'error' ? 'alert' : 'status'}
-              className={`glass-panel flex items-start gap-3 rounded-xl border ${ring} ${tint} p-3 shadow-xl backdrop-blur-md`}
+              className="surface-raised flex items-start gap-3 w-[min(380px,calc(100vw-32px))] pl-3.5 pr-1.5 py-3 text-ui text-base-100"
             >
-              <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${fg}`} aria-hidden="true" />
-              <p className="flex-1 text-sm leading-relaxed text-base-100 break-words">
+              <Icon className={`mt-0.5 size-4 shrink-0 ${fg}`} aria-hidden="true" />
+              <p className="min-w-0 flex-1 break-words font-medium text-base-50">
                 {item.message}
               </p>
               <button
                 type="button"
                 onClick={() => dismiss(item.id)}
-                aria-label="Dismiss notification"
-                className="rounded-md p-0.5 text-base-500 transition-colors hover:bg-white/5 hover:text-base-100"
+                aria-label="Dismiss"
+                title="Dismiss"
+                className="btn btn-ghost btn-icon btn-sm -my-1"
               >
-                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                <X aria-hidden="true" />
               </button>
             </motion.div>
           );

@@ -30,6 +30,7 @@ export function useTheme() {
     } else {
       root.removeAttribute('data-theme');
     }
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#f7f7f5' : '#0b0b0c');
     window.localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
 

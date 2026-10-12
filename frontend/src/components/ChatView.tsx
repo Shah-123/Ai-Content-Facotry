@@ -1,80 +1,82 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import {
-  ListOrdered, Send, Network,
-  CheckCircle2, RefreshCw, ShieldAlert, X,
-  FileText, Film, Podcast, Search, Bot,
-  RotateCcw, AlertTriangle, Sparkles, Paperclip
+  ListOrdered, Network, ShieldAlert, X,
+  FileText, Film, Podcast, Search, Bot, Image as ImageIcon,
+  RotateCcw, AlertTriangle, Sparkles, Paperclip, Loader2, ArrowUpRight
 } from 'lucide-react';
 import { APIClient, Job, AgentEvent, CreateJobParams, UploadResult, SourceMode } from '../api';
 import { PlanEditor } from './PlanEditor';
 import { UploadChip } from './UploadChip';
 import { ProgressTracker } from './ProgressTracker';
 
+// Agent colour lives only in a small dot (light first, then dark:), never in text.
 function getAgentConfig(agentName: string) {
   const name = agentName.toLowerCase();
   if (name.includes('research')) {
-    return {
-      icon: Search,
-      iconColor: 'text-sky-400',
-      bgColor: 'bg-sky-500/10 border-sky-500/20',
-      textColor: 'text-sky-400',
-    };
+    return { icon: Search, dot: 'bg-sky-600 dark:bg-sky-400' };
   }
   if (name.includes('orchestrat') || name.includes('plan')) {
-    return {
-      icon: ListOrdered,
-      iconColor: 'text-purple-400',
-      bgColor: 'bg-purple-500/10 border-purple-500/20',
-      textColor: 'text-purple-400',
-    };
+    return { icon: ListOrdered, dot: 'bg-violet-600 dark:bg-violet-400' };
   }
   if (name.includes('writer') || name.includes('edit')) {
-    return {
-      icon: FileText,
-      iconColor: 'text-amber-400',
-      bgColor: 'bg-amber-500/10 border-amber-500/20',
-      textColor: 'text-amber-400',
-    };
+    return { icon: FileText, dot: 'bg-amber-600 dark:bg-amber-400' };
   }
-  if (name.includes('quality') || name.includes('control') || name.includes('validator') || name.includes('critic')) {
-    return {
-      icon: ShieldAlert,
-      iconColor: 'text-emerald-400',
-      bgColor: 'bg-emerald-500/10 border-emerald-500/20',
-      textColor: 'text-emerald-400',
-    };
+  if (name.includes('quality') || name.includes('control') || name.includes('validator') || name.includes('critic')
+      || name.startsWith('qa') || name.includes('eval')) {
+    return { icon: ShieldAlert, dot: 'bg-emerald-600 dark:bg-emerald-400' };
   }
   if (name.includes('video')) {
-    return {
-      icon: Film,
-      iconColor: 'text-pink-400',
-      bgColor: 'bg-pink-500/10 border-pink-500/20',
-      textColor: 'text-pink-400',
-    };
+    return { icon: Film, dot: 'bg-rose-600 dark:bg-rose-400' };
   }
   if (name.includes('audio') || name.includes('podcast')) {
-    return {
-      icon: Podcast,
-      iconColor: 'text-indigo-400',
-      bgColor: 'bg-indigo-500/10 border-indigo-500/20',
-      textColor: 'text-indigo-400',
-    };
+    return { icon: Podcast, dot: 'bg-indigo-600 dark:bg-indigo-400' };
   }
-  return {
-    icon: Bot,
-    iconColor: 'text-base-400',
-    bgColor: 'bg-base-500/10 border-white/6',
-    textColor: 'text-base-300',
-  };
+  if (name.includes('image')) {
+    return { icon: ImageIcon, dot: 'bg-teal-600 dark:bg-teal-400' };
+  }
+  return { icon: Bot, dot: 'bg-base-500' };
 }
 
+/** "geval_evaluator" -> "G-Eval evaluator", "qa_agent" -> "QA agent" */
+const sentenceCase = (s: string) => {
+  const t = s.replace(/_/g, ' ').replace(/^geval\b/i, 'G-Eval').replace(/^qa\b/i, 'QA');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+/** HH:MM:SS for feed timestamps. */
+const formatClock = (epochSecs: number) =>
+  new Date(epochSecs * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+/** Agent header row in the timeline: node on the rail, colour dot, name. */
+function TimelineHead({ icon: Icon, dot, label }: { icon: typeof Bot; dot: string; label: string }) {
+  return (
+    <div className="relative flex h-8 items-center gap-2.5 mt-3">
+      <span className="relative z-10 grid size-6 place-items-center rounded-full bg-base-800 ring-1 ring-line-strong">
+        <Icon className="size-3.5 text-base-300" />
+      </span>
+      <span className={`size-1.5 rounded-full ${dot}`} />
+      <span className="text-ui font-medium text-base-100">{label}</span>
+    </div>
+  );
+}
 
 const ACCEPTED_UPLOAD_TYPES = '.pdf,.docx,.txt,.md';
 
-/** mm:ss for the live run clock. */
-const formatElapsed = (secs: number) =>
-  `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+/** mm:ss for the live run clock, h:mm:ss past an hour. */
+const formatElapsed = (secs: number) => {
+  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), ss = String(secs % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${String(m).padStart(2, '0')}:${ss}`;
+};
+
+/** Status map shared with Sidebar and ContentView (spec section 4). */
+const JOB_STATUS: Record<Job['status'], { badge: string; dot: string; label: string }> = {
+  completed:         { badge: 'badge',               dot: 'dot-success', label: 'Completed' },
+  awaiting_approval: { badge: 'badge badge-warning', dot: 'dot-warning', label: 'Awaiting approval' },
+  running:           { badge: 'badge badge-accent',  dot: 'live-dot',    label: 'Running' },
+  pending:           { badge: 'badge',               dot: 'dot-pending', label: 'Queued' },
+  failed:            { badge: 'badge badge-error',   dot: 'dot-error',   label: 'Failed' },
+};
 
 interface ChatViewProps {
   currentJob: Job | null;
@@ -102,7 +104,7 @@ const HERO_FEATURES = [
     icon: FileText,
     title: 'Research & Write',
     desc: 'Multi-agent pipeline with web research, evidence grounding, and QA audit.',
-    gradient: 'from-amber-500/20 to-orange-600/10',
+    chip: 'Blog',
     sampleTopic: 'How LangGraph enables persistent agent loops',
     sampleTone: 'technical',
     sampleSections: 4,
@@ -111,7 +113,7 @@ const HERO_FEATURES = [
     icon: Film,
     title: 'Video Generation',
     desc: 'Automated storyboard, AI voiceover, and Pexels B-roll compilation.',
-    gradient: 'from-blue-500/20 to-indigo-600/10',
+    chip: 'Video',
     sampleTopic: 'A brief guide to stock video synthesis with Pexels',
     sampleTone: 'conversational',
     sampleSections: 2,
@@ -120,7 +122,7 @@ const HERO_FEATURES = [
     icon: Podcast,
     title: 'Podcast Studio',
     desc: 'Two-host conversational audio voiced with OpenAI text-to-speech.',
-    gradient: 'from-emerald-500/20 to-teal-600/10',
+    chip: 'Podcast',
     sampleTopic: 'The future of generative voice acting and audio design',
     sampleTone: 'educational',
     sampleSections: 3,
@@ -217,9 +219,13 @@ export function ChatView({
 
   // Keep the newest agent event in view — the feed scrolls on desktop, so
   // without this the live process runs off the bottom of the panel.
+  // While the plan is up, land on its top instead: its sticky Approve footer keeps Approve visible.
   const feedEndRef = useRef<HTMLDivElement | null>(null);
+  const planRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    feedEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const toPlan = currentJob?.status === 'awaiting_approval' && planRef.current;
+    const behavior: ScrollBehavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    (toPlan || feedEndRef.current)?.scrollIntoView({ behavior, block: toPlan ? 'start' : 'end' });
   }, [events.length, currentJob?.status]);
 
   // Run clock — a long pipeline with no moving number reads as frozen.
@@ -233,120 +239,149 @@ export function ChatView({
     return () => clearInterval(id);
   }, [isLive, currentJob?.id, currentJob?.created_at]);
 
-  return (
-    <main className="flex-1 flex flex-col p-4 md:p-8 relative overflow-y-auto md:overflow-hidden">
-      <div className="md:flex-1 overflow-visible md:overflow-y-auto pr-0 md:pr-4 flex flex-col gap-5 pb-4 scroll-smooth">
-        <header className="mb-2 shrink-0 fade-in">
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-base-50 mb-1.5">
-            {!currentJob
-              ? 'Dashboard'
-              : currentJob.status === 'completed'
-                ? 'Generation Complete'
-                : currentJob.status === 'failed'
-                  ? 'Pipeline Interrupted'
-                  : currentJob.status === 'awaiting_approval'
-                    ? 'Review Outline'
-                    : 'Generating…'}
-          </h2>
-          <p className="text-base-400 text-sm flex items-center gap-2.5">
-            <span className="font-mono text-xs text-base-500">Powered by LangGraph</span>
-            {currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed' && (
-              <span className="px-2 py-0.5 rounded-md bg-accent-glow text-accent-400 text-xs font-semibold border border-accent-500/20 flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-accent-500 status-pulse" /> Processing
-              </span>
+  const generateDisabled =
+    uploadStatus === 'uploading'
+    || (!topicInput.trim()
+        && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic));
+
+  const composer = (
+    <>
+      {topicError && (
+        <div role="alert" className="mb-3 fade-in flex items-start gap-3 rounded-xl border border-signal-error/25 bg-signal-error-dim py-2.5 pl-4 pr-2">
+          <ShieldAlert className="size-4 mt-0.5 shrink-0 text-signal-error" />
+          <div className="flex-1 text-ui">
+            <span className="font-medium text-signal-error">Topic rejected.</span>{' '}
+            <span className="text-base-200">{topicError.reason}</span>
+            {topicError.suggested_topic && (
+              <button
+                onClick={() => {
+                  setTopicInput(topicError.suggested_topic!);
+                  clearTopicError?.();
+                }}
+                className="block mt-2 text-xs text-accent-400 hover:text-accent-300 underline underline-offset-2 transition-colors"
+              >
+                Try this instead: "{topicError.suggested_topic}"
+              </button>
             )}
-            {currentJob?.status === 'completed' && (
-              <span className="px-2 py-0.5 rounded-md bg-signal-success-dim text-signal-success text-xs font-semibold border border-signal-success/20 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3 h-3" /> Completed
-              </span>
-            )}
-          </p>
-        </header>
-        {/* -------- Welcome Hero (shown when no job is active) -------- */}
-        {showHero && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6 }}
-            className="flex flex-col items-center justify-center py-3 md:py-12 relative"
+          </div>
+          <button
+            onClick={() => clearTopicError?.()}
+            className="btn btn-ghost btn-icon btn-sm shrink-0"
+            aria-label="Dismiss"
+            title="Dismiss"
           >
-            {/* Ambient glow behind heading */}
-            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[400px] h-[200px] bg-accent-500/8 rounded-full blur-[80px] pointer-events-none hidden md:block" />
+            <X />
+          </button>
+        </div>
+      )}
 
-            {/* Version Badge & Active Model */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.1, duration: 0.4 }}
-              className="hidden sm:flex items-center gap-2.5 mb-5 relative z-10"
-            >
-              <span className="glass-pill px-3 py-1 text-label font-bold text-accent-400 tracking-wider uppercase border border-accent-500/20">
-                Orchestration Engine v2.0
-              </span>
-              <span className="glass-pill px-3 py-1 text-xs font-medium text-base-300 border border-white/6 flex items-center gap-1.5 shadow-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-signal-success animate-pulse"></span>
-                Active LLM: <span className="font-mono text-accent-400 font-bold">{selectedModel}</span>
-              </span>
-            </motion.div>
+      <div className="composer">
+        {uploadStatus !== 'idle' && (
+          <UploadChip
+            status={uploadStatus}
+            filename={uploadName}
+            result={uploadResult}
+            errorMessage={uploadError}
+            sourceMode={sourceMode}
+            onSourceModeChange={setSourceMode}
+            onClear={clearUpload}
+          />
+        )}
 
-            <motion.h3
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15, duration: 0.5 }}
-              className="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-center mb-2 md:mb-3 text-shimmer relative z-10"
-            >
-              Create Something Amazing
-            </motion.h3>
-            <motion.p
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, duration: 0.4 }}
-              className="text-base-400 text-center max-w-lg mb-4 md:mb-8 px-2 text-sm leading-relaxed relative z-10"
-            >
-              Enter a topic below and our multi-agent pipeline will research, write, and polish a publication-ready blog — with optional video, podcast, and social campaigns.
-            </motion.p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED_UPLOAD_TYPES}
+          className="hidden"
+          onChange={e => { handleFileSelected(e.target.files?.[0]); }}
+        />
 
-            {/* Feature cards */}
-            <div className="hidden roomy:grid md:grid-cols-3 gap-4 w-full max-w-3xl relative z-10">
-              {HERO_FEATURES.map((feat, i) => (
-                // A real <button>, not a clickable div: Tab, Enter and Space and
-                // the focus ring all come free, and it is announced as a button.
-                // The heading and paragraph became spans because <button> only
-                // admits phrasing content; the styling is utility classes, so
-                // nothing changes visually.
-                <motion.button
-                  key={feat.title}
-                  type="button"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 + i * 0.1, duration: 0.4 }}
-                  onClick={() => {
-                    setTopicInput(feat.sampleTopic);
-                    setTone(feat.sampleTone);
-                    setSections(feat.sampleSections);
-                  }}
-                  className={`glass-panel rounded-2xl p-5 text-left border border-white/6 hover-lift cursor-pointer hover:border-accent-500/30 focus-visible:outline-none focus-visible:border-accent-500/60 focus-visible:ring-2 focus-visible:ring-accent-500/40 bg-gradient-to-br ${feat.gradient} flex flex-col justify-between group`}
-                >
-                  <span className="block">
-                    <span className="w-10 h-10 rounded-xl bg-white/5 border border-white/8 flex items-center justify-center mb-3 group-hover:scale-105 group-hover:border-accent-500/20 transition-all duration-300">
-                      <feat.icon className="w-5 h-5 text-accent-400" />
-                    </span>
-                    <span className="block font-bold text-base-100 text-sm mb-1">{feat.title}</span>
-                    <span className="block text-xs text-base-400 leading-relaxed mb-4">{feat.desc}</span>
-                  </span>
-                  <span className="text-xs text-accent-400 font-semibold underline underline-offset-2 opacity-70 group-hover:opacity-100 group-hover:text-accent-300 transition-all duration-200">
-                    Use Template
-                  </span>
-                </motion.button>
-              ))}
+        <textarea
+          className="w-full resize-none bg-transparent px-2.5 pt-2 pb-1 text-base md:text-[15px] leading-6 text-base-50 placeholder:text-base-500 min-h-[32px] max-h-[180px] overflow-y-auto focus:outline-hidden"
+          aria-label="Topic"
+          placeholder={
+            uploadStatus === 'ready' && sourceMode === 'auto_topic'
+              ? (uploadResult?.derived_topic
+                  ? `Auto-topic ready — press Send (or override: "${uploadResult.derived_topic}")`
+                  : 'Auto-topic mode — enter or override the title...')
+              : 'Enter a topic to generate a publication-ready blog...'
+          }
+          ref={topicRef}
+          rows={1}
+          value={topicInput}
+          onChange={e => setTopicInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitJob(); } }}
+        />
+
+        <div className="mt-1 flex items-center gap-2 border-t border-line px-1 pt-1.5">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadStatus === 'uploading'}
+            title="Attach a document (PDF, DOCX, TXT, MD)"
+            aria-label="Attach document"
+            className={`btn btn-ghost btn-sm ${uploadStatus === 'ready' ? 'text-accent-400' : ''}`}
+          >
+            <Paperclip />
+            <span className="hidden sm:inline">Attach</span>
+          </button>
+
+          <div className="ml-auto flex items-center gap-3">
+            <span className="hidden md:flex items-center gap-1 text-xs text-base-500">
+              <span className="kbd">⇧</span><span className="kbd">↵</span> new line
+            </span>
+            <button
+              type="button"
+              onClick={() => submitJob()}
+              disabled={generateDisabled}
+              className="btn btn-primary btn-sm"
+            >
+              <Sparkles />
+              Generate
+              <span className="kbd max-md:hidden [@media(pointer:coarse)]:hidden">↵</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  const status = currentJob ? JOB_STATUS[currentJob.status] : null;
+  const showJobBar = !!currentJob && !!status;
+  const showComposer = !currentJob || currentJob.status === 'completed' || currentJob.status === 'failed';
+
+  return (
+    <main className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
+      {showHero ? (
+        /* -------- Welcome hero (shown when no job is active) -------- */
+        <motion.section
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2 }}
+          className="flex-1 min-h-0 overflow-y-auto px-4 md:px-8 flex flex-col"
+        >
+          <div className="mx-auto w-full max-w-2xl flex-1 flex flex-col md:justify-center pt-8 md:py-8 md:pb-[8vh]">
+            <div className="max-md:flex-1 flex flex-col justify-center text-center">
+              <h1 className="font-serif text-display-sm md:text-display text-base-50 text-balance">
+                What should the agents <em className="italic">write</em> today?
+              </h1>
+              <p className="mt-3 mx-auto max-w-md text-[15px] leading-6 text-base-400 line-clamp-2 text-balance">
+                Research, outline, draft and audit — from a single topic.
+              </p>
+              {selectedModel && (
+                <p className="mt-2 font-mono text-xs text-base-500">Model · {selectedModel}</p>
+              )}
             </div>
 
-            {/* Stands in for the feature cards on mobile and on short desktop screens,
-                so the prompt never gets pushed below the fold. */}
-            <div className="flex roomy:hidden flex-wrap justify-center gap-2 w-full relative z-10">
-              {HERO_FEATURES.map((feat) => {
-                const Icon = feat.icon;
-                return (
+            <div className="mt-8 max-md:order-3 max-md:mt-4 max-md:pb-[max(12px,env(safe-area-inset-bottom))]">{composer}</div>
+
+            <div className="mt-4 max-md:order-2">
+              {/* Template cards on roomy screens */}
+              <div className="hidden roomy:grid grid-cols-3 gap-3">
+                {HERO_FEATURES.map((feat) => (
+                  // A real <button>, not a clickable div: Tab, Enter and Space and
+                  // the focus ring all come free, and it is announced as a button.
+                  // <button> only admits phrasing content, hence spans.
                   <button
                     key={feat.title}
                     type="button"
@@ -355,398 +390,248 @@ export function ChatView({
                       setTone(feat.sampleTone);
                       setSections(feat.sampleSections);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/8 bg-base-900/70 px-2.5 py-1.5 text-xs font-semibold text-base-300 transition-colors hover:border-accent-500/35 hover:text-accent-400"
+                    className="group card card-interactive relative p-4 text-left"
                   >
-                    <Icon className="h-3.5 w-3.5 text-accent-400" />
-                    {feat.title}
-                  </button>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-
-        {/* -------- Job Controls Banner (pinned) + Pipeline Rail --------
-             Only the one-line status bar pins. The pipeline rail used to sit
-             inside this sticky wrapper too, which made the pinned block 234px
-             on desktop and ~500px of an 812px phone - the feed scrolled into a
-             sliver and messages were clipped mid-sentence behind it.
-             The fill is opaque for the same reason: at bg-base-950/85 the feed
-             showed through the pinned bar at 15%, and a bright element like the
-             amber topic bubble read as two cards drawn on top of each other. */}
-        {currentJob && currentJob.status !== 'completed' && (
-          <>
-          <div className="sticky top-0 z-20 -mt-2 pt-2 pb-2 bg-base-950">
-            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl glass-panel border border-white/8 backdrop-blur-md w-full">
-              <div className="flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${
-                  currentJob.status === 'failed' ? 'bg-signal-error' :
-                  currentJob.status === 'awaiting_approval' ? 'bg-amber-400 animate-ping' :
-                  'bg-accent-400 animate-pulse'
-                }`} />
-                <span className="text-xs font-bold text-base-100 uppercase tracking-wider">
-                  {currentJob.id
-                    ? `Job #${currentJob.id.slice(0, 8)} — ${currentJob.status.replace('_', ' ')}`
-                    : 'Starting pipeline'}
-                </span>
-                {isLive && (
-                  <span className="text-xs font-mono text-base-400 tabular-nums px-2 py-0.5 rounded-md bg-white/5 border border-white/8">
-                    {formatElapsed(elapsed)}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                {(currentJob.status === 'failed' || currentJob.status === 'running') && handleResumeJob && (
-                  <button
-                    onClick={() => handleResumeJob(currentJob.id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent-500/20 text-accent-400 hover:bg-accent-500/30 border border-accent-500/30 transition-all cursor-pointer shadow-sm"
-                    title="Resume pipeline execution from the last saved SQLite checkpoint"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Resume Checkpoint
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {currentJob.status !== 'failed' && (
-            <ProgressTracker events={events} jobStatus={currentJob.status} />
-          )}
-          </>
-        )}
-
-        {currentJob && (
-          <div className="self-end max-w-2xl w-full">
-            <div className="aurora-bubble p-5 rounded-2xl rounded-tr-sm">
-              <p className="text-base font-medium">Write a blog on: {currentJob.topic}</p>
-              <p className="text-sm opacity-70 mt-1">Tone: {currentJob.tone}</p>
-            </div>
-            <div className="text-right mt-1.5 text-xs text-base-500 font-medium">You</div>
-          </div>
-        )}
-
-        {isLive && events.length === 0 && (
-          <motion.div
-            className="self-start max-w-3xl flex gap-3.5 w-full"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border bg-accent-500/10 border-accent-500/20">
-              <Sparkles className="w-4 h-4 text-accent-400 animate-pulse" />
-            </div>
-            <div className="glass-panel p-4.5 rounded-2xl rounded-tl-sm flex-1 border border-white/5 shadow-sm">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-label font-bold px-2 py-0.5 rounded-md uppercase tracking-wider bg-accent-500/10 border border-accent-500/20 text-accent-400">
-                  topic guard
-                </span>
-                <span className="text-xs text-base-500 font-mono">{formatElapsed(elapsed)}</span>
-              </div>
-              <p className="text-base-200 text-sm flex items-center gap-2.5 leading-relaxed mt-2.5">
-                <RefreshCw className="w-3.5 h-3.5 text-accent-400 animate-spin shrink-0" />
-                <span className="flex-1">Screening your topic and warming up the agent graph…</span>
-              </p>
-              <div className="mt-3.5 space-y-2">
-                <div className="skeleton-shimmer h-2.5 w-[85%]" />
-                <div className="skeleton-shimmer h-2.5 w-[62%]" />
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {events.map((event, i) => {
-          const config = getAgentConfig(event.agent_name);
-          const AgentIcon = config.icon;
-          return (
-            <motion.div
-              // Identity, not position. Resuming a job or triggering a
-              // secondary task clears the feed and refills it with different
-              // events; under index keys React reused those nodes, so the entry
-              // animation never replayed and text swapped in place. This tuple
-              // is the same one appendUniqueEvent de-dupes on, so it is unique
-              // within the list by construction.
-              key={`${event.agent_name}|${event.timestamp}|${event.message}`}
-              className="self-start max-w-3xl flex gap-3.5 w-full"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: Math.min(i * 0.03, 0.3) }}
-            >
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${config.bgColor}`}>
-                <AgentIcon className={`w-4 h-4 ${config.iconColor}`} />
-              </div>
-              <div className="glass-panel p-4.5 rounded-2xl rounded-tl-sm flex-1 border border-white/5 shadow-sm">
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-label font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${config.bgColor} ${config.textColor}`}>
-                      {event.agent_name}
+                    <span className="grid size-8 place-items-center rounded-lg bg-hover ring-1 ring-line">
+                      <feat.icon className="size-4 text-base-300" />
                     </span>
-                  </div>
-                  <span className="text-xs text-base-500 font-mono">{new Date(event.timestamp * 1000).toLocaleTimeString()}</span>
-                </div>
-                <p className="text-base-200 text-sm flex items-center gap-2.5 leading-relaxed mt-2.5">
-                  {event.status === 'error'
-                    ? <span className="text-signal-error font-bold text-xs shrink-0">ERR</span>
-                    : (event.status === 'working' || event.status === 'started')
-                         && i === events.length - 1
-                         && currentJob?.status !== 'completed'
-                         && currentJob?.status !== 'failed'
-                      ? <RefreshCw className="w-3.5 h-3.5 text-accent-400 animate-spin shrink-0" />
-                      : <CheckCircle2 className="w-4 h-4 text-signal-success shrink-0" />}
-                  <span className="flex-1">{event.message}</span>
-                </p>
+                    <ArrowUpRight className="size-4 absolute top-4 right-4 text-base-500 group-hover:text-base-200 transition-colors" />
+                    <span className="block mt-3 text-ui font-medium text-base-100">{feat.title}</span>
+                    <span className="block mt-1 text-ui text-base-400 line-clamp-2">{feat.desc}</span>
+                  </button>
+                ))}
               </div>
-            </motion.div>
-          );
-        })}
 
-        {events.length === 0 && currentJob?.status === 'completed' && (
-          <div className="self-start max-w-3xl flex gap-3 w-full">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-base-800 border border-white/6">
-              <Network className="w-4 h-4 text-accent-400" />
-            </div>
-            <div className="glass-panel p-4 rounded-2xl rounded-tl-sm flex-1">
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="font-semibold text-sm text-accent-400 capitalize">system</span>
-                {currentJob.completed_at && <span className="text-xs text-base-500 font-mono">{new Date(currentJob.completed_at).toLocaleTimeString()}</span>}
+              {/* Compact chips on mobile and short desktop screens, so the
+                  prompt never gets pushed below the fold. */}
+              <div className="roomy:hidden flex gap-2 overflow-x-auto snap-x -mx-4 px-4 py-1 -my-1 md:mx-0 md:px-0 justify-center-safe [scrollbar-width:none]">
+                {HERO_FEATURES.map((feat) => {
+                  const Icon = feat.icon;
+                  return (
+                    <button
+                      key={feat.title}
+                      type="button"
+                      onClick={() => {
+                        setTopicInput(feat.sampleTopic);
+                        setTone(feat.sampleTone);
+                        setSections(feat.sampleSections);
+                      }}
+                      className="btn btn-secondary btn-sm rounded-full snap-start shrink-0"
+                    >
+                      <Icon className="text-base-400" />
+                      {feat.chip}
+                    </button>
+                  );
+                })}
               </div>
-              <p className="text-base-200 text-sm flex items-center gap-2 leading-relaxed">
-                <CheckCircle2 className="w-4 h-4 text-signal-success shrink-0" />
-                Historical job completed successfully.
-              </p>
             </div>
           </div>
-        )}
+        </motion.section>
+      ) : (
+        <>
+          {/* No bottom fade while the plan is up: its sticky Approve footer sits on that edge. */}
+          <div className={`flex-1 min-h-0 overflow-y-auto scroll-pt-24 scroll-pb-20 px-4 md:px-8 ${isAwaitingApproval
+            ? '[mask-image:linear-gradient(to_bottom,transparent,black_20px)]'
+            : '[mask-image:linear-gradient(to_bottom,transparent,black_20px,black_calc(100%-28px),transparent)]'}`}>
+            <div className={`mx-auto w-full max-w-3xl pb-6 flex flex-col gap-4 ${showJobBar ? '' : 'pt-6'}`}>
 
-        {/* Completed job also gets a progress tracker showing all-done */}
-        {currentJob?.status === 'completed' && (
-          <ProgressTracker events={events} jobStatus={currentJob.status} />
-        )}
-
-        {isAwaitingApproval && currentJob?.plan && (
-          <PlanEditor
-            plan={currentJob.plan}
-            jobId={currentJob.id}
-            onApprove={() => handleApprovePlan(currentJob.id)}
-            onRevise={(fb) => handleRevisePlan(currentJob.id, fb)}
-            onUpdatePlan={(plan) => handleUpdatePlan(currentJob.id, plan)}
-          />
-        )}
-
-        {/* -------- Failed Job Resume Banner -------- */}
-        {currentJob?.status === 'failed' && (
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-            className="w-full max-w-3xl self-start"
-          >
-            <div className="relative overflow-hidden rounded-2xl border border-signal-error/30 bg-signal-error-dim/20 backdrop-blur-xl shadow-md">
-              {/* Subtle animated glow bar at top */}
-              <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-signal-error/60 to-transparent" />
-
-              <div className="p-5 md:p-6">
-                {/* Header */}
-                <div className="flex items-start gap-3.5 mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-signal-error-dim border border-signal-error/25 flex items-center justify-center shrink-0">
-                    <AlertTriangle className="w-5 h-5 text-signal-error" />
+              {/* -------- Sticky job bar --------
+                   Only this one-line bar pins; the full rail lives below it so the
+                   pinned block stays short. The fill is opaque so the feed never
+                   shows through it. */}
+              {showJobBar && (
+                <div className={`sticky top-0 z-20 -mx-4 px-4 md:mx-0 md:px-0 bg-canvas ${currentJob.status === 'completed' ? 'pt-5' : 'pt-4'} pb-2 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-8 after:bg-gradient-to-b after:from-canvas after:to-transparent`}>
+                  <div className="flex h-11 items-center gap-3 rounded-xl bg-surface ring-1 ring-line px-3">
+                    <span className={status.badge}><span className={`dot ${status.dot}`} />{status.label}</span>
+                    {isAwaitingApproval
+                      ? <span className="hidden sm:inline text-ui text-base-400 truncate">Review outline · {currentJob.plan?.tasks?.length ?? 0} sections</span>
+                      : currentJob.status !== 'failed' && (
+                          <ProgressTracker events={events} jobStatus={currentJob.status} compact className="hidden sm:flex" />
+                        )}
+                    <div className="ml-auto flex items-center gap-3">
+                      {currentJob.id && (
+                        <span className="hidden sm:inline font-mono text-xs text-base-500" title={currentJob.id}>{currentJob.id.slice(0, 8)}</span>
+                      )}
+                      {isLive && (
+                        <span className={`font-mono text-xs tabular-nums ${isAwaitingApproval ? 'text-base-500' : 'text-base-200'}`}>{formatElapsed(elapsed)}</span>
+                      )}
+                      {(currentJob.status === 'failed' || currentJob.status === 'running') && handleResumeJob && (
+                        <button
+                          onClick={() => handleResumeJob(currentJob.id)}
+                          className="btn btn-ghost btn-sm"
+                          aria-label="Resume from checkpoint"
+                          title="Resume pipeline execution from the last saved SQLite checkpoint"
+                        >
+                          <RotateCcw />
+                          <span className="hidden sm:inline">Resume</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
+                </div>
+              )}
+
+              {/* Phones: the bar's compact tracker is hidden below sm, so show the full rail here. */}
+              {currentJob && isLive && !isAwaitingApproval && (
+                <ProgressTracker events={events} jobStatus={currentJob.status} className="sm:hidden" />
+              )}
+
+              {/* -------- Topic quote -------- */}
+              {currentJob && (
+                <div className="border-l-2 border-base-700 pl-4 py-1">
+                  <p className="text-xs text-base-500">Topic</p>
+                  <p className="mt-0.5 font-serif text-xl leading-7 text-base-50">{currentJob.topic}</p>
+                  {currentJob.tone && <p className="mt-1 text-xs text-base-500">Tone · {currentJob.tone}</p>}
+                </div>
+              )}
+
+              {/* -------- Timeline -------- */}
+              {(events.length > 0 || isLive || currentJob?.status === 'completed') && (
+                <ol className="relative [&>li:first-child>div:first-child]:mt-0 before:absolute before:left-[11px] before:top-3 before:bottom-3 before:w-px before:bg-line">
+                  {isLive && events.length === 0 && (
+                    <motion.li initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}>
+                      <TimelineHead icon={ShieldAlert} dot="bg-base-500" label="Topic guard" />
+                      <div className="flex items-baseline gap-3 rounded-lg py-1 pl-9 pr-2 bg-hover">
+                        <p className="flex-1 text-ui text-base-100">
+                          <Loader2 className="mr-1.5 inline size-3.5 animate-spin text-accent-400 align-[-2px]" />
+                          Screening your topic and warming up the agent graph…
+                        </p>
+                        <span className="shrink-0 font-mono text-xs text-base-500 tabular-nums">{formatElapsed(elapsed)}</span>
+                      </div>
+                      <div className="mt-2 space-y-2 pl-9 pr-2">
+                        <div className="skeleton-shimmer h-2 rounded w-5/6" />
+                        <div className="skeleton-shimmer h-2 rounded w-3/5" />
+                      </div>
+                    </motion.li>
+                  )}
+
+                  {events.map((event, i) => {
+                    const config = getAgentConfig(event.agent_name);
+                    const head = i === 0 || events[i - 1].agent_name !== event.agent_name;
+                    const isError = event.status === 'error';
+                    const live = (event.status === 'working' || event.status === 'started')
+                      && i === events.length - 1
+                      && currentJob?.status !== 'completed'
+                      && currentJob?.status !== 'failed';
+                    return (
+                      <motion.li
+                        // Identity, not position. Resuming a job or triggering a
+                        // secondary task clears the feed and refills it with different
+                        // events; under index keys React reused those nodes, so the entry
+                        // animation never replayed and text swapped in place. This tuple
+                        // is the same one appendUniqueEvent de-dupes on, so it is unique
+                        // within the list by construction.
+                        key={`${event.agent_name}|${event.timestamp}|${event.message}`}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                      >
+                        {head && <TimelineHead icon={config.icon} dot={config.dot} label={sentenceCase(event.agent_name)} />}
+                        <div className={`flex items-baseline gap-3 rounded-lg py-1 pl-9 pr-2 ${live ? 'bg-hover' : ''}`}>
+                          <p className={`flex-1 text-ui ${isError ? 'text-signal-error' : live ? 'text-base-100' : 'text-base-300'}`}>
+                            {live && <Loader2 className="mr-1.5 inline size-3.5 animate-spin text-accent-400 align-[-2px]" />}
+                            {isError && <><AlertTriangle className="mr-1.5 inline size-3.5 align-[-2px]" aria-hidden="true" /><span className="sr-only">Error: </span></>}
+                            {event.message}
+                          </p>
+                          <time className="shrink-0 font-mono text-xs text-base-500 tabular-nums">{formatClock(event.timestamp)}</time>
+                        </div>
+                      </motion.li>
+                    );
+                  })}
+
+                  {events.length === 0 && currentJob?.status === 'completed' && (
+                    <li>
+                      <TimelineHead icon={Network} dot="bg-base-500" label="System" />
+                      <div className="flex items-baseline gap-3 rounded-lg py-1 pl-9 pr-2">
+                        <p className="flex-1 text-ui text-base-300">Historical job completed successfully.</p>
+                        {currentJob.completed_at && (
+                          <time className="shrink-0 font-mono text-xs text-base-500 tabular-nums">
+                            {formatClock(new Date(currentJob.completed_at).getTime() / 1000)}
+                          </time>
+                        )}
+                      </div>
+                    </li>
+                  )}
+                </ol>
+              )}
+
+              {isAwaitingApproval && currentJob?.plan && (
+                <div ref={planRef}>
+                  <PlanEditor
+                    plan={currentJob.plan}
+                    jobId={currentJob.id}
+                    onApprove={() => handleApprovePlan(currentJob.id)}
+                    onRevise={(fb) => handleRevisePlan(currentJob.id, fb)}
+                    onUpdatePlan={(plan) => handleUpdatePlan(currentJob.id, plan)}
+                  />
+                </div>
+              )}
+
+              {/* -------- Failure banner -------- */}
+              {currentJob?.status === 'failed' && (
+                <div className="rounded-xl border border-signal-error/25 bg-signal-error-dim px-4 py-3 flex items-start gap-3">
+                  <AlertTriangle className="size-4 shrink-0 text-signal-error mt-0.5" />
                   <div className="flex-1 min-w-0">
-                    <h4 className="text-base font-bold text-signal-error mb-0.5">Pipeline Interrupted</h4>
-                    <p className="text-sm text-base-300 leading-relaxed">
+                    <p className="text-ui font-medium text-base-50">Pipeline interrupted</p>
+                    <p className="text-xs text-base-400 mt-0.5">
                       This job encountered an error and was halted. Your progress is checkpointed — you can resume from exactly where it stopped.
                     </p>
-                  </div>
-                </div>
-
-                {/* Error Details */}
-                {currentJob.error_message && (
-                  <div className="mb-4 p-3 rounded-xl bg-base-950/60 border border-signal-error/20">
-                    <div className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5">Error Details</div>
-                    <p className="text-xs text-signal-error font-mono leading-relaxed break-all font-medium">
-                      {currentJob.error_message}
-                    </p>
-                  </div>
-                )}
-
-                {/* Resume Action */}
-                <div className="flex items-center gap-3">
-                  <motion.button
-                    onClick={async () => {
-                      if (!handleResumeJob || isResuming) return;
-                      setIsResuming(true);
-                      try {
-                        await handleResumeJob(currentJob.id);
-                      } finally {
-                        // Reset after a short delay to allow the UI to update
-                        setTimeout(() => setIsResuming(false), 2000);
-                      }
-                    }}
-                    disabled={isResuming || !handleResumeJob}
-                    className={`resume-btn flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
-                      isResuming
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-wait'
-                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-amber-950 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 hover:scale-[1.02] active:scale-[0.98]'
-                    }`}
-                    whileHover={!isResuming ? { scale: 1.03 } : undefined}
-                    whileTap={!isResuming ? { scale: 0.97 } : undefined}
-                  >
-                    {isResuming ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        Resuming…
-                      </>
-                    ) : (
-                      <>
-                        <RotateCcw className="w-4 h-4" />
-                        Resume from Checkpoint
-                      </>
+                    {currentJob.error_message && (
+                      <p className="mt-2 text-xs text-signal-error break-words">{currentJob.error_message}</p>
                     )}
-                  </motion.button>
-                  <span className="text-xs text-base-500">
-                    Picks up from the last completed step — no work is repeated.
-                  </span>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={async () => {
+                          if (!handleResumeJob || isResuming) return;
+                          setIsResuming(true);
+                          try {
+                            await handleResumeJob(currentJob.id);
+                          } finally {
+                            // Reset after a short delay to allow the UI to update
+                            setTimeout(() => setIsResuming(false), 2000);
+                          }
+                        }}
+                        disabled={isResuming || !handleResumeJob}
+                        className="btn btn-primary btn-sm"
+                      >
+                        {isResuming ? (
+                          <>
+                            <Loader2 className="animate-spin" />
+                            Resuming…
+                          </>
+                        ) : (
+                          <>
+                            <RotateCcw />
+                            Resume from checkpoint
+                          </>
+                        )}
+                      </button>
+                      <span className="text-xs text-base-400">
+                        Picks up from the last completed step — no work is repeated.
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* Completed jobs get the full rail showing all-done; failed jobs show where it stopped. */}
+              {currentJob?.status === 'completed' && (
+                <ProgressTracker events={events} jobStatus={currentJob.status} />
+              )}
+              {currentJob?.status === 'failed' && events.length > 0 && (
+                <ProgressTracker events={events} jobStatus={currentJob.status} />
+              )}
+
+              <div ref={feedEndRef} />
             </div>
-          </motion.div>
-        )}
+          </div>
 
-        {/* Show progress tracker for failed jobs too (shows where it stopped) */}
-        {currentJob?.status === 'failed' && events.length > 0 && (
-          <ProgressTracker events={events} jobStatus={currentJob.status} />
-        )}
-
-
-        <div ref={feedEndRef} />
-      </div>
-
-      {(!currentJob || currentJob.status === 'completed' || currentJob.status === 'failed') && (
-        <div className="w-full max-w-4xl mx-auto mt-4 shrink-0 z-30">
-          {topicError && (
-            <div className="max-w-4xl mx-auto mb-3 fade-in">
-              <div className="flex items-start gap-3 p-3.5 pr-2 rounded-xl border border-signal-error/30 bg-signal-error-dim text-signal-error">
-                <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
-                <div className="flex-1 text-sm leading-relaxed">
-                  <span className="font-semibold">Topic rejected.</span>{' '}
-                  <span className="text-base-200">{topicError.reason}</span>
-                  {topicError.suggested_topic && (
-                    <button
-                      onClick={() => {
-                        setTopicInput(topicError.suggested_topic!);
-                        clearTopicError?.();
-                      }}
-                      className="block mt-2 text-xs text-accent-300 hover:text-accent-200 underline underline-offset-2"
-                    >
-                      Try this instead: "{topicError.suggested_topic}"
-                    </button>
-                  )}
-                </div>
-                <button
-                  onClick={() => clearTopicError?.()}
-                  className="p-1.5 text-base-400 hover:text-base-100 rounded-md hover:bg-white/5 shrink-0"
-                  aria-label="Dismiss"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
+          {showComposer && (
+            <div className="shrink-0 px-4 md:px-8 pt-2 pb-[max(16px,env(safe-area-inset-bottom))]">
+              <div className="mx-auto w-full max-w-3xl">{composer}</div>
             </div>
           )}
-
-
-          <div className="w-full max-w-4xl mx-auto rounded-3xl p-3 bg-base-900/90 dark:bg-base-950/90 backdrop-blur-2xl border border-base-750/80 hover:border-accent-500/40 focus-within:border-accent-500/60 focus-within:shadow-[0_8px_35px_rgba(245,158,11,0.14)] shadow-2xl transition-all duration-300 flex flex-col gap-2">
-
-            {uploadStatus !== 'idle' && (
-              <UploadChip
-                status={uploadStatus}
-                filename={uploadName}
-                result={uploadResult}
-                errorMessage={uploadError}
-                sourceMode={sourceMode}
-                onSourceModeChange={setSourceMode}
-                onClear={clearUpload}
-              />
-            )}
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPTED_UPLOAD_TYPES}
-              className="hidden"
-              onChange={e => { handleFileSelected(e.target.files?.[0]); }}
-            />
-
-            {/* Prompt Textarea */}
-            <div className="w-full px-1">
-              <textarea
-                className="w-full bg-transparent border-none text-base-100 placeholder-base-400/70 text-base font-medium min-h-[30px] max-h-[180px] resize-none overflow-y-auto focus:outline-none focus:ring-0 leading-relaxed font-sans"
-                placeholder={
-                  uploadStatus === 'ready' && sourceMode === 'auto_topic'
-                    ? (uploadResult?.derived_topic
-                        ? `Auto-topic ready — press Send (or override: "${uploadResult.derived_topic}")`
-                        : 'Auto-topic mode — enter or override the title...')
-                    : 'Enter a topic to generate a publication-ready blog...'
-                }
-                ref={topicRef}
-                rows={1}
-                value={topicInput}
-                onChange={e => setTopicInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitJob(); } }}
-              />
-            </div>
-
-            {/* Control Toolbar */}
-            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 border-t border-base-800/80 pt-2 px-1">
-              {/* Left Side Tools: Attach Doc */}
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadStatus === 'uploading'}
-                  title="Attach a document (PDF, DOCX, TXT, MD)"
-                  className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
-                    uploadStatus === 'ready'
-                      ? 'text-accent-400 bg-accent-500/15 border border-accent-500/30'
-                      : 'text-base-300 hover:text-accent-400 bg-base-800/80 hover:bg-base-750 border border-base-700/60 hover:border-accent-500/30'
-                  } ${uploadStatus === 'uploading' ? 'opacity-50 cursor-wait' : ''}`}
-                >
-                  <Paperclip className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Attach Doc</span>
-                </button>
-              </div>
-
-              {/* Right Side Tools: Shortcut Hint + Send Button */}
-              <div className="ml-auto flex shrink-0 items-center gap-3">
-                <span className="hidden md:flex items-center gap-1.5 text-xs font-mono text-base-400">
-                  <span>Press <kbd className="px-1.5 py-0.5 rounded-md bg-base-800 border border-base-700 text-xs text-base-300 font-sans shadow-inner">Enter ↵</kbd></span>
-                </span>
-
-                <motion.button
-                  onClick={() => submitJob()}
-                  disabled={
-                    uploadStatus === 'uploading'
-                    || (!topicInput.trim()
-                        && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic))
-                  }
-                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition-all ${
-                    (uploadStatus === 'uploading'
-                     || (!topicInput.trim()
-                         && !(sourceMode === 'auto_topic' && uploadStatus === 'ready' && !!uploadResult?.derived_topic)))
-                      ? 'bg-base-800 text-base-500 border border-base-700 cursor-not-allowed shadow-none'
-                      : 'bg-gradient-to-r from-accent-400 to-accent-600 hover:from-accent-300 hover:to-accent-500 text-base-950 shadow-accent-500/25 active:scale-95'
-                  }`}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  <span>Generate</span>
-                  <Send className="w-3.5 h-3.5" />
-                </motion.button>
-              </div>
-            </div>
-
-          </div>
-        </div>
+        </>
       )}
     </main>
   );

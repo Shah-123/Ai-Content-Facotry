@@ -3,219 +3,149 @@
 
 /* Bind Tailwind's `dark:` variant to the app's own theme switch.
    Without this it defaults to `prefers-color-scheme`, so every `dark:`
-   utility (the G-Eval radar grid and score cards in ContentView, the
-   composer backdrop in ChatView) followed the OS instead of the toggle —
-   flipping the app to light on a dark-OS machine left near-white strokes
-   and labels sitting on light surfaces. `useTheme` writes
+   utility followed the OS instead of the toggle. `useTheme` writes
    data-theme="light" and removes the attribute for dark. */
 /* `:is` not `:where` — :where contributes zero specificity, so a
    `dark:text-*` tied with its own un-varianted base utility lost on
-   source order (dark:text-slate-300/80 rendered as text-slate-600). */
+   source order. */
 @custom-variant dark (&:is(:root:not([data-theme="light"]) *));
 
-/* Dark is the default: `useTheme` removes data-theme entirely for it. */
-:root { color-scheme: dark; }
-
-/* "Enough room to show the full hero." The dashboard pins the composer to the
-   bottom and scrolls only the feed above it, so on a 1366x768 laptop or
-   projector the three hero feature cards were sliced through the middle. Height
-   is the real constraint, not width, so gate them on both: below this, the
-   compact chip row (which is a real <button>, unlike the cards) stands in. */
-@custom-variant roomy (@media (min-width: 768px) and (min-height: 800px));
+/* "Enough room to show the full hero." Height is the real constraint on a
+   1366x768 laptop, not width, so gate on both. */
+@custom-variant roomy (@media (min-width: 1024px) and (min-height: 800px));
 
 /* ===================================================================
-   Aesthetic: Dark editorial + warm amber accent. 
-   Inspired by late-night creative studios, not generic SaaS dashboards.
+   Nocturne. Near-zero-chroma neutrals, brass-gold accent in both themes.
+   Accent 200-400 = text/icons, 500-700 = fills, --color-indicator = thin
+   non-text indicators. See the design spec, section 2.
    =================================================================== */
 
 @theme {
-  /* --- Core Palette: Modern Lighter Slate/Navy Dark (softer on eyes) --- */
-  --color-base-950: #121622;
-  --color-base-900: #1a202e;
-  --color-base-850: #21293a;
-  --color-base-800: #2b354a;
-  --color-base-750: #35425c;
-  --color-base-700: #425272;
-  --color-base-600: #576b91;
-  --color-base-500: #8098b5;
-  --color-base-400: #9bb1d0;
-  --color-base-300: #c2d4ec;
-  --color-base-200: #e2ebf7;
-  --color-base-100: #f4f8fc;
-  --color-base-50:  #ffffff;
+  /* Fonts */
+  --font-sans:  'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Newsreader', ui-serif, Georgia, 'Times New Roman', serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* --- Type scale ---
-     Tailwind's ramp starts at text-xs (12px), so every micro-label in the app
-     had been hand-rolled as an arbitrary value: text-[7px] through text-[15px],
-     seven off-scale sizes and 78 usages sitting alongside the named steps.
-     `text-label` is the one step that was actually missing — 11px, for the
-     uppercase tracked eyebrows and status badges, where all-caps and letter-
-     spacing carry more apparent size than the nominal value. Everything else
-     maps onto xs/sm/base. Floor: nothing below 11px, and nothing that is not
-     uppercase below 12px. */
-  --text-label: 0.6875rem;
-  --text-label--line-height: 1.4;
+  /* Neutral ramp: DARK (default). Low-chroma near-black. */
+  --color-base-950: #0b0b0c;  /* canvas */
+  --color-base-900: #121214;  /* surface */
+  --color-base-850: #18181b;  /* raised / hover */
+  --color-base-800: #1f1f23;  /* thumb, avatar, node */
+  --color-base-750: #27272c;
+  --color-base-700: #34343a;  /* field border at rest */
+  --color-base-600: #4b4b52;  /* decorative only, never text */
+  --color-base-500: #86868e;  /* muted text: 5.45 canvas / 5.18 surface / 4.91 raised / 4.55 base-800 */
+  --color-base-400: #a1a1a8;  /* secondary text 7.66 */
+  --color-base-300: #c8c8cd;
+  --color-base-200: #e4e4e7;  /* body 15.5 */
+  --color-base-100: #f2f2f3;
+  --color-base-50:  #ffffff;  /* headings */
 
-  /* --- Accent: Warm amber/gold --- */
-  --color-accent-500: #f59e0b;
-  --color-accent-400: #fbbf24;
-  --color-accent-300: #fcd34d;
-  --color-accent-200: #fde68a;
-  --color-accent-600: #d97706;
-  --color-accent-700: #b45309;
-  --color-accent-glow: rgba(var(--accent-rgb), 0.15);
+  /* Semantic (flip in light; prefer these in all new markup) */
+  --color-canvas:      #0b0b0c;
+  --color-surface:     #121214;
+  --color-raised:      #18181b;
+  --color-field:       #0e0e10;
+  --color-line:        rgba(255,255,255,0.07);
+  --color-line-strong: rgba(255,255,255,0.12);
+  --color-hover:       rgba(255,255,255,0.04);
+  --color-selected:    rgba(255,255,255,0.07);
+  --color-on-accent:   #1a1206;
+  --color-focus:       #e5a23a;  /* 8.96 on canvas */
+  --color-indicator:   #e5a23a;
 
-  /* --- Signal: Emerald for success, rose for error --- */
-  --color-signal-success: #34d399;
-  --color-signal-success-dim: rgba(52, 211, 153, 0.12);
-  --color-signal-error: #fb7185;
-  --color-signal-error-dim: rgba(251, 113, 133, 0.12);
-  --color-signal-info: #60a5fa;
-  --color-signal-info-dim: rgba(96, 165, 250, 0.12);
-  --color-signal-warning: #fbbf24;
-  --color-signal-warning-dim: rgba(251, 191, 36, 0.12);
+  /* Accent: brass gold. 200-400 = text/icons, 500-700 = fills. */
+  --color-accent-200: #f7deac;
+  --color-accent-300: #f3cf8a;  /* hover text */
+  --color-accent-400: #eebb5c;  /* accent text 11.15 canvas */
+  --color-accent-500: #e5a23a;  /* fill; ink 8.44 */
+  --color-accent-600: #c8851f;  /* pressed fill */
+  --color-accent-700: #a0661a;
+  --color-accent-glow: rgba(var(--accent-rgb), 0.14);  /* back-compat tint only */
 
-  /* --- Semantic mappings (backward compat) --- */
-  --color-surface: #0a0a0c;
-  --color-surface-dim: #0a0a0c;
-  --color-surface-bright: #25252e;
-  --color-surface-container-lowest: #111114;
-  --color-surface-container-low: #161619;
-  --color-surface-container: #1a1a1f;
-  --color-surface-container-high: #1f1f26;
-  --color-surface-container-highest: #25252e;
-  --color-on-surface: #e0e0ec;
-  --color-on-surface-variant: #9090a8;
-  --color-outline: #6b6b80;
-  --color-outline-variant: #32323e;
-  --color-primary: #fbbf24;
-  --color-primary-container: #b45309;
-  --color-on-primary: #0a0a0c;
-  --color-secondary: #60a5fa;
-  --color-secondary-container: #1e3a5f;
-  --color-tertiary: #34d399;
-  --color-tertiary-container: #064e3b;
-  --color-error: #fb7185;
-  --color-error-container: #4c0519;
-  --color-background: #0a0a0c;
-  --color-on-background: #e0e0ec;
-  --color-surface-variant: #1a1a1f;
-  --color-on-primary-fixed: #0a0a0c;
-  --color-primary-fixed: #fde68a;
-  --color-surface-tint: #fbbf24;
-  --color-inverse-primary: #d97706;
-  --color-primary-fixed-dim: #fbbf24;
-  --color-on-error-container: #fecdd3;
-  --color-secondary-fixed: #bfdbfe;
-  --color-tertiary-fixed: #a7f3d0;
-  --color-tertiary-fixed-dim: #34d399;
+  /* Signals: dark */
+  --color-signal-success: #4ade80;  --color-signal-success-dim: rgba(74,222,128,0.12);
+  --color-signal-warning: #e8955a;  --color-signal-warning-dim: rgba(232,149,90,0.12);  /* terracotta: never reads as brand gold */
+  --color-signal-error:   #f87171;  --color-signal-error-dim:   rgba(248,113,113,0.12);
+  --color-signal-info:    #7dd3fc;  --color-signal-info-dim:    rgba(125,211,252,0.12);
+
+  /* Type scale (use font-serif alongside display/title) */
+  --text-display: 2.75rem;    --text-display--line-height: 3rem;     --text-display--letter-spacing: -0.02em;  --text-display--font-weight: 500;
+  --text-display-sm: 1.875rem; --text-display-sm--line-height: 2.25rem; --text-display-sm--letter-spacing: -0.02em; --text-display-sm--font-weight: 500;
+  --text-title: 1.75rem;      --text-title--line-height: 2.125rem;   --text-title--letter-spacing: -0.015em;   --text-title--font-weight: 500;
+  --text-title-sm: 1.5rem;    --text-title-sm--line-height: 1.875rem; --text-title-sm--letter-spacing: -0.015em; --text-title-sm--font-weight: 500;
+  --text-kpi: 1.875rem;       --text-kpi--line-height: 2.25rem;      --text-kpi--letter-spacing: -0.02em;      --text-kpi--font-weight: 600;
+  --text-heading: 1rem;       --text-heading--line-height: 1.5rem;   --text-heading--letter-spacing: -0.011em; --text-heading--font-weight: 600;
+  --text-ui: 0.8125rem;       --text-ui--line-height: 1.25rem;
+  --text-label: 0.6875rem;    --text-label--line-height: 1rem;       /* 11px: kbd + badges ONLY */
+
+  /* Radii: Tailwind v4 defaults except 3xl, which collapses onto 2xl. */
+  --radius-3xl: 1rem;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* The accent as a bare RGB triplet. Every amber glow, tint and ambient wash
-   below was hard-coded rgba(245,158,11,…), which stayed amber after the light
-   theme flipped the accent to blue — that was the yellow cast over the light
-   background. Flipped once here, applied everywhere via rgba(var(--accent-rgb), …). */
-:root { --accent-rgb: 245, 158, 11; }
+/* Dark is the default: `useTheme` removes data-theme entirely for it. */
+:root {
+  color-scheme: dark;
+  --accent-rgb: 229, 162, 58;
+  --elev-1: inset 0 1px 0 rgba(255,255,255,0.03);
+  --elev-2: 0 0 0 1px rgba(255,255,255,0.10), 0 12px 32px -8px rgba(0,0,0,0.65);
+  --elev-3: 0 0 0 1px rgba(255,255,255,0.10), 0 24px 64px -12px rgba(0,0,0,0.75);
+}
 
 /* ===================================================================
-   LIGHT THEME OVERRIDES
-   Activated by setting `data-theme="light"` on <html>.
-   The amber accent + signal colors stay the same so the brand feel is
-   consistent across themes; only the neutral base scale is inverted.
+   LIGHT THEME. Activated by data-theme="light" on <html>. Same gold hue;
+   the text steps of the accent ramp get darker for contrast on white.
+   color-scheme drives the browser's own chrome off the in-app toggle.
    =================================================================== */
-
 :root[data-theme="light"] {
-  /* Drives the browser's own chrome - scrollbars, form controls, autofill,
-     the canvas behind the page - off the app's toggle. The <meta> in
-     index.html only declares which schemes are supported; the browser picks
-     between them by OS preference, which is the wrong signal once the user
-     has chosen a theme in-app. */
   color-scheme: light;
-  --color-base-950: #f5f5f7;
-  --color-base-900: #ececef;
-  --color-base-850: #e3e3e8;
-  --color-base-800: #d9d9e0;
-  --color-base-750: #cfcfd8;
-  --color-base-700: #bdbdc9;
-  --color-base-600: #7a7a8c;
-  --color-base-500: #67677a;
-  --color-base-400: #5a5a6c;
-  --color-base-300: #3f3f50;
-  --color-base-200: #2a2a38;
-  --color-base-100: #15151e;
-  --color-base-50:  #0a0a0c;
+  --color-base-950: #f7f7f5;  --color-base-900: #ffffff;  --color-base-850: #f4f4f2;
+  --color-base-800: #ececea;  --color-base-750: #e4e4e7;  --color-base-700: #d4d4d8;
+  --color-base-600: #a1a1aa;  /* decorative only */
+  --color-base-500: #6b6b73;  /* 5.28 white / 4.92 canvas / 4.80 base-850. NOT on base-800 (4.47) */
+  --color-base-400: #52525b;  --color-base-300: #3f3f46;  --color-base-200: #27272a;
+  --color-base-100: #18181b;  --color-base-50:  #0a0a0b;
 
-  --color-surface: #f5f5f7;
-  --color-surface-dim: #ececef;
-  --color-surface-bright: #ffffff;
-  --color-surface-container-lowest: #ffffff;
-  --color-surface-container-low: #f5f5f7;
-  --color-surface-container: #ececef;
-  --color-surface-container-high: #e3e3e8;
-  --color-surface-container-highest: #d9d9e0;
-  --color-on-surface: #15151e;
-  --color-on-surface-variant: #3f3f50;
-  --color-background: #f5f5f7;
-  --color-on-background: #15151e;
+  --color-canvas: #f7f7f5;  --color-surface: #ffffff;  --color-raised: #ffffff;  --color-field: #ffffff;
+  --color-line:        rgba(10,10,12,0.08);
+  --color-line-strong: rgba(10,10,12,0.14);
+  --color-hover:       rgba(10,10,12,0.04);
+  --color-selected:    rgba(10,10,12,0.06);
+  --color-focus:       #b87814;  /* 3.66 white / 3.41 canvas */
+  --color-indicator:   #b87814;
 
-  /* Light theme swaps the accent palette from amber to a deep, professional
-     blue (Stripe / Linear feel). Everything that uses `accent-*` utilities —
-     hover text, focus rings, badges, links — automatically picks this up. */
-  --color-accent-500: #2563eb;
-  --color-accent-400: #3b82f6;
-  --color-accent-300: #60a5fa;
-  --color-accent-200: #93c5fd;
-  --color-accent-600: #1d4ed8;
-  --color-accent-700: #1e40af;
-  --color-accent-glow: rgba(37, 99, 235, 0.15);
-  --accent-rgb: 37, 99, 235;
+  --color-accent-200: #5e3806;
+  --color-accent-300: #7f4a08;  /* hover text gets darker: 7.28 */
+  --color-accent-400: #9a5b0b;  /* text: 5.42 white / 5.05 canvas / 4.99 on accent tint */
+  --color-accent-500: #d99a2b;  /* fill; ink 7.6 */
+  --color-accent-600: #b87814;
+  --color-accent-700: #8a560c;
+  --accent-rgb: 217, 154, 43;
 
-  /* Signal colors need their own light-theme values. The dark palette's
-     emerald/amber/blue are tuned for a near-black surface and collapse on
-     #f5f5f7: success #34d399 was 1.77:1, warning #fbbf24 1.53:1, info
-     #60a5fa 2.33:1 — all far below the 4.5:1 needed for body text. Error
-     already had an override; these are the missing three. Info is cyan, not
-     blue, so it stays distinguishable from the light-theme accent. */
-  --color-signal-success: #047857;
-  --color-signal-warning: #b45309;
-  --color-signal-info: #0e7490;
-  --color-signal-error: #dc2626;
-  --color-signal-error-dim: rgba(220, 38, 38, 0.08);
-  --color-error: #dc2626;
-  --color-error-container: #fee2e2;
-}
+  --color-signal-success: #047857;  --color-signal-success-dim: rgba(4,120,87,0.08);     /* 5.48 / 4.90 on tint */
+  --color-signal-warning: #c2410c;  --color-signal-warning-dim: rgba(194,65,12,0.08);    /* 5.18 / 4.62 on tint */
+  --color-signal-error:   #b91c1c;  --color-signal-error-dim:   rgba(185,28,28,0.08);    /* 6.47 / 5.66 on tint */
+  --color-signal-info:    #0e7490;  --color-signal-info-dim:    rgba(14,116,144,0.08);
 
-:root[data-theme="light"] body {
-  background-color: var(--color-base-950);
-  color: var(--color-base-100);
-}
-
-:root[data-theme="light"] .glass-panel {
-  background: linear-gradient(
-    135deg,
-    rgba(0, 0, 0, 0.03) 0%,
-    rgba(0, 0, 0, 0.01) 100%
-  );
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 8px 32px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-
-:root[data-theme="light"] .glass-pill {
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  --elev-1: 0 0 0 1px rgba(10,10,12,0.06), 0 1px 2px rgba(10,10,12,0.04);
+  --elev-2: 0 0 0 1px rgba(10,10,12,0.08), 0 8px 24px -6px rgba(10,10,12,0.12);
+  --elev-3: 0 0 0 1px rgba(10,10,12,0.08), 0 24px 56px -12px rgba(10,10,12,0.18);
 }
 
 :root[data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(10, 10, 12, 0.15);
 }
 :root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(10, 10, 12, 0.25);
 }
 
-/* Range Sliders for Light Theme */
+/* Range sliders */
 input[type="range"] {
   accent-color: var(--color-accent-500);
 }
@@ -231,181 +161,61 @@ input[type="range"] {
   border-radius: 9999px;
 }
 
-/* -------------------------------------------------------------------
-   Flip the many hard-coded `white/N` overlay utilities so that borders,
-   dividers, and hover backdrops remain visible against a light surface.
-   Tailwind compiles `border-white/6` to a literal rgba(255,255,255,0.06)
-   which is invisible in light mode; these rules retarget the same
-   compiled class names to black-opacity equivalents.
-   ------------------------------------------------------------------- */
-
-:root[data-theme="light"] .border-white\/3  { border-color: rgba(0, 0, 0, 0.05); }
-:root[data-theme="light"] .border-white\/4  { border-color: rgba(0, 0, 0, 0.06); }
-:root[data-theme="light"] .border-white\/5  { border-color: rgba(0, 0, 0, 0.07); }
-:root[data-theme="light"] .border-white\/6  { border-color: rgba(0, 0, 0, 0.09); }
-:root[data-theme="light"] .border-white\/8  { border-color: rgba(0, 0, 0, 0.11); }
-:root[data-theme="light"] .border-white\/10 { border-color: rgba(0, 0, 0, 0.14); }
-:root[data-theme="light"] .border-white\/12 { border-color: rgba(0, 0, 0, 0.16); }
-:root[data-theme="light"] .border-white\/20 { border-color: rgba(0, 0, 0, 0.20); }
-
-:root[data-theme="light"] .bg-white\/2  { background-color: rgba(0, 0, 0, 0.02); }
-:root[data-theme="light"] .bg-white\/3  { background-color: rgba(0, 0, 0, 0.03); }
-:root[data-theme="light"] .bg-white\/4  { background-color: rgba(0, 0, 0, 0.04); }
-:root[data-theme="light"] .bg-white\/5  { background-color: rgba(0, 0, 0, 0.05); }
-:root[data-theme="light"] .bg-white\/6  { background-color: rgba(0, 0, 0, 0.06); }
-:root[data-theme="light"] .bg-white\/10 { background-color: rgba(0, 0, 0, 0.08); }
-
-:root[data-theme="light"] .hover\:bg-white\/3:hover  { background-color: rgba(0, 0, 0, 0.04); }
-:root[data-theme="light"] .hover\:bg-white\/4:hover  { background-color: rgba(0, 0, 0, 0.05); }
-:root[data-theme="light"] .hover\:bg-white\/5:hover  { background-color: rgba(0, 0, 0, 0.06); }
-:root[data-theme="light"] .hover\:bg-white\/6:hover  { background-color: rgba(0, 0, 0, 0.07); }
-:root[data-theme="light"] .hover\:bg-white\/10:hover { background-color: rgba(0, 0, 0, 0.10); }
-
-:root[data-theme="light"] .hover\:border-white\/6:hover  { border-color: rgba(0, 0, 0, 0.12); }
-:root[data-theme="light"] .hover\:border-white\/10:hover { border-color: rgba(0, 0, 0, 0.16); }
-:root[data-theme="light"] .hover\:border-white\/12:hover { border-color: rgba(0, 0, 0, 0.18); }
-:root[data-theme="light"] .focus\:border-white\/10:focus { border-color: rgba(0, 0, 0, 0.16); }
-
-:root[data-theme="light"] .divide-white\/4 > * + * { border-color: rgba(0, 0, 0, 0.06); }
-:root[data-theme="light"] .divide-white\/6 > * + * { border-color: rgba(0, 0, 0, 0.09); }
-
-/* Ambient gradient is too subtle on light bg — boost the amber tint a notch. */
-:root[data-theme="light"] .ambient-bg {
-  background-image:
-    radial-gradient(ellipse 80% 60% at 10% 0%, rgba(var(--accent-rgb), 0.10) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 80% at 90% 100%, rgba(96, 165, 250, 0.08) 0%, transparent 50%);
-}
-
 /* Noise overlay is calibrated for dark; dial it down in light mode. */
 :root[data-theme="light"] .noise-bg::before {
   opacity: 0.5;
 }
 
-/* Top-nav uses bg-base-950/60 which becomes a translucent light grey — keep
-   it readable by tinting toward white. */
-:root[data-theme="light"] nav.bg-base-950\/80 {
-  background-color: rgba(255, 255, 255, 0.75);
-}
-
 /* -------------------------------------------------------------------
-   Button + glow refinements for light mode.
-   The amber brand colour stays consistent (think Stripe purple, Linear
-   indigo, Notion red — accent doesn't flip with theme). We only adjust
-   shadow weight and gradient stops so the CTA reads as crisp and
-   intentional on a light surface instead of washed-out.
+   Light remap (safety net, unlayered). Tailwind compiles `border-white/6`
+   to a literal white rgba that is invisible on a light surface; these
+   retarget the same class names to ink-opacity equivalents.
+   New markup must not use white/N: use border-line, border-line-strong,
+   bg-hover, bg-selected, ring-line, ring-line-strong. Delete this block
+   once `grep -rn "white/[0-9]" src --include=*.tsx` returns 0 (excluding
+   image overlays).
    ------------------------------------------------------------------- */
 
-:root[data-theme="light"] .btn-primary,
-:root[data-theme="light"] .kinetic-pill {
-  /* Deep professional blue gradient (Stripe / Linear feel). */
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-  color: #ffffff;
-  box-shadow:
-    0 1px 2px rgba(29, 78, 216, 0.18),
-    0 4px 12px rgba(59, 130, 246, 0.30);
-}
-:root[data-theme="light"] .btn-primary:hover,
-:root[data-theme="light"] .kinetic-pill:hover {
-  box-shadow:
-    0 2px 4px rgba(29, 78, 216, 0.22),
-    0 8px 24px rgba(59, 130, 246, 0.40);
-}
+:root[data-theme="light"] .border-white\/3  { border-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .border-white\/4  { border-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .border-white\/5  { border-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .border-white\/6  { border-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .border-white\/7  { border-color: rgba(10, 10, 12, 0.08); }
+:root[data-theme="light"] .border-white\/8  { border-color: rgba(10, 10, 12, 0.08); }
+:root[data-theme="light"] .border-white\/10 { border-color: rgba(10, 10, 12, 0.10); }
+:root[data-theme="light"] .border-white\/12 { border-color: rgba(10, 10, 12, 0.14); }
+:root[data-theme="light"] .border-white\/14 { border-color: rgba(10, 10, 12, 0.14); }
+:root[data-theme="light"] .border-white\/16 { border-color: rgba(10, 10, 12, 0.14); }
+:root[data-theme="light"] .border-white\/20 { border-color: rgba(10, 10, 12, 0.14); }
 
-/* Glow ring: dark mode uses heavy black shadow; light mode wants a
-   softer, tighter lift with a hint of blue so cards feel raised. */
-:root[data-theme="light"] .ambient-glow {
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.06),
-    0 0 0 1px rgba(0, 0, 0, 0.05),
-    0 0 32px rgba(59, 130, 246, 0.10);
-}
+:root[data-theme="light"] .bg-white\/2  { background-color: rgba(10, 10, 12, 0.02); }
+:root[data-theme="light"] .bg-white\/3  { background-color: rgba(10, 10, 12, 0.03); }
+:root[data-theme="light"] .bg-white\/4  { background-color: rgba(10, 10, 12, 0.04); }
+:root[data-theme="light"] .bg-white\/5  { background-color: rgba(10, 10, 12, 0.04); }
+:root[data-theme="light"] .bg-white\/6  { background-color: rgba(10, 10, 12, 0.05); }
+:root[data-theme="light"] .bg-white\/7  { background-color: rgba(10, 10, 12, 0.05); }
+:root[data-theme="light"] .bg-white\/8  { background-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .bg-white\/10 { background-color: rgba(10, 10, 12, 0.06); }
 
-/* Glass panels in light mode get a subtle drop shadow for separation. */
-:root[data-theme="light"] .glass-panel {
-  backdrop-filter: blur(20px) saturate(1.4);
-}
+:root[data-theme="light"] .hover\:bg-white\/3:hover  { background-color: rgba(10, 10, 12, 0.03); }
+:root[data-theme="light"] .hover\:bg-white\/4:hover  { background-color: rgba(10, 10, 12, 0.04); }
+:root[data-theme="light"] .hover\:bg-white\/5:hover  { background-color: rgba(10, 10, 12, 0.04); }
+:root[data-theme="light"] .hover\:bg-white\/6:hover  { background-color: rgba(10, 10, 12, 0.05); }
+:root[data-theme="light"] .hover\:bg-white\/7:hover  { background-color: rgba(10, 10, 12, 0.05); }
+:root[data-theme="light"] .hover\:bg-white\/8:hover  { background-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .hover\:bg-white\/10:hover { background-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .hover\:bg-white\/20:hover { background-color: rgba(10, 10, 12, 0.06); }
 
-/* Brand mark (logo text + SE chip) also flips to the blue palette so the
-   light theme reads as fully monochrome-cool rather than amber+blue mixed. */
-:root[data-theme="light"] .text-gradient-amber {
-  background: linear-gradient(135deg, #3b82f6, #2563eb, #1d4ed8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
+:root[data-theme="light"] .hover\:border-white\/6:hover  { border-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .hover\:border-white\/10:hover { border-color: rgba(10, 10, 12, 0.10); }
+:root[data-theme="light"] .hover\:border-white\/12:hover { border-color: rgba(10, 10, 12, 0.14); }
+:root[data-theme="light"] .hover\:border-white\/14:hover { border-color: rgba(10, 10, 12, 0.14); }
+:root[data-theme="light"] .hover\:border-white\/16:hover { border-color: rgba(10, 10, 12, 0.14); }
+:root[data-theme="light"] .focus\:border-white\/10:focus { border-color: rgba(10, 10, 12, 0.10); }
 
-:root[data-theme="light"] .aurora-chip {
-  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 50%, #1d4ed8 100%);
-  color: #ffffff;
-  box-shadow:
-    0 1px 2px rgba(29, 78, 216, 0.20),
-    0 4px 12px rgba(59, 130, 246, 0.30);
-}
-
-/* User-message chat bubble — also flip to the blue palette. */
-:root[data-theme="light"] .aurora-bubble {
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-  color: #ffffff;
-  box-shadow:
-    0 1px 2px rgba(29, 78, 216, 0.18),
-    0 6px 20px rgba(59, 130, 246, 0.22);
-}
-
-/* Hero headline. Unlike the other gradient-text utilities this one had no
-   light override, so its stops resolved to accent-200/300 (#93c5fd, #60a5fa)
-   — near-invisible on the #f5f5f7 ground. Re-declaring `background` resets
-   background-size and background-clip, so both are restated. */
-:root[data-theme="light"] .text-shimmer {
-  background: linear-gradient(
-    90deg,
-    #3b82f6 0%,
-    #1d4ed8 30%,
-    #1e3a8a 50%,
-    #1d4ed8 70%,
-    #3b82f6 100%
-  );
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* The amber gradient text utility (used for some headings) too. */
-:root[data-theme="light"] .text-gradient-aurora {
-  background: linear-gradient(135deg, #3b82f6, #2563eb, #1d4ed8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* ── Podcast Player — light mode overrides ──────────────────────────────────
-   In light mode the player card flips to a clean white/grey surface and
-   the inactive bars become a subtle dark tint. The play button glow
-   picks up the blue accent automatically because --color-accent-* already
-   flips in the light theme block above.
-─────────────────────────────────────────────────────────────────────────── */
-:root[data-theme="light"] .podcast-player-card {
-  --podcast-card-bg-start: #ffffff;
-  --podcast-card-bg-end:   #f0f0f6;
-  /* Inactive bars: dark tint on light surface */
-  --podcast-bar-inactive:  rgba(0, 0, 0, 0.12);
-  /* Play button glow: blue accent */
-  --podcast-play-ring:        rgba(37, 99, 235, 0.20);
-  --podcast-play-glow:        rgba(37, 99, 235, 0.30);
-  --podcast-play-glow-strong: rgba(37, 99, 235, 0.50);
-  /* Lighter shadow for light mode */
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.06),
-    0 0 0 1px rgba(0, 0, 0, 0.06);
-}
-
-:root[data-theme="light"] .podcast-player-card h3 {
-  color: var(--color-base-100); /* dark text on light card */
-}
-
-:root[data-theme="light"] .podcast-player-card p {
-  color: var(--color-base-400);
-}
+:root[data-theme="light"] .divide-white\/4 > * + * { border-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .divide-white\/6 > * + * { border-color: rgba(10, 10, 12, 0.06); }
+:root[data-theme="light"] .divide-white\/8 > * + * { border-color: rgba(10, 10, 12, 0.08); }
 
 
 /* ===================================================================
@@ -413,37 +223,161 @@ input[type="range"] {
    =================================================================== */
 
 @layer base {
-  * {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
   body {
-    background-color: var(--color-base-950);
-    color: var(--color-base-100);
-    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
-    font-size: 15px;
-    line-height: 1.6;
-    min-height: 100dvh;
-    overflow-x: hidden;
+    font-family: var(--font-sans); font-size: 14px; line-height: 1.57;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    background: var(--color-canvas); color: var(--color-base-200);
+    min-height: 100dvh; overflow-x: hidden;
   }
-
-  h1, h2, h3, h4, h5, h6 {
-    font-family: 'Sora', system-ui, sans-serif;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.2;
+  h1,h2,h3,h4,h5,h6 { font-family: inherit; font-weight: 600; letter-spacing: -0.011em; color: var(--color-base-50); }
+  code, kbd, pre, samp, .font-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .font-serif { font-optical-sizing: auto; }
+  .lucide { stroke-width: 1.75; }
+  ::selection { background: rgba(var(--accent-rgb), 0.28); color: inherit; }
+  :where(a, button, [role=tab], [role=slider], summary, select, input, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-focus); outline-offset: 2px;
   }
-
-  code, pre, .font-mono {
-    font-family: 'Space Mono', ui-monospace, monospace;
-  }
-
-  ::selection {
-    background: rgba(var(--accent-rgb), 0.28);
-    color: var(--color-base-50);
-  }
+  input[type=number] { appearance: textfield; -moz-appearance: textfield; }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  summary { list-style: none; } summary::-webkit-details-marker { display: none; }
 }
+
+/* ===================================================================
+   COMPONENTS LAYER: the shared vocabulary. Utilities beat these.
+   =================================================================== */
+
+@layer components {
+  /* ---------- Surfaces ---------- */
+  .card, .glass-panel {               /* .glass-panel is an alias: solid, no blur */
+    background: var(--color-surface); border: 1px solid var(--color-line);
+    border-radius: var(--radius-xl); box-shadow: var(--elev-1);
+  }
+  .card-interactive { transition: border-color .15s var(--ease-out), background-color .15s var(--ease-out), box-shadow .15s var(--ease-out); }
+  .card-interactive:hover { border-color: var(--color-line-strong); background: var(--color-raised); }
+  :root[data-theme="light"] .card-interactive:hover { background: #fff; box-shadow: var(--elev-2); }
+  .surface-raised {                   /* menus, popovers, toasts, modal body */
+    background: var(--color-raised); border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-xl); box-shadow: var(--elev-2);
+  }
+  .well {                             /* empty/loading containers */
+    border: 1px dashed var(--color-line-strong); border-radius: var(--radius-xl); background: transparent;
+  }
+  :root[data-theme="light"] .well { background:var(--color-surface); border-style:solid; border-color:var(--color-line); box-shadow:var(--elev-1); }
+
+  /* ---------- Buttons ---------- */
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:36px; padding:0 14px;
+    border-radius:var(--radius-lg); border:1px solid transparent; font:500 13px/1 var(--font-sans);
+    white-space:nowrap; user-select:none; cursor:pointer;
+    transition: background-color .12s var(--ease-out), border-color .12s var(--ease-out), color .12s var(--ease-out); }
+  .btn svg { width:16px; height:16px; flex-shrink:0; }
+  .btn-sm { height:28px; padding:0 10px; gap:5px; font-size:12px; border-radius:var(--radius-md); }
+  .btn-sm svg { width:14px; height:14px; }
+  .btn-lg { height:40px; padding:0 18px; font-size:14px; }
+  .btn-icon { width:32px; padding:0; }  .btn-sm.btn-icon { width:28px; }  .btn-lg.btn-icon { width:40px; }
+  .btn:disabled, .btn[aria-disabled="true"] { opacity:.4; cursor:not-allowed; }
+
+  .btn-primary { background:var(--color-accent-500); color:var(--color-on-accent);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(0,0,0,.30); }
+  .btn-primary:hover:not(:disabled) { background: color-mix(in oklab, var(--color-accent-500), white 12%); }
+  .btn-primary:active:not(:disabled) { background: var(--color-accent-600); }
+
+  .btn-secondary { background:var(--color-hover); border-color:var(--color-line-strong); color:var(--color-base-100); }
+  .btn-secondary:hover:not(:disabled) { background:var(--color-selected); }
+  :root[data-theme="light"] .btn-secondary { background:#fff; box-shadow:0 1px 2px rgba(10,10,12,.04); }
+  :root[data-theme="light"] .btn-secondary:hover:not(:disabled) { background:var(--color-base-850); }
+  .btn-secondary[aria-pressed="true"] { background:var(--color-selected); color:var(--color-base-50); }
+
+  .btn-ghost { background:transparent; color:var(--color-base-300); }
+  .btn-ghost:hover:not(:disabled) { background:var(--color-hover); color:var(--color-base-50); }
+  .btn-ghost[aria-pressed="true"] { background:var(--color-selected); color:var(--color-base-50); }
+
+  .btn-danger { background:transparent; color:var(--color-base-300); }
+  .btn-danger:hover:not(:disabled) { background:var(--color-signal-error-dim); color:var(--color-signal-error); }
+
+  /* ---------- kbd ---------- */
+  .kbd { display:inline-grid; place-items:center; min-width:18px; height:18px; padding:0 4px; border-radius:var(--radius-sm);
+    font:500 11px/1 var(--font-sans); color:var(--color-base-400); background:var(--color-hover);
+    box-shadow: inset 0 0 0 1px var(--color-line-strong); }
+  .btn-primary .kbd { color: rgba(26,18,6,.72); background: rgba(0,0,0,.08); box-shadow: inset 0 0 0 1px rgba(0,0,0,.14); }
+  :root[data-theme="light"] .btn-primary:disabled { opacity:1; background:color-mix(in oklab,var(--color-accent-500) 30%,white); color:rgba(26,18,6,.6); box-shadow:inset 0 0 0 1px rgba(184,120,20,.22); }
+  :root[data-theme="light"] .btn-primary:disabled .kbd { background:transparent; color:inherit; box-shadow:inset 0 0 0 1px rgba(26,18,6,.18); }
+
+  /* ---------- Fields ---------- */
+  .field { width:100%; height:32px; padding:0 10px; border-radius:var(--radius-lg);
+    background:var(--color-field); border:1px solid var(--color-base-700); color:var(--color-base-100);
+    font:400 13px/1.4 var(--font-sans); transition: border-color .12s, box-shadow .12s; }
+  .field::placeholder { color: var(--color-base-500); }
+  .field:hover { border-color: var(--color-base-600); }
+  .field:focus { outline:2px solid transparent; border-color: var(--color-focus);
+    box-shadow: 0 0 0 1px var(--color-focus), 0 0 0 4px rgba(var(--accent-rgb), .18); }
+  .field:disabled { opacity:.5; cursor:not-allowed; }
+  .field-lg { height:40px; padding:0 12px; font-size:14px; }
+  textarea.field { height:auto; min-height:72px; padding:8px 10px; line-height:1.55; resize:vertical; }
+  select.field { appearance:none; padding-right:30px; cursor:pointer; }
+  .field-label { display:block; margin-bottom:6px; font:500 12px/16px var(--font-sans); color:var(--color-base-400); }
+  .select-wrap { position:relative; }
+  .select-wrap > svg { position:absolute; right:10px; top:50%; translate:0 -50%; width:14px; height:14px; color:var(--color-base-500); pointer-events:none; }
+
+  /* ---------- Touch sizing (replaces per-element size-10 md:size-8) ---------- */
+  @media (pointer: coarse) {
+    .btn { min-height:40px; }  .btn-icon { min-width:40px; }  .field { height:40px; }
+    .field-lg { font-size:16px; }  .field { font-size:16px; }  /* iOS zooms focused controls under 16px */
+    .seg-item, .menu-item { min-height:40px; }
+  }
+
+  /* ---------- Badges + dots ---------- */
+  .badge { display:inline-flex; align-items:center; gap:6px; height:20px; padding:0 8px; border-radius:var(--radius-md);
+    font:500 12px/1 var(--font-sans); white-space:nowrap; color:var(--color-base-300);
+    background:var(--color-hover); box-shadow: inset 0 0 0 1px var(--color-line); }
+  .badge-success { color:var(--color-signal-success); background:var(--color-signal-success-dim); box-shadow:none; }
+  .badge-warning { color:var(--color-signal-warning); background:var(--color-signal-warning-dim); box-shadow:none; }
+  .badge-error   { color:var(--color-signal-error);   background:var(--color-signal-error-dim);   box-shadow:none; }
+  .badge-accent  { color:var(--color-accent-400); background:rgba(var(--accent-rgb),.10); box-shadow:none; }
+  .dot { width:6px; height:6px; border-radius:9999px; flex-shrink:0; background:var(--color-base-500); }
+  .dot-success { background:var(--color-signal-success); }
+  .dot-error   { width:8px; height:8px; margin:-1px; border-radius:0; background:var(--color-signal-error);  /* X glyph = shape cue vs the success circle; 6px footprint kept */
+    -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cpath d='M1 1l6 6M7 1L1 7' stroke='black' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
+            mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cpath d='M1 1l6 6M7 1L1 7' stroke='black' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat; }
+  .dot-warning { background:transparent; box-shadow: inset 0 0 0 1.5px var(--color-signal-warning); }  /* hollow = shape cue, not hue-only */
+  .dot-pending { background:transparent; box-shadow: inset 0 0 0 1px var(--color-base-500); }
+  .live-dot    { background:var(--color-indicator); animation: livePulse 1.6s var(--ease-in-out) infinite; }
+
+  /* ---------- Composer ---------- */
+  .composer { background:var(--color-surface); border:1px solid var(--color-line-strong); border-radius:var(--radius-2xl);
+    box-shadow:var(--elev-2); padding:6px; transition: border-color .15s var(--ease-out), box-shadow .15s var(--ease-out); }
+  .composer:focus-within { border-color: var(--color-focus);
+    box-shadow: 0 0 0 1px var(--color-focus), 0 0 0 4px rgba(var(--accent-rgb), .12), var(--elev-2); }
+
+  /* ---------- Menu (native <details>) ---------- */
+  .menu { position:absolute; right:0; top:calc(100% + 6px); z-index:30; width:13rem; padding:4px; }  /* combine with .surface-raised */
+  .menu-item { display:flex; width:100%; height:32px; align-items:center; gap:10px; padding:0 10px; border-radius:var(--radius-md);
+    font-size:13px; color:var(--color-base-200); text-align:left; }
+  .menu-item:hover { background:var(--color-hover); color:var(--color-base-50); }
+  .menu-item svg { width:16px; height:16px; color:var(--color-base-500); }
+
+  /* ---------- Segmented control ---------- */
+  .seg { display:inline-grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:2px; padding:3px; border-radius:var(--radius-lg);
+    background:var(--color-hover); box-shadow: inset 0 0 0 1px var(--color-line); }
+  .seg-item { height:30px; padding:0 12px; border-radius:var(--radius-md); font:500 13px/1 var(--font-sans); color:var(--color-base-400); }
+  .seg-item:hover { color:var(--color-base-100); }
+  .seg-item[aria-selected="true"], .seg-item[aria-pressed="true"] { background:var(--color-base-800); color:var(--color-base-50);
+    box-shadow: 0 1px 2px rgba(0,0,0,.35), inset 0 0 0 1px var(--color-base-500); }
+  :root[data-theme="light"] .seg-item[aria-selected="true"], :root[data-theme="light"] .seg-item[aria-pressed="true"] { background:#fff; box-shadow: var(--elev-1), inset 0 0 0 1px var(--color-base-500); }
+
+  /* ---------- Progress tracker (restyled; structure unchanged) ---------- */
+  .step-node { width:24px; height:24px; border-radius:9999px; display:grid; place-items:center; font:500 11px/1 var(--font-sans); }
+  .step-node-completed { background:var(--color-signal-success-dim); color:var(--color-signal-success); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-signal-success) 35%, transparent); }
+  .step-node-active    { background:var(--color-accent-500); color:var(--color-on-accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), .14); }
+  .step-node-pending   { background:var(--color-hover); color:var(--color-base-500); box-shadow: inset 0 0 0 1px var(--color-line-strong); }
+  .step-node-error     { background:var(--color-signal-error-dim); color:var(--color-signal-error); }
+  .step-connector      { height:1px; background:var(--color-line-strong); }
+  .step-connector-fill { background:var(--color-signal-success); }
+}
+
+/* Defined once, outside the layers. */
+@keyframes livePulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
 
 /* ===================================================================
    UTILITIES
@@ -461,180 +395,27 @@ input[type="range"] {
     z-index: 0;
   }
 
-  /* --- Ambient background gradient with floating organic aurora mesh --- */
+  /* --- Ambient background: one static, faint top wash --- */
   .ambient-bg {
     position: relative;
     overflow-x: hidden;
   }
-  .ambient-bg::before {
-    content: '';
-    position: fixed;
-    width: 80vw;
-    height: 80vh;
-    top: -20vh;
-    left: -20vw;
-    background: radial-gradient(circle at center, rgba(var(--accent-rgb), 0.045) 0%, transparent 70%);
-    pointer-events: none;
-    z-index: 0;
-    animation: aurora-float-1 25s ease-in-out infinite alternate;
-  }
   .ambient-bg::after {
     content: '';
     position: fixed;
-    width: 80vw;
-    height: 80vh;
-    bottom: -20vh;
-    right: -20vw;
-    background: radial-gradient(circle at center, rgba(96, 165, 250, 0.035) 0%, transparent 70%);
+    inset: 0;
+    background: radial-gradient(1200px 520px at 50% -12%, rgba(var(--accent-rgb), 0.05), transparent 60%);
     pointer-events: none;
-    z-index: 0;
-    animation: aurora-float-2 20s ease-in-out infinite alternate;
-  }
-
-  @keyframes aurora-float-1 {
-    0% { transform: translate(0, 0) scale(1); opacity: 0.8; }
-    50% { transform: translate(10vw, 8vh) scale(1.15); opacity: 1; }
-    100% { transform: translate(-5vw, 15vh) scale(0.95); opacity: 0.8; }
-  }
-
-  @keyframes aurora-float-2 {
-    0% { transform: translate(0, 0) scale(1); opacity: 0.8; }
-    50% { transform: translate(-8vw, -12vh) scale(0.95); opacity: 1; }
-    100% { transform: translate(6vw, -4vh) scale(1.1); opacity: 0.8; }
-  }
-
-  /* --- Glass panel: refined frosted glass --- */
-  .glass-panel {
-    background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.03) 0%,
-      rgba(255, 255, 255, 0.01) 100%
-    );
-    backdrop-filter: blur(24px) saturate(1.3);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    box-shadow: 
-      0 1px 2px rgba(0, 0, 0, 0.4),
-      0 12px 40px rgba(0, 0, 0, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.02);
-    transition: border-color 0.3s ease, box-shadow 0.3s ease;
-  }
-  .glass-panel:focus-within {
-    border-color: rgba(var(--accent-rgb), 0.25);
-    box-shadow: 
-      0 1px 2px rgba(0, 0, 0, 0.4),
-      0 12px 40px rgba(0, 0, 0, 0.3),
-      0 0 15px rgba(var(--accent-rgb), 0.06),
-      inset 0 1px 0 rgba(255, 255, 255, 0.02);
-  }
-
-  /* --- Glass pill (lighter variant) --- */
-  .glass-pill {
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  /* --- CTA button: warm amber gradient --- */
-  .btn-primary {
-    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-    color: #0a0a0c;
-    font-weight: 600;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.25);
-  }
-  .btn-primary:hover {
-    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.4);
-    transform: translateY(-1px);
-  }
-  .btn-primary:active {
-    transform: translateY(0) scale(0.98);
-  }
-
-  /* --- Kinetic pill (backward compat, now amber) --- */
-  .kinetic-pill {
-    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-    color: #0a0a0c;
-    font-weight: 600;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.25);
-  }
-  .kinetic-pill:hover {
-    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.4);
-    transform: translateY(-1px);
-  }
-  .kinetic-pill:active {
-    transform: translateY(0) scale(0.98);
-  }
-  .kinetic-pill:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-  }
-
-  /* --- Glow ring effect --- */
-  .ambient-glow {
-    box-shadow: 
-      0 8px 32px rgba(0, 0, 0, 0.3),
-      0 0 0 1px rgba(255, 255, 255, 0.04),
-      0 0 40px rgba(var(--accent-rgb), 0.05);
-  }
-
-  /* --- High contrast card (for blog reader) --- */
-  .high-contrast-card {
-    background-color: #fafafa;
-    color: #1a1a2e;
-  }
-
-  /* --- Status dot pulse --- */
-  .status-pulse {
-    animation: statusPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-  @keyframes statusPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-
-  /* --- Shimmer loading bar --- */
-  .progress-bar-animated {
-    background: linear-gradient(90deg, var(--color-accent-500) 0%, var(--color-accent-300) 50%, var(--color-accent-500) 100%);
-    background-size: 200% 100%;
-    animation: shimmer 2s infinite linear;
-  }
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+    z-index: -1; /* not 0: a z-index 0 ::after comes last in tree order and would paint over opaque cards. Needs body-only background (no bg on html/#root). */
   }
 
   /* --- Fade-in animation --- */
   .fade-in {
-    animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    animation: fadeIn 160ms var(--ease-out) forwards;
   }
   @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* --- Stagger children --- */
-  .stagger > * {
-    animation: fadeIn 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
-  }
-  .stagger > *:nth-child(1) { animation-delay: 0ms; }
-  .stagger > *:nth-child(2) { animation-delay: 50ms; }
-  .stagger > *:nth-child(3) { animation-delay: 100ms; }
-  .stagger > *:nth-child(4) { animation-delay: 150ms; }
-  .stagger > *:nth-child(5) { animation-delay: 200ms; }
-  .stagger > *:nth-child(6) { animation-delay: 250ms; }
-  .stagger > *:nth-child(7) { animation-delay: 300ms; }
-  .stagger > *:nth-child(8) { animation-delay: 350ms; }
-
-  /* --- Slide in from left (sidebar items) --- */
-  .slide-in-left {
-    animation: slideInLeft 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  }
-  @keyframes slideInLeft {
-    from { opacity: 0; transform: translateX(-12px); }
-    to { opacity: 1; transform: translateX(0); }
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   /* --- Custom scrollbar --- */
@@ -653,121 +434,45 @@ input[type="range"] {
     background: rgba(255, 255, 255, 0.15);
   }
 
-  /* --- Audio player override --- */
+  /* --- Audio player --- */
   audio {
     border-radius: 8px;
     width: 100%;
-    filter: sepia(0.1) hue-rotate(15deg);
   }
 
-  /* ── Podcast Player — theme-adaptive CSS vars ─────────────────────────────
-     Dark mode defaults (amber accent).
-     Light mode overrides are below in the :root[data-theme="light"] block.
-  ─────────────────────────────────────────────────────────────────────────── */
-  .podcast-player-card {
-    /* Dark: deep obsidian surface */
-    --podcast-card-bg-start: #111114;
-    --podcast-card-bg-end:   #0d0d10;
-    /* Inactive waveform bars: faint white tint on dark bg */
-    --podcast-bar-inactive:  rgba(255, 255, 255, 0.13);
-    /* Play button glow helpers — derived from accent */
-    --podcast-play-ring:        rgba(var(--accent-rgb), 0.22);
-    --podcast-play-glow:        rgba(var(--accent-rgb), 0.38);
-    --podcast-play-glow-strong: rgba(var(--accent-rgb), 0.60);
+  /* --- Article prose. Doubled selector beats the plugin's .prose / .prose-lg. --- */
+  .prose.prose-editorial {
+    --tw-prose-body: var(--color-base-200);       --tw-prose-headings: var(--color-base-50);
+    --tw-prose-lead: var(--color-base-300);       --tw-prose-links: var(--color-accent-400);
+    --tw-prose-bold: var(--color-base-50);        --tw-prose-counters: var(--color-base-500);
+    --tw-prose-bullets: var(--color-base-600);    --tw-prose-hr: var(--color-line-strong);
+    --tw-prose-quotes: var(--color-base-200);     --tw-prose-quote-borders: var(--color-indicator);
+    --tw-prose-captions: var(--color-base-500);   --tw-prose-code: var(--color-base-100);
+    --tw-prose-pre-code: var(--color-base-200);   --tw-prose-pre-bg: var(--color-field);
+    --tw-prose-th-borders: var(--color-line-strong); --tw-prose-td-borders: var(--color-line);
+    font-family: var(--font-serif); font-optical-sizing: auto;
+    font-size: 19px; line-height: 1.7; max-width: 66ch; margin-inline: auto;
+  }
+  .prose.prose-editorial h1 { font-size: 2.15em; line-height: 1.12; font-weight: 500; letter-spacing: -0.02em; margin: 0 0 .6em; }
+  .prose.prose-editorial h2 { font-size: 1.45em; line-height: 1.25; font-weight: 500; letter-spacing: -0.015em; margin-top: 2em; }
+  .prose.prose-editorial h3 { font-family: var(--font-sans); font-size: .95em; font-weight: 600; letter-spacing: -0.006em; margin-top: 1.8em; }
+  .prose.prose-editorial h1 + p { font-size: 1.12em; color: var(--color-base-100); }
+  .prose.prose-editorial a { text-decoration-color: rgba(var(--accent-rgb), .45); text-underline-offset: 4px; text-decoration-thickness: 1px; }
+  .prose.prose-editorial a:hover { color: var(--color-accent-300); text-decoration-color: currentColor; }
+  .prose.prose-editorial blockquote { font-style: italic; border-left-width: 2px; padding-left: 1.25em; }
+  .prose.prose-editorial :not(pre) > code { font-size: .82em; background: var(--color-hover); padding: .15em .4em; border-radius: var(--radius-sm); }
+  .prose.prose-editorial code::before, .prose.prose-editorial code::after { content: none; }
+  .prose.prose-editorial img { border-radius: var(--radius-xl); box-shadow: 0 0 0 1px var(--color-line); }
+  .prose.prose-editorial table { font-family: var(--font-sans); font-size: 14px; margin: 0; }
+  .prose.prose-editorial th { font-size: 12px; font-weight: 600; color: var(--color-base-300); background: var(--color-hover); padding: 8px 12px; }
+  .prose.prose-editorial td { padding: 8px 12px; font-variant-numeric: tabular-nums; }
+  @media (max-width: 640px) { .prose.prose-editorial { font-size: 17px; } .prose.prose-editorial h1 { font-size: 1.75em; } }
 
-    background: linear-gradient(
-      160deg,
-      var(--podcast-card-bg-start) 0%,
-      var(--podcast-card-bg-end)   100%
-    );
-  }
-
-  /* Play button: matches accent in both themes */
-  .podcast-play-btn {
-    background: linear-gradient(
-      135deg,
-      var(--color-accent-500) 0%,
-      var(--color-accent-600) 100%
-    );
-  }
-  .podcast-play-btn:hover {
-    filter: brightness(1.12);
-  }
-
-  /* --- Prose overrides for blog content --- */
-  .prose h1, .prose h2, .prose h3 {
-    font-family: 'Sora', system-ui, sans-serif;
-    letter-spacing: -0.02em;
-  }
-  .prose a {
-    color: var(--color-accent-500);
-    text-decoration-color: rgba(var(--accent-rgb), 0.3);
-  }
-  .prose a:hover {
-    color: var(--color-accent-400);
-    text-decoration-color: var(--color-accent-400);
-  }
-
-  /* --- Focus ring --- */
-  .focus-ring:focus-visible {
-    outline: 2px solid var(--color-accent-500);
-    outline-offset: 2px;
-  }
-
-  /* --- Gradient text utility --- */
-  .text-gradient-amber {
-    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .text-gradient-cool {
-    background: linear-gradient(135deg, #60a5fa, #818cf8);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  /* --- Backward-compat aliases: map "aurora" classes to the amber palette
-     so the refactored components keep rendering correctly under the
-     original warm-amber theme. --- */
-  .aurora-chip {
-    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
-    color: #0a0a0c;
-    box-shadow:
-      0 2px 12px rgba(var(--accent-rgb), 0.30),
-      inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  }
-
-  .aurora-bubble {
-    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-    color: #0a0a0c;
-    box-shadow:
-      0 6px 24px rgba(var(--accent-rgb), 0.18),
-      0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-  }
-
-  .text-gradient-aurora {
-    background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .neural-pulse {
-    animation: statusPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  /* ===================================================================
-     PREMIUM ANIMATIONS — UI Upgrade
-     =================================================================== */
-
-  /* --- Animated Score Ring (conic-gradient fill) --- */
+  /* --- Animated score ring (conic-gradient fill) --- */
   .score-ring {
     --score-pct: 0;
-    --ring-color: var(--color-accent-500);
-    --ring-track: rgba(255, 255, 255, 0.06);
+    --ring-color: var(--color-indicator);
+    --ring-track: var(--color-line-strong);
     width: 120px;
     height: 120px;
     border-radius: 50%;
@@ -779,13 +484,13 @@ input[type="range"] {
     align-items: center;
     justify-content: center;
     position: relative;
-    animation: scoreRingFill 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation: scoreRingFill 700ms var(--ease-out) forwards;
   }
   .score-ring-inner {
     width: calc(100% - 10px);
     height: calc(100% - 10px);
     border-radius: 50%;
-    background: var(--color-base-950);
+    background: var(--color-surface);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -800,48 +505,13 @@ input[type="range"] {
     inherits: false;
   }
 
-  /* --- Orbital Loader (multi-ring) --- */
-  .orbital-loader {
-    position: relative;
-    width: 80px;
-    height: 80px;
-  }
-  .orbital-ring {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 2px solid transparent;
-  }
-  .orbital-ring-1 {
-    border-top-color: var(--color-accent-500);
-    border-right-color: var(--color-accent-500);
-    animation: orbitalSpin 1.6s linear infinite;
-    filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.4));
-  }
-  .orbital-ring-2 {
-    inset: 6px;
-    border-bottom-color: var(--color-accent-300);
-    border-left-color: var(--color-accent-300);
-    animation: orbitalSpin 2.4s linear infinite reverse;
-    filter: drop-shadow(0 0 4px rgba(252, 211, 77, 0.3));
-  }
-  .orbital-ring-3 {
-    inset: 12px;
-    border-top-color: var(--color-accent-600);
-    animation: orbitalSpin 3.2s linear infinite;
-    opacity: 0.6;
-  }
-  @keyframes orbitalSpin {
-    to { transform: rotate(360deg); }
-  }
-
-  /* --- Premium Skeleton Shimmer --- */
+  /* --- Skeleton shimmer --- */
   .skeleton-shimmer {
     background: linear-gradient(
       90deg,
-      rgba(255, 255, 255, 0.03) 25%,
-      rgba(255, 255, 255, 0.08) 50%,
-      rgba(255, 255, 255, 0.03) 75%
+      var(--color-hover) 25%,
+      var(--color-selected) 50%,
+      var(--color-hover) 75%
     );
     background-size: 400% 100%;
     animation: skeletonSweep 1.8s ease-in-out infinite;
@@ -852,192 +522,14 @@ input[type="range"] {
     100% { background-position: -200% 0; }
   }
 
-  /* --- Sidebar Hover Glow --- */
-  .sidebar-glow {
-    position: relative;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .sidebar-glow::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    opacity: 0;
-    background: radial-gradient(
-      ellipse at 20% 50%,
-      var(--color-accent-glow) 0%,
-      transparent 70%
-    );
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-  }
-  .sidebar-glow:hover::before {
-    opacity: 1;
-  }
-
-  /* --- Step Tracker --- */
-  .step-track {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 0;
-  }
-  .step-node {
-    position: relative;
-    z-index: 1;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .step-node-completed {
-    background: var(--color-signal-success);
-    color: #0a0a0c;
-    box-shadow: 0 0 12px rgba(52, 211, 153, 0.4);
-  }
-  .step-node-active {
-    background: var(--color-accent-500);
-    color: #0a0a0c;
-    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.5);
-    animation: stepPulse 2s ease-in-out infinite;
-  }
-  .step-node-pending {
-    background: var(--color-base-700);
-    color: var(--color-base-400);
-    border: 1px solid var(--color-base-600);
-  }
-  .step-node-error {
-    background: var(--color-signal-error);
-    color: #0a0a0c;
-    box-shadow: 0 0 12px rgba(251, 113, 133, 0.5);
-  }
-  @keyframes stepPulse {
-    0%, 100% { box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.5); }
-    50% { box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.8), 0 0 40px rgba(var(--accent-rgb), 0.2); }
-  }
-  .step-connector {
-    flex: 1;
-    height: 2px;
-    background: var(--color-base-700);
-    position: relative;
-    overflow: hidden;
-    min-width: 20px;
-  }
-  .step-connector-fill {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, var(--color-signal-success), var(--color-accent-500));
-    transform-origin: left;
-    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  /* --- Floating Hero Particles --- */
-  .hero-particle {
-    position: absolute;
-    border-radius: 50%;
-    pointer-events: none;
-    animation: heroFloat linear infinite;
-  }
-  @keyframes heroFloat {
-    0% { transform: translateY(0) scale(1); opacity: 0; }
-    10% { opacity: 1; }
-    90% { opacity: 1; }
-    100% { transform: translateY(-100px) scale(0.5); opacity: 0; }
-  }
-
-  /* --- Tab Content Transition (CSS fallback) --- */
+  /* --- Tab content transition (CSS fallback) --- */
   .tab-enter {
-    animation: tabSlideIn 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  }
-  @keyframes tabSlideIn {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* --- Gradient text shimmer (hero headings) --- */
-  .text-shimmer {
-    /* The five stops used to run accent-300 -> 500 -> 200 -> 500 -> 300: all
-       mid-to-light ambers, so the sweep moved but there was almost nothing to
-       see. Widened to a real dark -> white-hot -> dark ramp, which turns the
-       same animation into a visible glint. Darkest stop #d97706 is 5.67:1 on
-       base-950 - this utility is only safe on large bold text (3:1), which is
-       its one caller, the hero h3. */
-    background: linear-gradient(
-      90deg,
-      var(--color-accent-600) 0%,
-      var(--color-accent-400) 30%,
-      #fffbeb 50%,
-      var(--color-accent-400) 70%,
-      var(--color-accent-600) 100%
-    );
-    background-size: 200% auto;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    animation: textShimmer 5s ease-in-out infinite;
-  }
-  /* The gradient is symmetric and background-size is 200%, so 0% and 200%
-     paint identically - the loop restarts with no jump. Holding at both ends
-     makes it read as a glint that passes and rests, rather than a permanent
-     crawl. The old keyframe had only a `to`, leaving `from` as whatever the
-     underlying value happened to be. */
-  @keyframes textShimmer {
-    0%, 20%   { background-position: 0% center; }
-    80%, 100% { background-position: 200% center; }
-  }
-
-  /* --- Tilt hover card --- */
-  .hover-lift {
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .hover-lift:hover {
-    transform: translateY(-4px);
-    box-shadow:
-      0 12px 40px rgba(0, 0, 0, 0.25),
-      0 0 0 1px rgba(255, 255, 255, 0.06),
-      0 0 30px var(--color-accent-glow);
-  }
-
-  /* --- Resume button glow pulse --- */
-  .resume-btn {
-    position: relative;
-    overflow: hidden;
-  }
-  .resume-btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 255, 255, 0.15) 50%,
-      transparent 100%
-    );
-    transform: translateX(-100%);
-    transition: transform 0.6s ease;
-  }
-  .resume-btn:hover::before {
-    transform: translateX(100%);
-  }
-
-  /* --- Failed job sidebar pulse --- */
-  @keyframes failPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
-  }
-  .fail-pulse {
-    animation: failPulse 2.5s ease-in-out infinite;
+    animation: fadeIn 160ms var(--ease-out);
   }
 }
 
 /* ===================================================================
-   ENHANCED PRINT & PDF EXPORT STYLESHEET
-   Formats generated articles for high-academic publication PDF export.
+   PRINT & PDF EXPORT
    =================================================================== */
 
 @media print {
@@ -1058,7 +550,7 @@ input[type="range"] {
   body, html {
     background: #ffffff !important;
     color: #1e293b !important;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+    font-family: var(--font-serif) !important;
     margin: 0 !important;
     padding: 0 !important;
     font-size: 11pt !important;
@@ -1073,11 +565,13 @@ input[type="range"] {
     box-shadow: none !important;
     background: #ffffff !important;
     border: none !important;
+    font-family: var(--font-serif) !important;
   }
 
   h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sans) !important;
     color: #0f172a !important;
-    font-weight: 800 !important;
+    font-weight: 600 !important;
     page-break-after: avoid !important;
     margin-top: 1.5em !important;
     margin-bottom: 0.5em !important;
@@ -1104,7 +598,7 @@ input[type="range"] {
   }
 
   blockquote {
-    border-left: 4px solid #f59e0b !important;
+    border-left: 4px solid #b87814 !important;
     background: #f8fafc !important;
     padding: 0.75rem 1.25rem !important;
     color: #475569 !important;
@@ -1131,15 +625,10 @@ input[type="range"] {
 
 /* ===================================================================
    REDUCED MOTION
-   The app runs several always-on animations — the two aurora washes
-   behind the dashboard, statusPulse on running jobs, shimmer and
-   skeletonSweep on loading rows, orbitalSpin, textShimmer. For anyone
-   who gets motion sickness or migraines from movement, an ambient
-   25s loop is not decoration, it is a reason to close the tab.
    Nothing in the app listens for animationend/transitionend, so
    collapsing the durations is safe rather than leaving state stuck.
-   Framer Motion is handled separately by <MotionConfig reducedMotion="user">
-   in main.tsx — this block only covers CSS.
+   Framer Motion is handled separately by <MotionConfig reducedMotion="user">.
+   Spinners and the live dot become a slow opacity pulse instead.
    =================================================================== */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -1150,4 +639,5 @@ input[type="range"] {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  .animate-spin, .live-dot, .skeleton-shimmer { animation: livePulse 2s ease-in-out infinite !important; transform: none !important; }
 }
