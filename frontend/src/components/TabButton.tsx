@@ -17,20 +17,26 @@ export function TabButton<T extends string>({
   const active = activeTab === id;
   return (
     <button
+      type="button"
+      role="tab"
+      id={`tab-${id}`}
+      aria-selected={active}
+      aria-controls={`panel-${id}`}
+      tabIndex={active ? 0 : -1}
       onClick={() => setActiveTab(id)}
-      className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 whitespace-nowrap relative
-      ${
-        active
-          ? 'bg-accent-500/10 text-accent-400 border border-accent-500/20 shadow-sm'
-          : 'text-base-400 hover:text-base-200 hover:bg-white/3 border border-transparent'
+      className={`relative inline-flex h-10 items-center gap-2 px-3 text-ui font-medium whitespace-nowrap rounded-t-lg transition-colors focus-visible:outline-offset-[-2px] ${
+        active ? 'text-base-50' : 'text-base-400 hover:text-base-100'
       }`}
     >
-      {icon} {label}
+      <span aria-hidden="true" className={`inline-flex [&_svg]:size-4 ${active ? 'text-indicator' : 'text-base-500'}`}>
+        {icon}
+      </span>
+      {label}
       {active && (
-        <motion.div
+        <motion.span
           layoutId="tab-active-underline"
-          className="absolute -bottom-[9px] left-2 right-2 h-[2px] bg-accent-500 rounded-full"
-          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+          className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-indicator"
+          transition={{ type: 'spring', stiffness: 500, damping: 40 }}
         />
       )}
     </button>

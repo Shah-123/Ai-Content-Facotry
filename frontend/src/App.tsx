@@ -6,7 +6,7 @@ import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
 import { ChatView } from './components/ChatView';
 import { Toasts, toast } from './components/Toast';
-import { Cpu, X } from 'lucide-react';
+import { ChevronDown, Cpu, X } from 'lucide-react';
 import { motion } from 'motion/react';
 
 /** Backend statuses that mean the job record changed and should be re-fetched. */
@@ -120,13 +120,23 @@ export default function App() {
     };
   }, []);
 
-  // Escape closes the settings dialog.
+  // Native <dialog> modal: showModal() traps focus and close() returns it to
+  // the opener. Escape closes it natively and onClose syncs the state back.
+  const settingsDialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (!isSettingsOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsSettingsOpen(false); };
+    const d = settingsDialogRef.current;
+    if (!d) return;
+    if (isSettingsOpen && !d.open) d.showModal();
+    else if (!isSettingsOpen && d.open) d.close();
+  }, [isSettingsOpen]);
+
+  // Escape closes the mobile drawer (the settings dialog handles its own).
+  useEffect(() => {
+    if (!isMobileSidebarOpen || isSettingsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsMobileSidebarOpen(false); };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isSettingsOpen]);
+  }, [isMobileSidebarOpen, isSettingsOpen]);
 
   const loadJob = async (jobId: string) => {
     try {
@@ -261,7 +271,7 @@ export default function App() {
     <div className="min-h-dvh flex overflow-hidden antialiased relative noise-bg ambient-bg">
       <Sidebar
         view={view}
-        navTo={navTo}
+        navTo={(v) => { setIsMobileSidebarOpen(false); navTo(v); }}
         jobs={jobs}
         currentJob={currentJob}
         loadJob={(id) => { setIsMobileSidebarOpen(false); loadJob(id); }}
@@ -274,7 +284,7 @@ export default function App() {
         onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
         onRefreshJobs={fetchJobsList}
         selectedModel={selectedModel}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => { setIsMobileSidebarOpen(false); setIsSettingsOpen(true); }}
         tone={tone}
         setTone={setTone}
         sections={sections}
@@ -284,10 +294,11 @@ export default function App() {
         keywordsInput={keywordsInput}
         setKeywordsInput={setKeywordsInput}
       />
-      <div className={`flex-1 flex flex-col h-dvh relative transition-[margin] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isSidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'}`}>
+      <div className={`flex-1 min-w-0 flex flex-col h-dvh relative transition-[margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isSidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-[260px]'}`}>
         <TopNav
           view={view}
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
+          isMobileSidebarOpen={isMobileSidebarOpen}
           notifications={notifications}
           unread={unreadCount}
           onOpenNotifications={() => setUnreadCount(0)}
@@ -328,52 +339,58 @@ export default function App() {
         )}
       </div>
 
-      {isSettingsOpen && (
-        <div
-          className="fixed inset-0 bg-base-950/80 backdrop-blur-md flex items-center justify-center z-[100] flex-col p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="settings-dialog-title"
-          onClick={(e) => { if (e.target === e.currentTarget) setIsSettingsOpen(false); }}
-        >
+      <dialog
+        ref={settingsDialogRef}
+        aria-labelledby="settings-dialog-title"
+        onClose={() => setIsSettingsOpen(false)}
+        onClick={(e) => { if (e.target === e.currentTarget) setIsSettingsOpen(false); }}
+        className="m-0 h-dvh max-h-none w-screen max-w-none overflow-y-auto bg-transparent p-4 text-inherit open:grid place-items-center backdrop:bg-black/60 backdrop:backdrop-blur-sm [:root[data-theme=light]_&]:backdrop:bg-[rgba(10,10,12,0.35)]"
+      >
+        {isSettingsOpen && (
           <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="glass-panel w-full max-w-md rounded-2xl p-6 relative overflow-hidden border border-white/10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            className="surface-raised relative w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl p-6 shadow-[var(--elev-3)]"
           >
             {/* Header */}
-            <div className="flex justify-between items-center mb-5 pb-3 border-b border-white/10">
+            <div className="flex items-center justify-between pb-4 mb-5 border-b border-line">
               <div className="flex items-center gap-2">
-                <Cpu className="w-[18px] h-[18px] text-accent-400" aria-hidden="true" />
-                <h3 id="settings-dialog-title" className="text-md font-bold text-base-100">Model Selector</h3>
+                <Cpu className="size-4 text-base-400" aria-hidden="true" />
+                <h3 id="settings-dialog-title" className="text-heading">Model selector</h3>
               </div>
               <button
                 onClick={() => setIsSettingsOpen(false)}
-                aria-label="Close model selector"
-                className="p-1 rounded-lg text-base-500 hover:text-base-100 hover:bg-white/5 transition-colors"
+                aria-label="Close"
+                title="Close"
+                className="btn btn-ghost btn-icon btn-sm"
               >
-                <X className="w-4 h-4" />
+                <X aria-hidden="true" />
               </button>
             </div>
 
             {/* Model Selection */}
             <div className="space-y-4">
               <div>
-                <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5 block">Default Foundation LLM</label>
-                <select
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  className="w-full bg-base-900 border border-white/8 rounded-xl px-3 py-2.5 text-sm text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors"
-                >
-                  {/* OpenAI only: the agent layer builds a ChatOpenAI client
-                      (Graph/agents/utils.py → get_llm), so a Claude or Gemini
-                      model id here would be sent to the OpenAI API and fail. */}
-                  <optgroup label="OpenAI Models" className="bg-base-900 text-base-100">
-                    <option value="gpt-5-mini">GPT-5 Mini (Default - Fast & High Quality)</option>
-                    <option value="gpt-4o-mini">GPT-4o-mini (Fast & Cheap)</option>
-                    <option value="gpt-4o">GPT-4o (Premium Quality)</option>
-                  </optgroup>
-                </select>
+                <label htmlFor="settings-model" className="field-label">Default model</label>
+                <div className="select-wrap">
+                  <select
+                    id="settings-model"
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="field"
+                  >
+                    {/* OpenAI only: the agent layer builds a ChatOpenAI client
+                        (Graph/agents/utils.py → get_llm), so a Claude or Gemini
+                        model id here would be sent to the OpenAI API and fail. */}
+                    <optgroup label="OpenAI models">
+                      <option value="gpt-5-mini">GPT-5 Mini (Default - Fast & High Quality)</option>
+                      <option value="gpt-4o-mini">GPT-4o-mini (Fast & Cheap)</option>
+                      <option value="gpt-4o">GPT-4o (Premium Quality)</option>
+                    </optgroup>
+                  </select>
+                  <ChevronDown aria-hidden="true" />
+                </div>
                 <p className="text-xs text-base-500 mt-1.5 leading-relaxed">
                   Sets the model used by the parallel section writers. Planning, QA, and
                   evaluation use the server-configured default (<code className="text-base-400">LLM_QUALITY_MODEL</code>).
@@ -381,75 +398,91 @@ export default function App() {
               </div>
 
               {/* OpenAI Image Generation Settings */}
-              <div className="pt-3 border-t border-white/10 space-y-3">
+              <div className="pt-4 border-t border-line space-y-4">
                 <div>
-                  <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1.5 block">OpenAI Image Model</label>
-                  <select
-                    value={imageModel}
-                    onChange={(e) => setImageModel(e.target.value)}
-                    className="w-full bg-base-900 border border-white/8 rounded-xl px-3 py-2 text-sm text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors"
-                  >
-                    <option value="gpt-image-1-mini">GPT Image 1 Mini (Fast &amp; Affordable)</option>
-                    <option value="dall-e-3">DALL-E 3 (Premium Quality - HD / Vivid)</option>
-                    <option value="dall-e-2">DALL-E 2 (Standard Quality)</option>
-                  </select>
+                  <label htmlFor="settings-image-model" className="field-label">Image model</label>
+                  <div className="select-wrap">
+                    <select
+                      id="settings-image-model"
+                      value={imageModel}
+                      onChange={(e) => setImageModel(e.target.value)}
+                      className="field"
+                    >
+                      <option value="gpt-image-1-mini">GPT Image 1 Mini (Fast &amp; Affordable)</option>
+                      <option value="dall-e-3">DALL-E 3 (Premium Quality - HD / Vivid)</option>
+                      <option value="dall-e-2">DALL-E 2 (Standard Quality)</option>
+                    </select>
+                    <ChevronDown aria-hidden="true" />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Size</label>
-                    <select
-                      value={imageSize}
-                      onChange={(e) => setImageSize(e.target.value)}
-                      className="w-full bg-base-900 border border-white/8 rounded-xl px-2 py-1.5 text-xs text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors"
-                    >
-                      <option value="1024x1024">Square (1:1)</option>
-                      <option value="1792x1024">Landscape (16:9)</option>
-                      <option value="1024x1792">Portrait (9:16)</option>
-                    </select>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="col-span-2 sm:col-span-1">
+                    <label htmlFor="settings-image-size" className="field-label">Size</label>
+                    <div className="select-wrap">
+                      <select
+                        id="settings-image-size"
+                        value={imageSize}
+                        onChange={(e) => setImageSize(e.target.value)}
+                        className="field"
+                      >
+                        <option value="1024x1024">Square (1:1)</option>
+                        <option value="1792x1024">Landscape (16:9)</option>
+                        <option value="1024x1792">Portrait (9:16)</option>
+                      </select>
+                      <ChevronDown aria-hidden="true" />
+                    </div>
                   </div>
 
                   <div>
-                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Quality</label>
-                    <select
-                      value={imageQuality}
-                      disabled={imageModel === 'dall-e-2'}
-                      onChange={(e) => setImageQuality(e.target.value)}
-                      className="w-full bg-base-900 border border-white/8 rounded-xl px-2 py-1.5 text-xs text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors disabled:opacity-40"
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="hd">HD</option>
-                    </select>
+                    <label htmlFor="settings-image-quality" className="field-label">Quality</label>
+                    <div className="select-wrap">
+                      <select
+                        id="settings-image-quality"
+                        value={imageQuality}
+                        disabled={imageModel === 'dall-e-2'}
+                        onChange={(e) => setImageQuality(e.target.value)}
+                        className="field"
+                      >
+                        <option value="standard">Standard</option>
+                        <option value="hd">HD</option>
+                      </select>
+                      <ChevronDown aria-hidden="true" />
+                    </div>
                   </div>
 
                   <div>
-                    <label className="text-label font-bold text-base-400 uppercase tracking-wider mb-1 block">Style</label>
-                    <select
-                      value={imageStyle}
-                      disabled={imageModel !== 'dall-e-3'}
-                      onChange={(e) => setImageStyle(e.target.value)}
-                      className="w-full bg-base-900 border border-white/8 rounded-xl px-2 py-1.5 text-xs text-base-100 focus:outline-none focus:border-accent-500/40 transition-colors disabled:opacity-40"
-                    >
-                      <option value="vivid">Vivid</option>
-                      <option value="natural">Natural</option>
-                    </select>
+                    <label htmlFor="settings-image-style" className="field-label">Style</label>
+                    <div className="select-wrap">
+                      <select
+                        id="settings-image-style"
+                        value={imageStyle}
+                        disabled={imageModel !== 'dall-e-3'}
+                        onChange={(e) => setImageStyle(e.target.value)}
+                        className="field"
+                      >
+                        <option value="vivid">Vivid</option>
+                        <option value="natural">Natural</option>
+                      </select>
+                      <ChevronDown aria-hidden="true" />
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Footer */}
-            <div className="mt-6 pt-4 border-t border-white/10 flex justify-end">
+            <div className="mt-6 pt-4 border-t border-line flex justify-end">
               <button
                 onClick={() => setIsSettingsOpen(false)}
-                className="btn-primary px-5 py-2 rounded-xl text-sm font-semibold"
+                className="btn btn-primary"
               >
-                Save Configurations
+                Save configurations
               </button>
             </div>
           </motion.div>
-        </div>
-      )}
+        )}
+      </dialog>
 
       <Toasts />
     </div>

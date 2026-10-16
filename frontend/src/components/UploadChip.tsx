@@ -1,4 +1,4 @@
-import { FileText, X, RefreshCw, Sparkles, Globe, BookOpen } from 'lucide-react';
+import { FileText, X, Loader2, Sparkles, Globe, BookOpen } from 'lucide-react';
 import { SourceMode, UploadResult } from '../api';
 
 interface UploadChipProps {
@@ -39,30 +39,26 @@ export function UploadChip({
   const isError = status === 'error';
   const isUploading = status === 'uploading';
 
+  const activeMode = MODE_OPTIONS.find(opt => opt.id === sourceMode);
+
   return (
-    <div className="flex flex-col gap-2 px-1">
+    <div className="flex flex-col gap-2 px-2 pt-1">
       {/* File chip */}
-      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs ${
-        isError
-          ? 'border-signal-error/30 bg-signal-error-dim text-signal-error'
-          : 'border-white/10 bg-base-800/80 text-base-200'
+      <div className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ring-1 ${
+        isError ? 'bg-signal-error-dim ring-signal-error/25 text-signal-error' : 'bg-hover ring-line text-base-200'
       }`}>
-        <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${
-          isError ? 'bg-signal-error/10' : 'bg-accent-500/10'
-        }`}>
-          {isUploading
-            ? <RefreshCw className="w-3.5 h-3.5 text-accent-400 animate-spin" />
-            : <FileText className={`w-3.5 h-3.5 ${isError ? 'text-signal-error' : 'text-accent-400'}`} />}
-        </div>
+        {isUploading
+          ? <Loader2 className="size-3.5 shrink-0 animate-spin text-base-400" />
+          : <FileText className={`size-3.5 shrink-0 ${isError ? 'text-signal-error' : 'text-base-400'}`} />}
         <div className="flex-1 min-w-0">
           <div className="font-medium truncate text-base-100">{displayName}</div>
-          <div className="text-xs text-base-500 truncate">
+          <div className={`text-xs truncate ${isError ? 'text-signal-error' : 'text-base-500'}`} aria-live="polite">
             {isError && errorMessage}
             {isUploading && 'Parsing & extracting evidence...'}
             {status === 'ready' && result && (
               <>
-                {result.format?.toUpperCase()} • {_humanBytes(result.bytes)} • {result.pages} page{result.pages !== 1 ? 's' : ''} • {result.evidence_count} fact{result.evidence_count !== 1 ? 's' : ''}
-                {result.truncated && <span className="text-signal-warn ml-1.5">• truncated</span>}
+                {result.format?.toUpperCase()} · {_humanBytes(result.bytes)} · {result.pages} page{result.pages !== 1 ? 's' : ''} · {result.evidence_count} fact{result.evidence_count !== 1 ? 's' : ''}
+                {result.truncated && <span className="text-signal-warning ml-1.5">· truncated</span>}
               </>
             )}
           </div>
@@ -70,36 +66,37 @@ export function UploadChip({
         <button
           type="button"
           onClick={onClear}
-          className="p-1 rounded hover:bg-white/10 text-base-400 hover:text-base-100 shrink-0"
+          className="btn btn-ghost btn-icon btn-sm shrink-0"
           aria-label="Remove file"
+          title="Remove file"
         >
-          <X className="w-3.5 h-3.5" />
+          <X />
         </button>
       </div>
 
       {/* Source-mode toggle (only meaningful once the upload is ready) */}
       {status === 'ready' && (
-        <div className="flex flex-wrap gap-1.5">
-          {MODE_OPTIONS.map(opt => {
-            const Icon = opt.icon;
-            const active = sourceMode === opt.id;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => onSourceModeChange(opt.id)}
-                title={opt.desc}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                  active
-                    ? 'text-accent-400 bg-accent-500/10 border-accent-500/30'
-                    : 'text-base-400 hover:text-base-200 border-white/6 hover:bg-white/3'
-                }`}
-              >
-                <Icon className="w-3 h-3" />
-                {opt.label}
-              </button>
-            );
-          })}
+        <div>
+          <div className="seg max-w-full" role="group" aria-label="How to use the document">
+            {MODE_OPTIONS.map(opt => {
+              const Icon = opt.icon;
+              const active = sourceMode === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onSourceModeChange(opt.id)}
+                  title={opt.desc}
+                  aria-pressed={active}
+                  className="seg-item !h-7 !text-xs whitespace-nowrap max-sm:!px-1.5 inline-flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Icon className="hidden sm:block size-3.5" />
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          {activeMode && <p className="mt-1 text-xs text-base-500">{activeMode.desc}</p>}
         </div>
       )}
     </div>

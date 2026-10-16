@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Check, Search, ListOrdered, PenTool, ShieldCheck, Sparkles, AlertTriangle } from 'lucide-react';
+import { Check, Loader2, X } from 'lucide-react';
 import { AgentEvent } from '../api';
 
 interface ProgressTrackerProps {
   events: AgentEvent[];
   jobStatus?: string;
+  /** One-line dots variant for the sticky job bar. */
+  compact?: boolean;
+  className?: string;
 }
 
 /** Maps agent_name values to pipeline stages. */
@@ -34,11 +36,11 @@ const STAGE_MAP: Record<string, number> = {
 };
 
 const STAGES = [
-  { label: 'Research', icon: Search },
-  { label: 'Plan', icon: ListOrdered },
-  { label: 'Write', icon: PenTool },
-  { label: 'QA', icon: ShieldCheck },
-  { label: 'Polish', icon: Sparkles },
+  { label: 'Research' },
+  { label: 'Plan' },
+  { label: 'Write' },
+  { label: 'QA' },
+  { label: 'Polish' },
 ] as const;
 
 export function getStageStates(events: AgentEvent[], jobStatus?: string) {
@@ -85,90 +87,64 @@ export function getStageStates(events: AgentEvent[], jobStatus?: string) {
   });
 }
 
-export function ProgressTracker({ events, jobStatus }: ProgressTrackerProps) {
+export function ProgressTracker({ events, jobStatus, compact, className = '' }: ProgressTrackerProps) {
   const states = useMemo(() => getStageStates(events, jobStatus), [events, jobStatus]);
 
   // Render as soon as a job exists — waiting for the first event kept the rail
   // hidden through the whole topic-guard + WS-connect window.
   if (events.length === 0 && !jobStatus) return null;
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
-      className="w-full max-w-3xl mx-auto my-4"
-    >
-      <div className="glass-panel rounded-2xl p-5 border border-white/6">
-        <div className="flex items-center justify-between mb-4 px-1">
-          <span className="text-label font-bold text-base-500 uppercase tracking-[0.15em]">Pipeline Progress</span>
-          <div className="flex items-center gap-1.5">
-            {states.filter(s => s === 'completed').length > 0 && (
-              <span className="text-xs font-mono text-base-500">
-                {states.filter(s => s === 'completed').length}/{STAGES.length}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="step-track">
-          {STAGES.map((stage, idx) => {
-            const state = states[idx];
-            const Icon = stage.icon;
-            const nodeClass =
-              state === 'completed' ? 'step-node step-node-completed'
-              : state === 'active' ? 'step-node step-node-active'
-              : state === 'error' ? 'step-node step-node-error'
-              : 'step-node step-node-pending';
-
-            return (
-              <div key={stage.label} className="contents">
-                <div className="flex flex-col items-center gap-1.5">
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={state}
-                      initial={{ scale: 0.6, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.6, opacity: 0 }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                      className={nodeClass}
-                    >
-                      {state === 'completed' ? (
-                        <Check className="w-4 h-4" strokeWidth={3} />
-                      ) : state === 'error' ? (
-                        <AlertTriangle className="w-3.5 h-3.5" />
-                      ) : (
-                        <Icon className="w-3.5 h-3.5" />
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                  <span className={`text-xs font-medium transition-colors ${
-                    state === 'completed' ? 'text-signal-success'
-                    : state === 'active' ? 'text-accent-400'
-                    : state === 'error' ? 'text-signal-error'
-                    : 'text-base-500'
-                  }`}>
-                    {stage.label}
-                  </span>
-                </div>
-                {idx < STAGES.length - 1 && (
-                  <div className="step-connector self-start mt-4">
-                    <div
-                      className="step-connector-fill"
-                      style={{
-                        transform: `scaleX(${
-                          state === 'completed' ? 1
-                          : state === 'active' ? 0.5
-                          : 0
-                        })`,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+  if (compact) {
+    const done = states.filter(s => s === 'completed').length;
+    const cur = Math.max(states.lastIndexOf('active'), states.lastIndexOf('error'));
+    const label = cur >= 0 ? STAGES[cur].label : done === STAGES.length ? 'Done' : STAGES[0].label;
+    return (
+      <div className={`flex items-center gap-1 ${className}`}>
+        {states.map((state, idx) => (
+          <span key={STAGES[idx].label} className="contents" aria-hidden="true">
+            {idx > 0 && <span className="w-3 h-px bg-line-strong" />}
+            <span className={`size-2 rounded-full ${
+              state === 'completed' ? 'bg-signal-success'
+              : state === 'active' ? 'live-dot'
+              : state === 'error' ? 'bg-signal-error'
+              : 'dot-pending'
+            }`} />
+          </span>
+        ))}
+        <span className="ml-2 text-xs text-base-400">{label} · {done}/{STAGES.length}</span>
       </div>
-    </motion.div>
+    );
+  }
+
+  return (
+    <div className={`card px-4 py-3 ${className}`}>
+      <ol className="flex items-start" aria-label="Pipeline progress">
+        {STAGES.map((stage, idx) => {
+          const state = states[idx];
+          return (
+            <li key={stage.label} className="contents">
+              <div className="flex w-12 sm:w-16 shrink-0 flex-col items-center" aria-current={state === 'active' ? 'step' : undefined}>
+                <span className={`step-node step-node-${state}`}>
+                  {state === 'completed' ? <Check className="size-3" />
+                    : state === 'active' ? <Loader2 className="size-3 animate-spin" />
+                    : state === 'error' ? <X className="size-3" />
+                    : idx + 1}
+                </span>
+                <span className={`mt-1.5 text-xs ${state === 'active' ? 'text-base-50 font-medium' : 'text-base-500'}`}>
+                  {stage.label}
+                  {state !== 'active' && <span className="sr-only">, {state}</span>}
+                </span>
+              </div>
+              {idx < STAGES.length - 1 && (
+                <span
+                  aria-hidden="true"
+                  className={`step-connector flex-1 mx-2 mt-3 ${state === 'completed' ? 'step-connector-fill' : ''}`}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

@@ -1,7 +1,6 @@
-import React from 'react';
 import {
   LayoutDashboard, FileEdit, Plus, RefreshCw, Sparkles, Trash2, RotateCcw,
-  PanelLeftClose, PanelLeftOpen, Cpu, ChevronDown
+  PanelLeftClose, PanelLeftOpen, Cpu, ChevronDown, ChevronRight, X, type LucideIcon
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Job } from '../api';
@@ -46,6 +45,15 @@ export function clampInt(raw: string, lo: number, hi: number, fallback: number):
   return Math.min(hi, Math.max(lo, Math.round(n)));
 }
 
+/** Job status map (shared spec): a dot per status plus a word for screen readers. */
+const STATUS: Record<Job['status'], { dot: string; word: string }> = {
+  completed:         { dot: 'dot dot-success', word: 'Completed' },
+  awaiting_approval: { dot: 'dot dot-warning', word: 'Awaiting approval' },
+  running:           { dot: 'dot live-dot',    word: 'Running' },
+  pending:           { dot: 'dot dot-pending', word: 'Queued' },
+  failed:            { dot: 'dot dot-error',   word: 'Failed' },
+};
+
 export function Sidebar({
   view, navTo, jobs, currentJob, loadJob, startNewJob, onDeleteJob, onResumeJob,
   isMobileOpen, onCloseMobile, isCollapsed = false, onToggleCollapse, onRefreshJobs,
@@ -55,10 +63,24 @@ export function Sidebar({
   // Collapse is a desktop affordance; on mobile the drawer is either open
   // (full width) or off-screen, so ignore it there.
   const rail = isCollapsed && !isMobileOpen;
-  const navItems: { key: ViewState; icon: React.ReactNode; label: string }[] = [
-    { key: 'chat',    icon: <LayoutDashboard className="w-[18px] h-[18px]" />, label: 'Dashboard' },
-    { key: 'content', icon: <FileEdit       className="w-[18px] h-[18px]" />, label: 'Studio' },
+  const navItems: { key: ViewState; icon: LucideIcon; label: string }[] = [
+    { key: 'chat',    icon: LayoutDashboard, label: 'Dashboard' },
+    { key: 'content', icon: FileEdit,        label: 'Studio' },
   ];
+
+  // Sits in the brand row when expanded; at the bottom of the 72px rail,
+  // where the brand row has no room beside the mark.
+  const collapseToggle = onToggleCollapse && (
+    <button
+      onClick={onToggleCollapse}
+      className={`btn btn-ghost btn-icon btn-sm hidden lg:inline-flex ${rail ? 'self-center' : 'ml-auto'}`}
+      title={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-expanded={!rail}
+    >
+      {rail ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
+    </button>
+  );
 
   return (
     <>
@@ -66,242 +88,229 @@ export function Sidebar({
       {isMobileOpen && (
         <div
           onClick={onCloseMobile}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
         />
       )}
-      <aside className={`h-full fixed left-0 top-0 bg-base-950/95 backdrop-blur-2xl flex flex-col z-50 overflow-y-auto overflow-x-hidden border-r border-white/6 shadow-xl transition-[transform,width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] md:translate-x-0 ${rail ? 'w-[260px] md:w-[72px]' : 'w-[260px]'} ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-      {/* Brand Header */}
-      <div className={`flex items-center pt-7 pb-5 ${rail ? 'flex-col gap-2.5 px-3' : 'gap-2.5 px-4'}`}>
-        <div className="w-9 h-9 rounded-xl aurora-chip flex items-center justify-center shadow-sm shrink-0">
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 24, repeat: Infinity, ease: 'linear' }}
-          >
-            <Sparkles className="text-base-950 w-4 h-4" />
-          </motion.div>
+      <aside id="app-sidebar" className={`h-full fixed left-0 top-0 bg-canvas border-r border-line flex flex-col z-50 overflow-y-auto overflow-x-hidden transition-[transform,width,visibility] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] lg:translate-x-0 ${rail ? 'w-[280px] lg:w-[72px]' : 'w-[280px] lg:w-[260px]'} ${isMobileOpen ? 'translate-x-0' : '-translate-x-full max-lg:invisible lg:translate-x-0'}`}>
+      {/* Brand row: same h-14 hairline as TopNav */}
+      <div className={`h-14 shrink-0 flex items-center gap-2.5 border-b border-line ${rail ? 'justify-center px-0' : 'px-4'}`}>
+        <div className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent-500 text-on-accent">
+          <Sparkles className="size-4" aria-hidden="true" />
         </div>
         {!rail && (
-          <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-extrabold text-gradient-amber tracking-tight leading-tight truncate">AI Content Factory</h1>
-            <p className="text-label text-base-400 font-semibold tracking-wider uppercase opacity-80 whitespace-nowrap">Multi-Agent Engine</p>
+          <h1 className="min-w-0 truncate text-ui font-semibold tracking-[-0.01em] text-base-50">AI Content Factory</h1>
+        )}
+        {!rail && collapseToggle}
+        {isMobileOpen && (
+          <button onClick={onCloseMobile} className="btn btn-ghost btn-icon btn-sm ml-auto lg:hidden" aria-label="Close menu" title="Close menu">
+            <X aria-hidden="true" />
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 min-h-0 flex flex-col px-3 pt-3">
+        {rail ? (
+          <button onClick={startNewJob} className="btn btn-secondary btn-icon self-center" title="New job" aria-label="New job">
+            <Plus aria-hidden="true" />
+          </button>
+        ) : (
+          <button onClick={startNewJob} className="btn btn-secondary w-full justify-start">
+            <Plus aria-hidden="true" /> New job
+          </button>
+        )}
+
+        <nav className={`mt-3 flex flex-col gap-0.5 ${rail ? 'items-center' : ''}`}>
+          {navItems.map(item => {
+            const active = view === item.key;
+            const Icon = item.icon;
+            return (
+              <button key={item.key} onClick={() => navTo(item.key)}
+                title={rail ? item.label : undefined}
+                aria-label={item.label}
+                aria-current={active ? 'page' : undefined}
+                className={rail
+                  ? `btn btn-ghost btn-icon relative ${active ? 'bg-selected text-base-50' : ''}`
+                  : `group relative flex h-8 [@media(pointer:coarse)]:h-10 items-center gap-2.5 rounded-lg px-2.5 text-ui font-medium transition-colors ${active ? 'bg-selected text-base-50' : 'text-base-400 hover:bg-hover hover:text-base-100'}`}>
+                {active && (
+                  <motion.span
+                    layoutId="nav-active"
+                    className={`absolute top-1.5 bottom-1.5 w-0.5 rounded-full bg-indicator ${rail ? '-left-5' : '-left-3'}`}
+                    transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                  />
+                )}
+                <Icon className={`size-4 shrink-0 ${active ? 'text-indicator' : ''}`} aria-hidden="true" />
+                {!rail && <span className="whitespace-nowrap">{item.label}</span>}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Recent jobs. The list needs labels to be useful, so the rail hides
+            it rather than showing a column of unreadable stubs. */}
+        <div className={`mt-6 flex-1 min-h-0 flex flex-col ${rail ? 'hidden' : ''}`}>
+          <div className="h-6 [@media(pointer:coarse)]:h-10 px-2.5 mb-1 flex items-center justify-between">
+            <span className="text-xs font-medium text-base-500">Recent</span>
+            <button
+              onClick={onRefreshJobs}
+              className="btn btn-ghost btn-icon btn-sm -mr-1.5"
+              title="Refresh list"
+              aria-label="Refresh job list"
+            >
+              <RefreshCw aria-hidden="true" />
+            </button>
           </div>
-        )}
-        {onToggleCollapse && (
-          <button
-            onClick={onToggleCollapse}
-            className="hidden md:flex items-center justify-center p-1.5 rounded-lg text-base-500 hover:text-accent-400 hover:bg-white/5 transition-colors shrink-0"
-            title={rail ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-expanded={!rail}
-          >
-            {rail ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-          </button>
-        )}
+          <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1 py-1 flex flex-col gap-px">
+            {jobs.slice(0, 10).map(job => {
+              const active = currentJob?.id === job.id;
+              const status = STATUS[job.status];
+              return (
+                <motion.div
+                  key={job.id}
+                  className={`group relative flex h-8 [@media(pointer:coarse)]:h-10 shrink-0 items-center rounded-lg pr-1 text-ui transition-colors ${active ? 'bg-selected text-base-50' : 'text-base-300 hover:bg-hover hover:text-base-100'}`}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  <button onClick={() => loadJob(job.id)}
+                    aria-current={active ? 'true' : undefined}
+                    className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg pl-2.5 text-left">
+                    <span className={status.dot} title={status.word} aria-hidden="true" />
+                    <span className="sr-only">{status.word}, </span>
+                    <span className="flex-1 truncate">{job.topic}</span>
+                  </button>
+                  {(onDeleteJob || (onResumeJob && job.status === 'failed')) && (
+                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+                      {onResumeJob && job.status === 'failed' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onResumeJob(job.id);
+                          }}
+                          className="btn btn-ghost btn-icon btn-sm"
+                          title="Resume from checkpoint"
+                          aria-label="Resume from checkpoint"
+                        >
+                          <RotateCcw aria-hidden="true" />
+                        </button>
+                      )}
+                      {onDeleteJob && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteJob(job.id);
+                          }}
+                          className="btn btn-danger btn-icon btn-sm"
+                          title="Delete job"
+                          aria-label="Delete job"
+                        >
+                          <Trash2 aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })}
+            {jobs.length === 0 && <div className="px-2.5 py-3 text-xs text-base-500">No jobs in history</div>}
+          </div>
+        </div>
       </div>
 
-      {/* New Job CTA */}
-      <div className={`mb-5 ${rail ? 'px-3' : 'px-5'}`}>
-        <motion.button
-          onClick={startNewJob}
-          className={`btn-primary w-full rounded-xl flex items-center justify-center gap-2 text-xs font-bold tracking-wide shadow-md hover:shadow-lg transition-all ${rail ? 'py-2.5 px-0' : 'py-2.5 px-4'} whitespace-nowrap`}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          title={rail ? 'New Generation Job' : undefined}
-        >
-          <Plus className="w-4 h-4 stroke-[2.5]" /> {!rail && 'New Generation Job'}
-        </motion.button>
-      </div>
-
-      <nav className={`flex flex-col gap-1 grow ${rail ? 'px-3' : 'px-4'}`}>
-        {!rail && <div className="text-label font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Navigation</div>}
-        {navItems.map(item => (
-          <button key={item.key} onClick={() => navTo(item.key)}
-            title={rail ? item.label : undefined}
-            aria-label={item.label}
-            className={`flex items-center py-2.5 rounded-xl transition-all duration-200 group relative sidebar-glow text-xs font-semibold ${rail ? 'justify-center px-0' : 'gap-3 px-3.5'} ${view === item.key ? 'bg-accent-500/10 text-accent-400 font-bold border border-accent-500/20 shadow-sm' : 'text-base-400 hover:text-base-200 hover:bg-white/4 border border-transparent'}`}>
-            {view === item.key && (
-              <motion.div
-                layoutId="nav-active-indicator"
-                className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-accent-500 shadow-[0_0_8px_var(--color-accent-500)]"
-                transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-              />
-            )}
-            {item.icon}
-            {!rail && <span className="whitespace-nowrap">{item.label}</span>}
-          </button>
-        ))}
-      </nav>
-
-      {/* Which model powers the session is a workspace setting, not something
-          that describes the request being typed — so it sits with Navigation
-          rather than in the composer next to Attach Doc. */}
-      {onOpenSettings && (
-        <div className={`pb-1 ${rail ? 'px-3' : 'px-4'}`}>
-          {!rail && <div className="text-label font-bold text-base-500 mb-1.5 uppercase tracking-widest px-2 whitespace-nowrap">Engine</div>}
+      <div className="shrink-0 border-t border-line p-3 flex flex-col gap-1">
+        {/* Which model powers the session is a workspace setting, not something
+            that describes the request being typed, so it lives here rather
+            than in the composer. */}
+        {onOpenSettings && (
           <button
             onClick={onOpenSettings}
             title={rail ? `Foundation LLM: ${selectedModel}` : 'Change foundation LLM'}
             aria-label="Change foundation LLM"
-            className={`group flex w-full items-center rounded-xl border border-accent-500/25 bg-accent-500/10 py-2 text-accent-400 transition-all hover:border-accent-500/50 hover:bg-accent-500/20 ${rail ? 'justify-center px-0' : 'gap-2 px-3.5'}`}
+            className={rail ? 'btn btn-ghost btn-icon self-center' : 'btn btn-ghost w-full justify-start'}
           >
-            <Cpu className="h-[18px] w-[18px] shrink-0 transition-transform group-hover:rotate-12" />
+            <Cpu className="text-base-500" aria-hidden="true" />
             {!rail && (
               <>
-                <span className="min-w-0 flex-1 truncate text-left font-mono text-xs font-bold">{selectedModel}</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-accent-400/70" />
+                <span className="min-w-0 truncate font-mono font-normal text-xs text-base-200">{selectedModel}</span>
+                <ChevronDown className="ml-auto size-3.5 text-base-500" aria-hidden="true" />
               </>
             )}
           </button>
-        </div>
-      )}
+        )}
 
-      {/* The run's parameters. They sit here rather than in the composer so the
-          input area stays one line plus Generate, and because their lifetime is
-          the session, not the message being typed — the same reason Engine is
-          here. The rail hides them: a bare field with no label is not usable. */}
-      <div className={`px-4 pt-2 pb-1 ${rail ? 'hidden' : ''}`}>
-        <div className="text-label font-bold text-base-500 mb-2 uppercase tracking-widest px-2 whitespace-nowrap">Generation</div>
-        <div className="flex flex-col gap-3 px-2">
-          <label className="text-label font-bold uppercase tracking-wider text-base-400">
-            Tone
-            <select
-              value={tone}
-              onChange={(e) => setTone(e.target.value)}
-              className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
-            >
-              <option value="professional">Professional</option>
-              <option value="conversational">Conversational</option>
-              <option value="technical">Technical</option>
-              <option value="educational">Educational</option>
-              <option value="persuasive">Persuasive</option>
-              <option value="inspirational">Inspirational</option>
-            </select>
-          </label>
+        {/* The run's parameters. Their lifetime is the session, not the message
+            being typed, so they sit here rather than in the composer. Open by
+            default so tone and keywords stay visible; the rail hides them
+            because a bare field with no label is not usable. */}
+        <details open className={`group/rs ${rail ? 'hidden' : ''}`}>
+          <summary className="flex h-auto min-h-8 [@media(pointer:coarse)]:min-h-10 flex-wrap cursor-pointer items-center gap-x-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-base-400 hover:bg-hover hover:text-base-100 transition-colors">
+            <ChevronRight className="size-3.5 shrink-0 transition-transform group-open/rs:rotate-90" aria-hidden="true" />
+            <span className="whitespace-nowrap">Run settings</span>
+            <span className="basis-full truncate pl-[22px] text-base-500">{tone.charAt(0).toUpperCase() + tone.slice(1)} · {sections} sections · {numImages} images</span>
+          </summary>
+          <div className="grid grid-cols-2 gap-3 px-1 pt-3 pb-1">
+            <div className="col-span-2">
+              <label htmlFor="rs-tone" className="field-label">Tone</label>
+              <div className="select-wrap">
+                <select
+                  id="rs-tone"
+                  value={tone}
+                  onChange={(e) => setTone(e.target.value)}
+                  className="field"
+                >
+                  <option value="professional">Professional</option>
+                  <option value="conversational">Conversational</option>
+                  <option value="technical">Technical</option>
+                  <option value="educational">Educational</option>
+                  <option value="persuasive">Persuasive</option>
+                  <option value="inspirational">Inspirational</option>
+                </select>
+                <ChevronDown aria-hidden="true" />
+              </div>
+            </div>
 
-          <label className="text-label font-bold uppercase tracking-wider text-base-400">
-            Target keywords
-            <input
-              value={keywordsInput}
-              onChange={(e) => setKeywordsInput(e.target.value)}
-              placeholder="e.g. AI agents"
-              className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium normal-case tracking-normal text-base-200 placeholder:text-base-600 focus:border-accent-500/50 focus:outline-none"
-            />
-          </label>
-
-          {/* Side by side: both are single digits, so a full-width field each
-              wasted a row of sidebar height that a short screen needs. */}
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-label font-bold uppercase tracking-wider text-base-400">
-              Sections
+            <div className="col-span-2">
+              <label htmlFor="rs-keywords" className="field-label">Target keywords</label>
               <input
+                id="rs-keywords"
+                value={keywordsInput}
+                onChange={(e) => setKeywordsInput(e.target.value)}
+                placeholder="e.g. AI agents"
+                className="field"
+              />
+            </div>
+
+            {/* Side by side: both are single digits. */}
+            <div>
+              <label htmlFor="rs-sections" className="field-label">Sections</label>
+              <input
+                id="rs-sections"
                 type="number"
                 min={2}
                 max={6}
                 step={1}
                 value={sections}
                 onChange={(e) => setSections(clampInt(e.target.value, 2, 6, sections))}
-                className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+                className="field font-mono"
               />
-            </label>
+            </div>
 
-            <label className="text-label font-bold uppercase tracking-wider text-base-400">
-              AI images
+            <div>
+              <label htmlFor="rs-images" className="field-label">Images</label>
               <input
+                id="rs-images"
                 type="number"
                 min={0}
                 max={5}
                 step={1}
                 value={numImages}
                 onChange={(e) => setNumImages(clampInt(e.target.value, 0, 5, numImages))}
-                className="mt-1.5 w-full rounded-lg border border-white/10 bg-base-900 px-2.5 py-1.5 text-xs font-medium text-base-200 focus:border-accent-500/50 focus:outline-none"
+                className="field font-mono"
               />
-            </label>
+            </div>
           </div>
-        </div>
-      </div>
+        </details>
 
-      {/* Recent Jobs History — the list needs labels to be useful, so the
-          rail hides it rather than showing a column of unreadable stubs. */}
-      <div className={`px-4 pb-4 pt-2 ${rail ? 'hidden' : ''}`}>
-        <div className="flex justify-between items-center mb-2.5 px-2">
-          <span className="text-label font-bold text-base-500 uppercase tracking-widest whitespace-nowrap">Recent Jobs</span>
-          <button
-            onClick={onRefreshJobs}
-            className="text-base-500 hover:text-accent-400 transition-colors p-1 rounded-lg hover:bg-white/5"
-            title="Refresh list"
-            aria-label="Refresh job list"
-          >
-            <RefreshCw className="w-3 h-3" />
-          </button>
-        </div>
-        <div className="flex flex-col gap-1 max-h-[28vh] overflow-y-auto pr-1 custom-scrollbar">
-          {jobs.slice(0, 10).map((job, i) => (
-            <motion.div
-              key={job.id}
-              className="relative group w-full"
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.03, duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-            >
-              <button onClick={() => loadJob(job.id)}
-                className={`w-full text-left rounded-xl pl-3 pr-8 py-2 text-xs flex justify-between items-center transition-all duration-200 sidebar-glow ${currentJob?.id === job.id ? 'bg-accent-500/10 border border-accent-500/30 text-base-100 font-semibold shadow-sm' : 'text-base-400 hover:text-base-200 border border-transparent hover:bg-white/4'}`}>
-                <span className="truncate pr-2 text-xs font-medium">{job.topic}</span>
-                <div className="shrink-0 group-hover:opacity-0 transition-opacity">
-                  {job.status === 'completed'         && (
-                    <span className="text-label font-bold text-signal-success bg-signal-success-dim border border-signal-success/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
-                      Done
-                    </span>
-                  )}
-                  {job.status === 'failed'            && (
-                    <span className="text-label font-bold text-signal-error bg-signal-error-dim border border-signal-error/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block fail-pulse">
-                      Fail
-                    </span>
-                  )}
-                  {job.status === 'running'           && (
-                    <span className="text-label font-bold text-accent-400 bg-accent-glow border border-accent-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
-                      Active
-                    </span>
-                  )}
-                  {job.status === 'awaiting_approval' && (
-                    <span className="text-label font-bold text-signal-warning bg-signal-warning-dim border border-signal-warning/20 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block status-pulse">
-                      Review
-                    </span>
-                  )}
-                  {job.status === 'pending'           && (
-                    <span className="text-label font-bold text-base-400 bg-white/5 border border-white/6 px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
-                      Queue
-                    </span>
-                  )}
-                </div>
-              </button>
-              {onDeleteJob && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteJob(job.id);
-                  }}
-                  className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-base-500 hover:text-signal-error transition-opacity duration-200 p-1.5 rounded-lg hover:bg-white/5 ${onResumeJob && job.status === 'failed' ? 'right-7' : 'right-1.5'}`}
-                  title="Delete job"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
-              {onResumeJob && job.status === 'failed' && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onResumeJob(job.id);
-                  }}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-base-500 hover:text-amber-400 transition-all duration-200 p-1.5 rounded-lg hover:bg-amber-500/10"
-                  title="Resume from checkpoint"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </motion.div>
-          ))}
-          {jobs.length === 0 && <div className="text-xs text-base-500 px-2 py-3 text-center italic">No jobs in history</div>}
-        </div>
+        {rail && collapseToggle}
       </div>
     </aside>
     </>
