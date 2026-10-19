@@ -8,6 +8,10 @@
 [![DeepEval](https://img.shields.io/badge/DeepEval-G--Eval_Metrics-red.svg)](https://github.com/confident-ai/deepeval)
 [![License](https://img.shields.io/badge/License-Apache_2.0-lightgrey.svg)](LICENSE)
 
+[![Watch the demo video](docs/ai-content-factory-demo.jpg)](docs/ai-content-factory-demo.mp4)
+
+**[▶ Watch the demo video](docs/ai-content-factory-demo.mp4)**
+
 A stateful, multi-agent AI system for automated research, content synthesis, multi-modal asset generation, and academic-grade evaluation. Built on **LangGraph**, **FastAPI**, and **React**, this project serves as a **Final Year Project (FYP)** demonstrating agent coordination, parallel processing, Human-in-the-Loop (HITL) workflows, Advanced RAG, and automated LLM-as-judge quality assessment.
 
 > **Scope.** This is a research and demonstration system, not a production
